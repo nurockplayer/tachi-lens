@@ -23,10 +23,13 @@ export const createGeminiProvider = (
 
     try {
       const response = await fetchFn(
-        `${BASE_URL}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        `${BASE_URL}/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: prompt.system }] },
             contents: [{ parts: [{ text: prompt.user }] }],
@@ -53,9 +56,9 @@ export const createGeminiProvider = (
 
   async validateKey(apiKey) {
     try {
-      const response = await fetchFn(
-        `${BASE_URL}/models?key=${encodeURIComponent(apiKey)}`,
-      )
+      const response = await fetchFn(`${BASE_URL}/models`, {
+        headers: { 'x-goog-api-key': apiKey },
+      })
       return {
         valid: response.ok,
         error: response.ok ? undefined : `Gemini key validation failed (${response.status})`,
