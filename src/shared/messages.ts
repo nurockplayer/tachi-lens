@@ -8,6 +8,15 @@ export type MessageType =
   | 'provider_status'
   | 'error_notification'
 
+export const MESSAGE_TYPES: readonly MessageType[] = [
+  'translate_request',
+  'translate_response',
+  'validate_key',
+  'key_validation_result',
+  'provider_status',
+  'error_notification',
+]
+
 export interface TranslationRequest {
   messageId: string
   text: string
@@ -36,3 +45,28 @@ export interface BaseMessage<T extends MessageType, P = unknown> {
   type: T
   payload: P
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+export const isMessageType = (value: unknown): value is MessageType =>
+  typeof value === 'string' && MESSAGE_TYPES.includes(value as MessageType)
+
+export const isBaseMessage = (value: unknown): value is BaseMessage<MessageType, unknown> =>
+  isRecord(value) && isMessageType(value.type) && Object.hasOwn(value, 'payload')
+
+export const isTranslationRequestMessage = (
+  value: unknown,
+): value is BaseMessage<'translate_request', TranslationRequest> => {
+  if (!isBaseMessage(value) || value.type !== 'translate_request' || !isRecord(value.payload)) {
+    return false
+  }
+
+  return (
+    typeof value.payload.messageId === 'string' &&
+    typeof value.payload.text === 'string' &&
+    (value.payload.sourceLang === undefined || typeof value.payload.sourceLang === 'string')
+  )
+}
+
+export const serializeMessage = <T extends MessageType, P>(message: BaseMessage<T, P>): string => JSON.stringify(message)
