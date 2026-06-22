@@ -8,6 +8,6 @@ export default defineConfig({
   build: {
     target: 'esnext',
     minify: false,
-    sourcemap: true,
+    sourcemap: process.env.NODE_ENV !== 'production',
   },
 })
