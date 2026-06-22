@@ -29,7 +29,7 @@ export interface TranslationProvider {
 
   /** Translate a batch of messages. Each item may succeed or fail independently. */
   translateBatch(
-    requests: { id: string; text: string }[],
+    requests: { id: string; text: string; sourceLang?: string }[],
     apiKey: string,
     model: string,
     targetLang: string,
