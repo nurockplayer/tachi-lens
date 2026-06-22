@@ -1,6 +1,13 @@
 // TranslationProvider interface — all LLM API adapters implement this contract.
 // Defined early so SW, Popup, and providers can be built in parallel.
 
+export const PROVIDER_IDS = ['gemini', 'deepseek', 'openai', 'claude'] as const
+
+export type ProviderId = (typeof PROVIDER_IDS)[number]
+
+export const isProviderId = (value: string): value is ProviderId =>
+  PROVIDER_IDS.includes(value as ProviderId)
+
 export interface ProviderModel {
   id: string
   displayName: string
@@ -15,7 +22,7 @@ export interface BatchItemResult {
 }
 
 export interface TranslationProvider {
-  readonly id: string
+  readonly id: ProviderId
   readonly displayName: string
   readonly models: ProviderModel[]
   readonly defaultModel: string
