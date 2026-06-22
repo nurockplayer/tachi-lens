@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"git switch main && git merge pr/1-scaffold -m \\\"Merge PR #15: Scaffold MV3 Chrome Extension with Vite + TypeScript + React and CI workflow\\\" 2>&1\",\"description\":\"Merge PR #15 into main\"}",
+  "error": "Exit code 1\nSwitched to branch 'main'\nYour branch is up to date with 'origin/main'.\nAuto-merging src/background/service-worker.ts\nCONFLICT (add/add): Merge conflict in src/background/service-worker.ts\nAuto-merging src/providers/types.ts\nCONFLICT (add/add): Merge conflict in src/providers/types.ts\nAuto-merging src/shared/messages.test.ts\nCONFLICT (add/add): Merge conflict in src/shared/messages.test.ts\nAuto-merging src/shared/messages.ts\nCONFLICT (add/add): Merge conflict in src/shared/messages.t...",
+  "timestamp": "2026-06-22T17:10:37.948Z",
+  "retry_count": 2
+}

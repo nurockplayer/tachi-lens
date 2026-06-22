@@ -1,0 +1,262 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1782130168351,
+  "projectRoot": "/Users/tachikoma/Developer/tachi-lens",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "react",
+        "version": "19.0.0",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.0.0",
+        "category": "frontend"
+      },
+      {
+        "name": "vite",
+        "version": "8.0.0",
+        "category": "build"
+      },
+      {
+        "name": "vitest",
+        "version": "4.0.0",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pnpm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "pnpm build",
+    "testCommand": "pnpm test",
+    "lintCommand": "pnpm lint",
+    "devCommand": "pnpm dev",
+    "scripts": {
+      "dev": "vite build --watch",
+      "build": "tsc --noEmit && vite build",
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "typecheck": "tsc --noEmit",
+      "lint": "tsc --noEmit"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "public",
+      "src",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 2,
+      "lastAccessed": 1782130168297,
+      "keyFiles": [
+        "manifest.json",
+        "service-worker-loader.js"
+      ]
+    },
+    "public": {
+      "path": "public",
+      "purpose": "Public files",
+      "fileCount": 0,
+      "lastAccessed": 1782130168298,
+      "keyFiles": []
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1782130168306,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1782130168306,
+      "keyFiles": []
+    },
+    "dist/assets": {
+      "path": "dist/assets",
+      "purpose": "Static assets",
+      "fileCount": 8,
+      "lastAccessed": 1782130168308,
+      "keyFiles": [
+        "crx-manifest.js-DyRiJgU4.js.map",
+        "index.html-DCZA8PhZ.js",
+        "index.html-DCZA8PhZ.js.map"
+      ]
+    },
+    "dist/public": {
+      "path": "dist/public",
+      "purpose": "Public files",
+      "fileCount": 0,
+      "lastAccessed": 1782130168308,
+      "keyFiles": []
+    },
+    "dist/src": {
+      "path": "dist/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1782130168308,
+      "keyFiles": []
+    },
+    "tests/fixtures": {
+      "path": "tests/fixtures",
+      "purpose": "Test fixtures",
+      "fileCount": 0,
+      "lastAccessed": 1782130168310,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src/providers/gemini.ts",
+      "accessCount": 8,
+      "lastAccessed": 1782143268001,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/registry.ts",
+      "accessCount": 6,
+      "lastAccessed": 1782131360252,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/registry.test.ts",
+      "accessCount": 5,
+      "lastAccessed": 1782130318851,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/prompt.test.ts",
+      "accessCount": 5,
+      "lastAccessed": 1782131367071,
+      "type": "file"
+    },
+    {
+      "path": "vite.config.ts",
+      "accessCount": 4,
+      "lastAccessed": 1782148162480,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/prompt.ts",
+      "accessCount": 3,
+      "lastAccessed": 1782131338023,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/deepseek.ts",
+      "accessCount": 3,
+      "lastAccessed": 1782131343742,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/openai.ts",
+      "accessCount": 3,
+      "lastAccessed": 1782131345928,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/claude.ts",
+      "accessCount": 3,
+      "lastAccessed": 1782131348334,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/types.ts",
+      "accessCount": 2,
+      "lastAccessed": 1782131339220,
+      "type": "file"
+    },
+    {
+      "path": "src/storage/settings.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782130177260,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 1,
+      "lastAccessed": 1782130180745,
+      "type": "file"
+    },
+    {
+      "path": "tsconfig.json",
+      "accessCount": 1,
+      "lastAccessed": 1782130181011,
+      "type": "file"
+    },
+    {
+      "path": "vitest.config.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782130220966,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/gemini.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782130292809,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/deepseek.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782130297215,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/openai.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782130301570,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/claude.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1782130306009,
+      "type": "file"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 1,
+      "lastAccessed": 1782147959591,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

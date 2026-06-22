@@ -1,0 +1,123 @@
+{
+  "updatedAt": "2026-06-22T15:45:31.514Z",
+  "missions": [
+    {
+      "id": "session:44f94a67-c088-4a07-875a-82baec47ff61:none",
+      "source": "session",
+      "name": "none",
+      "objective": "Session mission",
+      "createdAt": "2026-06-22T12:14:45.564Z",
+      "updatedAt": "2026-06-22T15:45:31.514Z",
+      "status": "done",
+      "workerCount": 4,
+      "taskCounts": {
+        "total": 4,
+        "pending": 0,
+        "blocked": 0,
+        "inProgress": 0,
+        "completed": 4,
+        "failed": 0
+      },
+      "agents": [
+        {
+          "name": "codex:codex-rescue:a4d6705",
+          "role": "codex:codex-rescue",
+          "ownership": "a4d6705be20ff3e84",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-22T15:45:31.514Z"
+        },
+        {
+          "name": "codex:codex-rescue:a688271",
+          "role": "codex:codex-rescue",
+          "ownership": "a68827197f2cfd15a",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-22T12:28:13.209Z"
+        },
+        {
+          "name": "codex:codex-rescue:a784032",
+          "role": "codex:codex-rescue",
+          "ownership": "a784032cbece2a1a8",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-22T12:47:18.076Z"
+        },
+        {
+          "name": "codex:codex-rescue:ac39197",
+          "role": "codex:codex-rescue",
+          "ownership": "ac3919792853b81cc",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-22T13:11:23.845Z"
+        }
+      ],
+      "timeline": [
+        {
+          "id": "session-stop:aa06fc298d024efe7:2026-06-22T12:50:29.974Z",
+          "at": "2026-06-22T12:50:29.974Z",
+          "kind": "completion",
+          "agent": "codex:codex-rescue:a4d6705",
+          "detail": "completed",
+          "sourceKey": "session-stop:aa06fc298d024efe7"
+        },
+        {
+          "id": "session-stop:a35684b2c03b08a5b:2026-06-22T13:05:13.206Z",
+          "at": "2026-06-22T13:05:13.206Z",
+          "kind": "completion",
+          "agent": "codex:codex-rescue:a4d6705",
+          "detail": "completed",
+          "sourceKey": "session-stop:a35684b2c03b08a5b"
+        },
+        {
+          "id": "session-start:ac3919792853b81cc:2026-06-22T13:06:35.941Z",
+          "at": "2026-06-22T13:06:35.941Z",
+          "kind": "update",
+          "agent": "codex:codex-rescue:ac39197",
+          "detail": "started codex:codex-rescue:ac39197",
+          "sourceKey": "session-start:ac3919792853b81cc"
+        },
+        {
+          "id": "session-stop:ac3919792853b81cc:2026-06-22T13:11:23.845Z",
+          "at": "2026-06-22T13:11:23.845Z",
+          "kind": "completion",
+          "agent": "codex:codex-rescue:ac39197",
+          "detail": "completed",
+          "sourceKey": "session-stop:ac3919792853b81cc"
+        },
+        {
+          "id": "session-stop:acd0131a39907be4f:2026-06-22T13:14:36.008Z",
+          "at": "2026-06-22T13:14:36.008Z",
+          "kind": "completion",
+          "agent": "codex:codex-rescue:a4d6705",
+          "detail": "completed",
+          "sourceKey": "session-stop:acd0131a39907be4f"
+        },
+        {
+          "id": "session-stop:a6e2991f1098a57f0:2026-06-22T14:53:53.508Z",
+          "at": "2026-06-22T14:53:53.508Z",
+          "kind": "completion",
+          "agent": "codex:codex-rescue:a4d6705",
+          "detail": "completed",
+          "sourceKey": "session-stop:a6e2991f1098a57f0"
+        },
+        {
+          "id": "session-stop:ad8deeacd85eeef71:2026-06-22T15:45:31.514Z",
+          "at": "2026-06-22T15:45:31.514Z",
+          "kind": "completion",
+          "agent": "codex:codex-rescue:a4d6705",
+          "detail": "completed",
+          "sourceKey": "session-stop:ad8deeacd85eeef71"
+        }
+      ]
+    }
+  ]
+}
