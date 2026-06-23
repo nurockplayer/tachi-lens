@@ -3,6 +3,7 @@ import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
+import { t } from '@/shared/i18n'
 
 type ValidationStatus = 'valid' | 'invalid' | 'checking' | null
 
@@ -90,7 +91,7 @@ export function App() {
 
     await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
     setSettings(updatedSettings)
-    setSaveMessage('設定已儲存')
+    setSaveMessage(t('settingsSaved'))
     setTimeout(() => setSaveMessage(null), 2000)
   }, [settings, blacklistInput])
 
@@ -163,7 +164,7 @@ export function App() {
   }, [])
 
   if (!settings) {
-    return <div style={{ padding: '1rem' }}>載入中...</div>
+    return <div style={{ padding: '1rem' }}>{t('loading')}</div>
   }
 
   const currentModels = getModelsForProvider(settings.selectedProvider)
@@ -172,7 +173,7 @@ export function App() {
     <div style={{ width: '320px', padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
       <h1 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem' }}>tachi-lens</h1>
       <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 1rem' }}>
-        Twitch 聊天室沉浸式翻譯
+        {t('appDescription')}
       </p>
 
       {/* 翻譯啟用 */}
@@ -183,9 +184,9 @@ export function App() {
           type='checkbox'
           checked={settings.translationEnabled}
           onChange={(e) => updateSetting('translationEnabled', e.target.checked)}
-          aria-label='啟用翻譯'
+          aria-label={t('enableTranslation')}
         />
-        <span style={{ fontSize: '0.9rem' }}>啟用翻譯</span>
+        <span style={{ fontSize: '0.9rem' }}>{t('enableTranslation')}</span>
       </label>
 
       {/* 翻譯提供者 */}
@@ -194,11 +195,11 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='provider-select'
         >
-          翻譯提供者
+          {t('translationProvider')}
         </label>
         <select
           id='provider-select'
-          aria-label='翻譯提供者'
+          aria-label={t('translationProvider')}
           value={settings.selectedProvider}
           onChange={(e) => handleProviderChange(e.target.value)}
           style={{ width: '100%', padding: '0.3rem' }}
@@ -217,7 +218,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='model-select'
         >
-          模型
+          {t('model')}
         </label>
         <select
           id='model-select'
@@ -239,7 +240,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='api-key-input'
         >
-          API Key
+          {t('apiKey')}
         </label>
         <div style={{ display: 'flex', gap: '0.25rem' }}>
           <input
@@ -247,13 +248,13 @@ export function App() {
             type={visibleKeys[settings.selectedProvider] ? 'text' : 'password'}
             value={apiKeyInputs[settings.selectedProvider] ?? ''}
             onChange={(e) => handleApiKeyChange(settings.selectedProvider, e.target.value)}
-            placeholder='輸入 API Key'
+            placeholder={t('apiKeyPlaceholder')}
             style={{ flex: 1, padding: '0.3rem', fontFamily: 'monospace' }}
           />
           <button
             onClick={() => toggleKeyVisibility(settings.selectedProvider)}
             style={{ padding: '0.3rem 0.5rem' }}
-            title={visibleKeys[settings.selectedProvider] ? '隱藏' : '顯示'}
+            title={visibleKeys[settings.selectedProvider] ? t('hide') : t('show')}
           >
             {visibleKeys[settings.selectedProvider] ? '🙈' : '👁️'}
           </button>
@@ -264,13 +265,13 @@ export function App() {
             disabled={validationStatus[settings.selectedProvider] === 'checking'}
             style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
           >
-            {validationStatus[settings.selectedProvider] === 'checking' ? '驗證中...' : '驗證'}
+            {validationStatus[settings.selectedProvider] === 'checking' ? t('validating') : t('validate')}
           </button>
           {validationStatus[settings.selectedProvider] === 'valid' && (
-            <span style={{ color: 'green', fontSize: '0.8rem' }}>✓ 有效</span>
+            <span style={{ color: 'green', fontSize: '0.8rem' }}>{t('valid')}</span>
           )}
           {validationStatus[settings.selectedProvider] === 'invalid' && (
-            <span style={{ color: 'red', fontSize: '0.8rem' }}>✗ 無效</span>
+            <span style={{ color: 'red', fontSize: '0.8rem' }}>{t('invalid')}</span>
           )}
         </div>
       </div>
@@ -281,7 +282,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='language-select'
         >
-          目標語言
+          {t('targetLanguage')}
         </label>
         <select
           id='language-select'
@@ -305,7 +306,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='display-mode-select'
         >
-          顯示模式
+          {t('displayMode')}
         </label>
         <select
           id='display-mode-select'
@@ -315,9 +316,9 @@ export function App() {
           }
           style={{ width: '100%', padding: '0.3rem' }}
         >
-          <option value='below'>原文下方</option>
-          <option value='hover'>懸停顯示</option>
-          <option value='collapse'>收合</option>
+          <option value='below'>{t('displayBelow')}</option>
+          <option value='hover'>{t('displayHover')}</option>
+          <option value='collapse'>{t('displayCollapse')}</option>
         </select>
       </div>
 
@@ -327,7 +328,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='min-length-input'
         >
-          最短翻譯字數
+          {t('minTextLength')}
         </label>
         <input
           id='min-length-input'
@@ -348,14 +349,14 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='blacklist-input'
         >
-          Bot 黑名單（逗號分隔）
+          {t('botBlacklist')}
         </label>
         <input
           id='blacklist-input'
           type='text'
           value={blacklistInput}
           onChange={(e) => setBlacklistInput(e.target.value)}
-          placeholder='streamelements, nightbot'
+          placeholder={t('botBlacklistPlaceholder')}
           style={{ width: '100%', padding: '0.3rem' }}
         />
       </div>
@@ -370,10 +371,10 @@ export function App() {
             cursor: 'pointer',
           }}
         >
-          儲存設定
+          {t('saveSettings')}
         </button>
         {saveMessage && (
-          <span style={{ color: 'green', fontSize: '0.85rem' }}>{saveMessage}</span>
+          <span style={{ color: 'green', fontSize: '0.85rem' }}>{t('settingsSaved')}</span>
         )}
       </div>
     </div>
