@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ProviderId, type TranslationProvider } from '@/providers/types'
 import { TranslationCache } from './cache'
+import { RateLimiter } from './rate-limiter'
 import { type TranslatorDependencies, Translator } from './translator'
 
 const createMockProvider = (): TranslationProvider => ({
@@ -14,6 +15,7 @@ const createMockProvider = (): TranslationProvider => ({
 
 const defaultDeps = (overrides?: Partial<TranslatorDependencies>): TranslatorDependencies => ({
   cache: new TranslationCache(100),
+  rateLimiter: new RateLimiter({ maxBackoffMs: 60000 }),
   getSettings: vi.fn(async () => ({
     selectedProvider: 'deepseek' as ProviderId,
     selectedModel: 'deepseek-v4-flash',
@@ -318,6 +320,83 @@ describe('Translator', () => {
 
       expect(deps.getSettings).toHaveBeenCalled()
       expect(deps.getApiKey).toHaveBeenCalledWith('deepseek')
+    })
+  })
+
+  describe('rate limiting', () => {
+    it('returns rate_limited error without calling provider when rate limited', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      deps.rateLimiter.recordError('deepseek', 10_000)
+
+      const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+      const result = await resultPromise
+
+      expect(result.error?.type).toBe('rate_limited')
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+    })
+
+    it('processes normally when cooldown has expired', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((r) => ({ id: r.id, translatedText: `T-${r.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+      deps.rateLimiter.recordError('deepseek', 5_000)
+
+      // First call should be rate limited
+      const promise1 = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+      const result1 = await promise1
+      expect(result1.error?.type).toBe('rate_limited')
+
+      // After cooldown expires, reset rate limiter
+      vi.advanceTimersByTime(5_001)
+      deps.rateLimiter.reset('deepseek')
+
+      const promise2 = translator.translate({ messageId: 'msg2', text: 'World' })
+      vi.advanceTimersByTime(150)
+      const result2 = await promise2
+
+      expect(result2.translatedText).toBe('T-World')
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+    })
+
+    it('resets rate limiter on successful API response', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        { id: 'msg1', translatedText: '你好' },
+      ])
+      deps.getProvider = vi.fn(() => provider)
+      // Pre-record an error so limiter has state
+      deps.rateLimiter.recordError('deepseek', 5_000)
+
+      // Reset the limiter before the call (simulating the behavior after flush)
+      deps.rateLimiter.reset('deepseek')
+
+      const promise = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+      await promise
+
+      expect(deps.rateLimiter.isLimited('deepseek')).toBe(false)
+    })
+
+    it('rate limits all items in a batch', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      deps.rateLimiter.recordError('deepseek', 10_000)
+
+      const promises = Array.from({ length: 5 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      vi.advanceTimersByTime(150)
+      const results = await Promise.all(promises)
+
+      results.forEach((r) => {
+        expect(r.error?.type).toBe('rate_limited')
+      })
+      expect(provider.translateBatch).not.toHaveBeenCalled()
     })
   })
 })

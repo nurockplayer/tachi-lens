@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ProviderId, type TranslationProvider } from '@/providers/types'
 import { TranslationCache } from './cache'
+import { RateLimiter } from './rate-limiter'
 import { Translator } from './translator'
 import { createMessageRouter, type RouterDependencies } from './message-router'
 
@@ -17,9 +18,11 @@ const createMockProvider = (): TranslationProvider => ({
 
 const makeRouter = (routerDepOverrides?: Partial<RouterDependencies>) => {
   const cache = new TranslationCache()
+  const rateLimiter = new RateLimiter({ maxBackoffMs: 60000 })
   const translator = new Translator(
     {
       cache,
+      rateLimiter,
       getSettings: vi.fn(async () => ({
         selectedProvider: 'deepseek' as ProviderId,
         selectedModel: 'deepseek-v4-flash',
