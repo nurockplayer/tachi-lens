@@ -1,9 +1,11 @@
 import type { BatchItemResult, ProviderId, TranslationProvider } from '@/providers/types'
 import type { ProviderError, TranslationRequest, TranslationResult } from '@/shared/messages'
 import { TranslationCache } from './cache'
+import { type RateLimiter } from './rate-limiter'
 
 export interface TranslatorDependencies {
   cache: TranslationCache
+  rateLimiter: RateLimiter
   getSettings: () => Promise<{
     selectedProvider: ProviderId
     selectedModel: string
@@ -87,6 +89,17 @@ export class Translator {
 
     const { selectedModel: model, targetLanguage: targetLang } = settings
 
+    // Check rate limit before calling the provider
+    if (this.deps.rateLimiter.isLimited(settings.selectedProvider)) {
+      this.resolveAll(items, {
+        type: 'rate_limited',
+        retryAfterMs: this.deps.rateLimiter.getRemainingCooldown(settings.selectedProvider),
+        message: `Provider "${settings.selectedProvider}" is rate limited`,
+      } as ProviderError)
+
+      return
+    }
+
     const uncached: PendingItem[] = []
 
     for (const item of items) {
@@ -122,6 +135,9 @@ export class Translator {
         model,
         targetLang,
       )
+
+      // Reset rate limiter on successful API response
+      this.deps.rateLimiter.reset(settings.selectedProvider)
     } catch (err) {
       const error: ProviderError = {
         type: 'unknown',

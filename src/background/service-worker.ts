@@ -3,6 +3,7 @@ import type { ProviderId } from '@/providers/types'
 import { getApiKeyForServiceWorker, getRuntimeState, getUserSettings, initializeStorageAccess } from '@/storage/settings'
 import { TranslationCache } from './cache'
 import { createMessageRouter } from './message-router'
+import { RateLimiter } from './rate-limiter'
 import { Translator } from './translator'
 
 const ignoreStorageInitializationError = (): void => {}
@@ -14,9 +15,11 @@ const initializeTrustedStorageAccess = (): void => {
 initializeTrustedStorageAccess()
 
 const cache = new TranslationCache()
+const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000 })
 const translator = new Translator(
   {
     cache,
+    rateLimiter,
     getSettings: () => getUserSettings(),
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
     getProvider: (providerId) => getProvider(providerId),
