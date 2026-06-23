@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TwitchMessageHandler } from './twitch-handler'
+import { TwitchMessageHandler, type ContentSettings } from './twitch-handler'
+
+const DEFAULT_SETTINGS: ContentSettings = {
+  botNameBlacklist: [],
+  minTextLength: 2,
+  displayMode: 'below',
+  translationEnabled: true,
+}
 
 const createMessageElement = (overrides?: {
   text?: string
@@ -104,25 +111,25 @@ describe('TwitchMessageHandler', () => {
   describe('shouldTranslate', () => {
     it('returns true for a valid message', () => {
       const el = createMessageElement({ text: 'Hello world', username: 'user' })
-      expect(handler.shouldTranslate(el, { botNameBlacklist: [], minTextLength: 2 })).toBe(true)
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
     })
 
     it('returns false for bot messages', () => {
       const el = createMessageElement({ text: 'Hello', username: 'nightbot' })
       expect(
-        handler.shouldTranslate(el, { botNameBlacklist: ['nightbot'], minTextLength: 2 }),
+        handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, botNameBlacklist: ['nightbot'] }),
       ).toBe(false)
     })
 
     it('returns false for short messages', () => {
       const el = createMessageElement({ text: 'Hi', username: 'user' })
-      expect(handler.shouldTranslate(el, { botNameBlacklist: [], minTextLength: 5 })).toBe(false)
+      expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, minTextLength: 5 })).toBe(false)
     })
 
     it('returns false for already processed messages', () => {
       const el = createMessageElement({ text: 'Hello world', username: 'user' })
       el.setAttribute('data-tachi-lens-processed', 'true')
-      expect(handler.shouldTranslate(el, { botNameBlacklist: [], minTextLength: 2 })).toBe(false)
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
     })
   })
 
@@ -135,10 +142,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(sendMessageMock).toHaveBeenCalledTimes(1)
       const callArg = sendMessageMock.mock.calls[0]![0] as Record<string, unknown>
@@ -154,10 +158,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       const translationEl = el.querySelector('[data-tachi-lens-translated]')
       expect(translationEl).not.toBeNull()
@@ -171,25 +172,19 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
 
-    it('marks the element as processed', async () => {
+    it('marks the element as processed (second test)', async () => {
       const el = createMessageElement({ text: 'Hello' })
       sendMessageMock.mockResolvedValue({
         type: 'translate_response',
         payload: { messageId: handler.getMessageId(el), translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
@@ -204,10 +199,7 @@ describe('TwitchMessageHandler', () => {
         },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       // Should NOT be marked as processed so it can be retried
       expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
@@ -225,12 +217,54 @@ describe('TwitchMessageHandler', () => {
         },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      // Should show error indicator
+      expect(el.querySelector('[data-tachi-lens-translated]')).not.toBeNull()
+    })
+
+    it('does nothing when translation is disabled', async () => {
+      const el = createMessageElement({ text: 'Hello' })
+      await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, translationEnabled: false })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+  })
+
+  describe('display modes', () => {
+    it('collapses original text in collapse mode', async () => {
+      const el = createMessageElement({ text: 'Hello world' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '你好世界' },
+      })
+
+      await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, displayMode: 'collapse' })
+
+      const body = el.querySelector('.chat-line__message-body') as HTMLElement
+      expect(body.style.display).toBe('none')
+      const trans = el.querySelector('[data-tachi-lens-translated]')
+      expect(trans?.textContent).toBe('你好世界')
+    })
+
+    it('hides translation until hover in hover mode', async () => {
+      const el = createMessageElement({ text: 'Hello' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '你好' },
+      })
+
+      await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, displayMode: 'hover' })
+
+      const trans = el.querySelector('[data-tachi-lens-translated]') as HTMLElement
+      expect(trans).not.toBeNull()
+      expect(trans.style.display).toBe('none')
+
+      // Simulate hover
+      el.dispatchEvent(new MouseEvent('mouseenter'))
+      expect(trans.style.display).toBe('block')
     })
   })
 })
