@@ -33,15 +33,23 @@ export function App() {
   const providers = listProviderMetadata()
 
   useEffect(() => {
+    let cancelled = false
+
     loadSettings().then((s) => {
+      if (cancelled) return
       setSettings(s)
       setBlacklistInput(s.botNameBlacklist.join(', '))
     })
     // Load API key previews for all providers
     for (const p of providers) {
       loadApiKeyPreview(p.id).then((preview) => {
+        if (cancelled) return
         setApiKeyInputs((prev) => ({ ...prev, [p.id]: preview }))
       })
+    }
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -90,6 +98,12 @@ export function App() {
     async (providerId: string) => {
       setValidationStatus((prev) => ({ ...prev, [providerId]: 'checking' }))
 
+      // Ensure the key is saved to storage first
+      const inputValue = apiKeyInputs[providerId] ?? ''
+      if (inputValue.trim() && !inputValue.includes('***')) {
+        await handleApiKeyChange(providerId, inputValue)
+      }
+
       try {
         const response = (await chrome.runtime.sendMessage({
           type: 'validate_key',
@@ -112,19 +126,34 @@ export function App() {
       setApiKeyInputs((prev) => ({ ...prev, [providerId]: value }))
       setValidationStatus((prev) => ({ ...prev, [providerId]: null }))
 
-      // Auto-save API key on change
-      if (value.trim()) {
-        const items = await chrome.storage.local.get('providerApiKeys')
-        const keys = items.providerApiKeys as Record<string, string> | undefined
-        const previewItems = await chrome.storage.local.get('providerApiKeyPreviews')
-        const previews = previewItems.providerApiKeyPreviews as Record<string, string> | undefined
+      const trimmed = value.trim()
 
-        const trimmed = value.trim()
-        await chrome.storage.local.set({
-          providerApiKeys: { ...keys, [providerId]: trimmed },
-          providerApiKeyPreviews: { ...previews, [providerId]: maskApiKey(trimmed) },
-        })
+      // Skip auto-save for masked preview values (contain "***")
+      if (trimmed.includes('***')) return
+
+      if (!trimmed) {
+        // Delete key when input is cleared
+        const oldKeys = await chrome.storage.local.get('providerApiKeys')
+        const keys = { ...(oldKeys.providerApiKeys as Record<string, string> | undefined) }
+        const oldPreviews = await chrome.storage.local.get('providerApiKeyPreviews')
+        const previews = { ...(oldPreviews.providerApiKeyPreviews as Record<string, string> | undefined) }
+
+        delete keys[providerId]
+        delete previews[providerId]
+        await chrome.storage.local.set({ providerApiKeys: keys, providerApiKeyPreviews: previews })
+        return
       }
+
+      // Auto-save real API key on change
+      const items = await chrome.storage.local.get('providerApiKeys')
+      const keys = items.providerApiKeys as Record<string, string> | undefined
+      const previewItems = await chrome.storage.local.get('providerApiKeyPreviews')
+      const previews = previewItems.providerApiKeyPreviews as Record<string, string> | undefined
+
+      await chrome.storage.local.set({
+        providerApiKeys: { ...keys, [providerId]: trimmed },
+        providerApiKeyPreviews: { ...previews, [providerId]: maskApiKey(trimmed) },
+      })
     },
     [],
   )
