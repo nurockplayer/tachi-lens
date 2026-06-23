@@ -139,6 +139,9 @@ export class Translator {
       // Reset rate limiter on successful API response
       this.deps.rateLimiter.reset(settings.selectedProvider)
     } catch (err) {
+      // Record rate limit on network/provider errors
+      this.deps.rateLimiter.recordError(settings.selectedProvider, 30_000)
+
       const error: ProviderError = {
         type: 'unknown',
         message: err instanceof Error ? err.message : 'Unknown error',
@@ -147,6 +150,11 @@ export class Translator {
       this.resolveAll(uncached, error)
 
       return
+    }
+
+    // Detect rate limit errors from batch response
+    if (batchResults.some((r) => r.error?.includes('(429)'))) {
+      this.deps.rateLimiter.recordError(settings.selectedProvider, 30_000)
     }
 
     for (const item of uncached) {
