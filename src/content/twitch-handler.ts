@@ -1,4 +1,5 @@
 import type { MessageType, TranslationResult } from '@/shared/messages'
+import { CHAT_MESSAGE_BODY, CHAT_USERNAME, ATTR_PROCESSED, ATTR_TRANSLATED } from './twitch-selectors'
 
 export interface MessageFilter {
   botNameBlacklist: string[]
@@ -11,11 +12,6 @@ interface ChromeRuntime {
 
 declare const chrome: { runtime: ChromeRuntime }
 
-const CHAT_MESSAGE_BODY_SEL = '.chat-line__message-body'
-const CHAT_USERNAME_SEL = '.chat-author__display-name'
-const ATTR_PROCESSED = 'data-tachi-lens-processed'
-const ATTR_TRANSLATED = 'data-tachi-lens-translated'
-
 export class TwitchMessageHandler {
   private counter = 0
 
@@ -25,17 +21,21 @@ export class TwitchMessageHandler {
   }
 
   getMessageText(element: HTMLElement): string {
-    const body = element.querySelector(CHAT_MESSAGE_BODY_SEL)
+    const body = element.querySelector(CHAT_MESSAGE_BODY)
     return body?.textContent?.trim() ?? ''
   }
 
   getMessageUsername(element: HTMLElement): string {
-    const usernameEl = element.querySelector(CHAT_USERNAME_SEL)
+    const usernameEl = element.querySelector(CHAT_USERNAME)
     return usernameEl?.textContent?.trim() ?? ''
   }
 
   isBot(username: string, blacklist: string[]): boolean {
-    return blacklist.length > 0 && blacklist.includes(username.toLowerCase())
+    if (blacklist.length === 0) return false
+
+    const normalized = username.toLowerCase()
+
+    return blacklist.some((entry) => entry.toLowerCase() === normalized)
   }
 
   isAlreadyProcessed(element: HTMLElement): boolean {

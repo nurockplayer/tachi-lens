@@ -3,6 +3,8 @@ import { CHAT_CONTAINER, CHAT_MESSAGE, ATTR_PROCESSED } from './twitch-selectors
 
 const handler = new TwitchMessageHandler()
 
+let chatObserver: MutationObserver | null = null
+
 const observeChat = (): void => {
   const container = document.querySelector(CHAT_CONTAINER)
 
@@ -11,12 +13,18 @@ const observeChat = (): void => {
     return
   }
 
+  // Disconnect previous observer when container is replaced (SPA navigation)
+  if (chatObserver) {
+    chatObserver.disconnect()
+    chatObserver = null
+  }
+
   const config: MutationObserverInit = {
     childList: true,
     subtree: true,
   }
 
-  const observer = new MutationObserver((mutations) => {
+  chatObserver = new MutationObserver((mutations) => {
     let hasNewMessages = false
 
     for (const mutation of mutations) {
@@ -40,7 +48,17 @@ const observeChat = (): void => {
     }
   })
 
-  observer.observe(container, config)
+  chatObserver.observe(container, config)
+
+  // Watch for container replacement (Twitch SPA navigation)
+  const bodyObserver = new MutationObserver(() => {
+    if (!document.body.contains(container) || !document.querySelector(CHAT_CONTAINER)) {
+      bodyObserver.disconnect()
+      observeChat()
+    }
+  })
+
+  bodyObserver.observe(document.body, { childList: true, subtree: true })
 
   // Process any existing messages on load
   retryUnprocessed()
@@ -56,20 +74,20 @@ const getFilter = async (): Promise<MessageFilter> => {
   }
 }
 
-const processedInFlight = new Set<string>()
+const inFlight = new WeakSet<HTMLElement>()
 
 const processMessage = async (element: HTMLElement): Promise<void> => {
-  const key = `el-${Math.random()}`
+  if (inFlight.has(element)) return
 
-  if (processedInFlight.has(key)) return
-
-  processedInFlight.add(key)
+  inFlight.add(element)
 
   try {
     const filter = await getFilter()
     await handler.translateAndInject(element, filter)
+  } catch {
+    // Silently ignore — element can be retried on next mutation
   } finally {
-    processedInFlight.delete(key)
+    inFlight.delete(element)
   }
 }
 
