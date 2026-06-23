@@ -1,11 +1,11 @@
-// Service Worker entry point
-// Routes messages from Content Script and Popup, manages translation queue, cache, and API calls.
+import { getProvider } from '@/providers/registry'
+import type { ProviderId } from '@/providers/types'
+import { getApiKeyForServiceWorker, getRuntimeState, getUserSettings, initializeStorageAccess } from '@/storage/settings'
+import { TranslationCache } from './cache'
+import { createMessageRouter } from './message-router'
+import { Translator } from './translator'
 
-import { initializeStorageAccess } from '@/storage/settings'
-
-const ignoreStorageInitializationError = (): void => {
-  // Avoid logging storage payloads or API-key-adjacent state during startup.
-}
+const ignoreStorageInitializationError = (): void => {}
 
 const initializeTrustedStorageAccess = (): void => {
   void initializeStorageAccess().catch(ignoreStorageInitializationError)
@@ -13,18 +13,32 @@ const initializeTrustedStorageAccess = (): void => {
 
 initializeTrustedStorageAccess()
 
+const cache = new TranslationCache()
+const translator = new Translator(
+  {
+    cache,
+    getSettings: () => getUserSettings(),
+    getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
+    getProvider: (providerId) => getProvider(providerId),
+  },
+  { debounceMs: 150, maxBatchSize: 10 },
+)
+
+const router = createMessageRouter({
+  translator,
+  getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
+  getProvider: (providerId) => getProvider(providerId),
+  getRuntimeState: () => getRuntimeState(),
+})
+
 const handleMessage = (
-  _message: unknown,
-  _sender: chrome.runtime.MessageSender,
-  _sendResponse: (response: unknown) => void,
-): boolean => {
-  // Message routing will be implemented in #3
-  return false
-}
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: unknown) => void,
+): boolean => router.handleMessage(message, sender, sendResponse)
 
 chrome.runtime.onMessage.addListener(handleMessage)
 
-// Keep service worker alive during startup
 chrome.runtime.onInstalled.addListener(() => {
   initializeTrustedStorageAccess()
   console.info('tachi-lens installed')
