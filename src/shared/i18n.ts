@@ -67,6 +67,14 @@ export const MESSAGE_KEYS: readonly string[] = [
   'hide',
   'show',
   'translationFailed',
+  'errorAuth',
+  'errorRateLimited',
+  'errorTimeout',
+  'errorNetwork',
+  'errorUnsupportedModel',
+  'errorUnknown',
+  'errorNotificationTitle',
+  'dismiss',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
