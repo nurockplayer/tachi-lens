@@ -1,0 +1,16 @@
+{
+  "appName": {
+    "message": "tachi-lens"
+  },
+  "appDesc": {
+    "message": "Twitch 聊天室沉浸式翻譯"
+  },
+  "shortcutToggleTranslation": {
+    "message": "切換翻譯 (Ctrl+Shift+T)",
+    "description": "切換翻譯啟用/停用的快捷鍵標籤"
+  },
+  "shortcutToggleDisplayMode": {
+    "message": "切換顯示模式 (Ctrl+Shift+M)",
+    "description": "循環切換顯示模式的快捷鍵標籤"
+  }
+}

@@ -1,5 +1,19 @@
+import { isSettingsUpdateMessage } from '@/shared/messages'
+import type { SettingsUpdatePayload } from '@/shared/messages'
 import { TwitchMessageHandler, type MessageFilter } from './twitch-handler'
 import { CHAT_CONTAINER, CHAT_MESSAGE, ATTR_PROCESSED } from './twitch-selectors'
+
+export const getSettings = async (): Promise<Record<string, unknown>> => {
+  const items = await chrome.storage.local.get('userSettings')
+
+  return (items.userSettings as Record<string, unknown>) ?? {}
+}
+
+export const handleSettingsUpdate = async (payload: SettingsUpdatePayload): Promise<void> => {
+  const current = await getSettings()
+
+  await chrome.storage.local.set({ userSettings: { ...current, ...payload } })
+}
 
 const handler = new TwitchMessageHandler()
 
@@ -108,6 +122,12 @@ const retryUnprocessed = (): void => {
 const main = (): void => {
   console.info('tachi-lens content script loaded')
   observeChat()
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (isSettingsUpdateMessage(message)) {
+      void handleSettingsUpdate(message.payload)
+    }
+  })
 }
 
 main()

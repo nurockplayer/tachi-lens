@@ -7,6 +7,7 @@ export type MessageType =
   | 'key_validation_result'
   | 'provider_status'
   | 'error_notification'
+  | 'settings_updated'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -15,7 +16,14 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'key_validation_result',
   'provider_status',
   'error_notification',
+  'settings_updated',
 ]
+
+/** Payload for settings_updated: partial settings sent from SW to content scripts. */
+export type SettingsUpdatePayload = Partial<{
+  translationEnabled: boolean
+  displayMode: 'below' | 'hover' | 'collapse'
+}>
 
 export interface TranslationRequest {
   messageId: string
@@ -67,6 +75,16 @@ export const isTranslationRequestMessage = (
     typeof value.payload.text === 'string' &&
     (value.payload.sourceLang === undefined || typeof value.payload.sourceLang === 'string')
   )
+}
+
+export const isSettingsUpdateMessage = (
+  value: unknown,
+): value is BaseMessage<'settings_updated', SettingsUpdatePayload> => {
+  if (!isBaseMessage(value) || value.type !== 'settings_updated') {
+    return false
+  }
+
+  return typeof value.payload === 'object' && value.payload !== null && !Array.isArray(value.payload)
 }
 
 export const serializeMessage = <T extends MessageType, P>(message: BaseMessage<T, P>): string => JSON.stringify(message)

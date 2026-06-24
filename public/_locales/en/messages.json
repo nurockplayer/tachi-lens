@@ -1,0 +1,16 @@
+{
+  "appName": {
+    "message": "tachi-lens"
+  },
+  "appDesc": {
+    "message": "Immersive Twitch chat translation"
+  },
+  "shortcutToggleTranslation": {
+    "message": "Toggle Translation (Ctrl+Shift+T)",
+    "description": "Keyboard shortcut label for toggling translation on/off"
+  },
+  "shortcutToggleDisplayMode": {
+    "message": "Toggle Display Mode (Ctrl+Shift+M)",
+    "description": "Keyboard shortcut label for cycling display mode"
+  }
+}

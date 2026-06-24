@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
 import { listProviderMetadata } from '@/providers/registry'
+import { t } from '@/shared/i18n'
 import { App } from './App'
 
 describe('Popup App', () => {
@@ -62,5 +63,19 @@ describe('Popup App', () => {
         expect.objectContaining({ value: 'claude' }),
       ]),
     )
+  })
+
+  it('provides shortcut label for toggle translation in i18n', () => {
+    const label = t('shortcutToggleTranslation')
+
+    expect(label).toBeTypeOf('string')
+    expect(label.length).toBeGreaterThan(0)
+  })
+
+  it('provides shortcut label for toggle display mode in i18n', () => {
+    const label = t('shortcutToggleDisplayMode')
+
+    expect(label).toBeTypeOf('string')
+    expect(label.length).toBeGreaterThan(0)
   })
 })
