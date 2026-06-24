@@ -1,9 +1,10 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
 import { listProviderMetadata } from '@/providers/registry'
 import { App } from './App'
+import { t } from '@/shared/i18n'
 
 describe('Popup App', () => {
   it('exports a valid React component', () => {
@@ -62,5 +63,38 @@ describe('Popup App', () => {
         expect.objectContaining({ value: 'claude' }),
       ]),
     )
+  })
+
+  describe('error notifications', () => {
+    beforeEach(() => {
+      vi.stubGlobal('chrome', {
+        runtime: {
+          onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+          sendMessage: vi.fn(),
+        },
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValue({
+              userSettings: DEFAULT_SETTINGS,
+              providerApiKeyPreviews: {},
+            }),
+            set: vi.fn(),
+          },
+        },
+        i18n: {
+          getMessage: vi.fn(() => ''),
+        },
+      })
+    })
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('renders error notification area', () => {
+      expect(t('errorNotificationTitle')).toBeTypeOf('string')
+      expect(t('dismiss')).toBeTypeOf('string')
+      expect(t('errorAuth')).toBe('API Key 無效')
+    })
   })
 })

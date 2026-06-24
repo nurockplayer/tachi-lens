@@ -1,4 +1,4 @@
-import { TwitchMessageHandler, type MessageFilter } from './twitch-handler'
+import { TwitchMessageHandler, type ContentSettings } from './twitch-handler'
 import { CHAT_CONTAINER, CHAT_MESSAGE, ATTR_PROCESSED } from './twitch-selectors'
 
 const handler = new TwitchMessageHandler()
@@ -64,13 +64,15 @@ const observeChat = (): void => {
   retryUnprocessed()
 }
 
-const getFilter = async (): Promise<MessageFilter> => {
+const getFilter = async (): Promise<ContentSettings> => {
   const items = await chrome.storage.local.get('userSettings')
   const settings = items.userSettings as Record<string, unknown> | undefined
 
   return {
     botNameBlacklist: (settings?.botNameBlacklist as string[]) ?? [],
     minTextLength: (settings?.minTextLength as number) ?? 2,
+    displayMode: (settings?.displayMode as ContentSettings['displayMode']) ?? 'below',
+    translationEnabled: (settings?.translationEnabled as boolean) ?? true,
   }
 }
 

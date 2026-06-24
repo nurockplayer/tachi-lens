@@ -2,11 +2,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TwitchMessageHandler } from './twitch-handler'
 
+const DEFAULT_FILTER = {
+  botNameBlacklist: [] as string[],
+  minTextLength: 2,
+  displayMode: 'below' as const,
+  translationEnabled: true,
+}
+
 const createMessageElement = (overrides?: {
   text?: string
   username?: string
   messageId?: string
-}): HTMLElement => {
+  }): HTMLElement => {
   const el = document.createElement('div')
   el.className = 'chat-line__message'
   el.setAttribute('data-test-user', overrides?.username ?? 'testuser')
@@ -104,25 +111,25 @@ describe('TwitchMessageHandler', () => {
   describe('shouldTranslate', () => {
     it('returns true for a valid message', () => {
       const el = createMessageElement({ text: 'Hello world', username: 'user' })
-      expect(handler.shouldTranslate(el, { botNameBlacklist: [], minTextLength: 2 })).toBe(true)
+      expect(handler.shouldTranslate(el, { ...DEFAULT_FILTER })).toBe(true)
     })
 
     it('returns false for bot messages', () => {
       const el = createMessageElement({ text: 'Hello', username: 'nightbot' })
       expect(
-        handler.shouldTranslate(el, { botNameBlacklist: ['nightbot'], minTextLength: 2 }),
+        handler.shouldTranslate(el, { ...DEFAULT_FILTER, botNameBlacklist: ['nightbot'] }),
       ).toBe(false)
     })
 
     it('returns false for short messages', () => {
       const el = createMessageElement({ text: 'Hi', username: 'user' })
-      expect(handler.shouldTranslate(el, { botNameBlacklist: [], minTextLength: 5 })).toBe(false)
+      expect(handler.shouldTranslate(el, { ...DEFAULT_FILTER, minTextLength: 5 })).toBe(false)
     })
 
     it('returns false for already processed messages', () => {
       const el = createMessageElement({ text: 'Hello world', username: 'user' })
       el.setAttribute('data-tachi-lens-processed', 'true')
-      expect(handler.shouldTranslate(el, { botNameBlacklist: [], minTextLength: 2 })).toBe(false)
+      expect(handler.shouldTranslate(el, { ...DEFAULT_FILTER })).toBe(false)
     })
   })
 
@@ -135,10 +142,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
 
       expect(sendMessageMock).toHaveBeenCalledTimes(1)
       const callArg = sendMessageMock.mock.calls[0]![0] as Record<string, unknown>
@@ -154,10 +158,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
 
       const translationEl = el.querySelector('[data-tachi-lens-translated]')
       expect(translationEl).not.toBeNull()
@@ -171,10 +172,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
@@ -186,10 +184,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: handler.getMessageId(el), translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
@@ -204,10 +199,7 @@ describe('TwitchMessageHandler', () => {
         },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
 
       // Should NOT be marked as processed so it can be retried
       expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
@@ -225,12 +217,89 @@ describe('TwitchMessageHandler', () => {
         },
       })
 
-      await handler.translateAndInject(el, {
-        botNameBlacklist: [],
-        minTextLength: 2,
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    describe('error icons by type', () => {
+      it('shows 🔑 for auth errors', async () => {
+        const el = createMessageElement({ text: 'Hello' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: {
+            messageId: handler.getMessageId(el),
+            error: { type: 'auth', status: 401, message: 'Unauthorized' },
+          },
+        })
+        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('🔑')
+      })
+
+      it('shows ⏰ for timeout errors', async () => {
+        const el = createMessageElement({ text: 'Hello' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: {
+            messageId: handler.getMessageId(el),
+            error: { type: 'timeout', message: 'Timed out' },
+          },
+        })
+        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('⏰')
+      })
+
+      it('shows 🌐 for network errors', async () => {
+        const el = createMessageElement({ text: 'Hello' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: {
+            messageId: handler.getMessageId(el),
+            error: { type: 'network', message: 'Network error' },
+          },
+        })
+        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('🌐')
+      })
+
+      it('shows ⚙️ for unsupported_model errors', async () => {
+        const el = createMessageElement({ text: 'Hello' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: {
+            messageId: handler.getMessageId(el),
+            error: { type: 'unsupported_model', message: 'Unsupported model' },
+          },
+        })
+        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('⚙️')
+      })
+
+      it('shows ⚠️ for unknown errors', async () => {
+        const el = createMessageElement({ text: 'Hello' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: {
+            messageId: handler.getMessageId(el),
+            error: { type: 'unknown', message: 'Something went wrong' },
+          },
+        })
+        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('⚠️')
+      })
+
+      it('has title attribute with error message', async () => {
+        const el = createMessageElement({ text: 'Hello' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: {
+            messageId: handler.getMessageId(el),
+            error: { type: 'auth', status: 401, message: 'Unauthorized' },
+          },
+        })
+        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+        expect(el.querySelector('[data-tachi-lens-translated]')?.getAttribute('title')).toBe('Unauthorized')
+      })
     })
   })
 })
