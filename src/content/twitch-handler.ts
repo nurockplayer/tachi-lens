@@ -16,8 +16,22 @@ interface ChromeRuntime {
 
 declare const chrome: { runtime: ChromeRuntime }
 
+/**
+ * Extract a lowercased Twitch channel name from the given URL pathname.
+ * Returns undefined for root ('/') or empty path.
+ */
+export const parseChannelFromPathname = (pathname: string): string | undefined => {
+  const match = pathname.match(/^\/([^/]+)/)
+
+  return match?.[1]?.toLowerCase()
+}
+
 export class TwitchMessageHandler {
   private counter = 0
+
+  getChannelName(pathname?: string): string | undefined {
+    return parseChannelFromPathname(pathname ?? window.location.pathname)
+  }
 
   getMessageId(_element: HTMLElement): string {
     this.counter++

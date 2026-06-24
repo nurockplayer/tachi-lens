@@ -48,6 +48,9 @@ export const USER_SETTINGS_STORAGE_KEY = 'userSettings'
 export const API_KEYS_STORAGE_KEY = 'providerApiKeys'
 export const API_KEY_PREVIEWS_STORAGE_KEY = 'providerApiKeyPreviews'
 export const RUNTIME_STATE_STORAGE_KEY = 'runtimeState'
+export const PER_CHANNEL_SETTINGS_STORAGE_KEY = 'perChannelSettings'
+
+export type PerChannelSettings = Record<string, Partial<UserSettings>>
 
 type ApiKeyMap = Partial<Record<ProviderId, string>>
 type ApiKeyPreviewMap = Partial<Record<ProviderId, string>>
@@ -187,3 +190,49 @@ export const getRuntimeState = async (storage = getDefaultStorage()): Promise<Ru
 
   return isRecord(runtimeState) ? (runtimeState as RuntimeState) : undefined
 }
+
+export const getPerChannelSettings = async (storage = getDefaultStorage()): Promise<PerChannelSettings> =>
+  readRecord(storage.local, PER_CHANNEL_SETTINGS_STORAGE_KEY) as unknown as PerChannelSettings
+
+export const getChannelSettings = async (
+  channelName: string,
+  storage = getDefaultStorage(),
+): Promise<Partial<UserSettings> | undefined> => {
+  const all = await getPerChannelSettings(storage)
+
+  return all[channelName]
+}
+
+export const saveChannelSettings = async (
+  channelName: string,
+  settings: Partial<UserSettings>,
+  storage = getDefaultStorage(),
+): Promise<void> => {
+  const all = await getPerChannelSettings(storage)
+
+  await storage.local.set({
+    [PER_CHANNEL_SETTINGS_STORAGE_KEY]: {
+      ...all,
+      [channelName]: settings,
+    },
+  })
+}
+
+export const deleteChannelSettings = async (
+  channelName: string,
+  storage = getDefaultStorage(),
+): Promise<void> => {
+  const all = await getPerChannelSettings(storage)
+
+  delete all[channelName]
+
+  await storage.local.set({ [PER_CHANNEL_SETTINGS_STORAGE_KEY]: all })
+}
+
+export const mergeSettings = (
+  global: UserSettings,
+  channel?: Partial<UserSettings>,
+): UserSettings => ({
+  ...global,
+  ...channel,
+})
