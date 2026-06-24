@@ -77,6 +77,8 @@ export const MESSAGE_KEYS: readonly string[] = [
   'errorUnknown',
   'errorNotificationTitle',
   'dismiss',
+  'shortcutToggleTranslation',
+  'shortcutToggleDisplayMode',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
