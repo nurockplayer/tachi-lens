@@ -32,6 +32,14 @@ export type MessageKey =
   | 'hide'
   | 'show'
   | 'translationFailed'
+  | 'errorAuth'
+  | 'errorRateLimited'
+  | 'errorTimeout'
+  | 'errorNetwork'
+  | 'errorUnsupportedModel'
+  | 'errorUnknown'
+  | 'errorNotificationTitle'
+  | 'dismiss'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -87,6 +95,14 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   hide: '隱藏',
   show: '顯示',
   translationFailed: '翻譯失敗',
+  errorAuth: 'API 驗證失敗，請檢查 API Key',
+  errorRateLimited: '請求次數過多，請稍後再試',
+  errorTimeout: '請求超時，請檢查網路連線',
+  errorNetwork: '網路錯誤，請檢查連線狀態',
+  errorUnsupportedModel: '不支援的模型',
+  errorUnknown: '發生未知錯誤',
+  errorNotificationTitle: '錯誤通知',
+  dismiss: '關閉',
 }
 
 /**

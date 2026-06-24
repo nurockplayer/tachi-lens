@@ -69,4 +69,28 @@ export const isTranslationRequestMessage = (
   )
 }
 
+export interface ErrorNotification {
+  id: string
+  type: string
+  message: string
+  timestamp: number
+}
+
+export const isErrorNotificationMessage = (
+  value: unknown,
+): value is BaseMessage<'error_notification', ErrorNotification> => {
+  if (!isBaseMessage(value) || value.type !== 'error_notification' || !isRecord(value.payload)) {
+    return false
+  }
+
+  const p = value.payload as Record<string, unknown>
+
+  return (
+    typeof p.id === 'string' &&
+    typeof p.type === 'string' &&
+    typeof p.message === 'string' &&
+    typeof p.timestamp === 'number'
+  )
+}
+
 export const serializeMessage = <T extends MessageType, P>(message: BaseMessage<T, P>): string => JSON.stringify(message)
