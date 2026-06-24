@@ -1,4 +1,6 @@
 import { getChannelSettings, getUserSettings, mergeSettings } from '@/storage/settings'
+import { isSettingsUpdateMessage } from '@/shared/messages'
+import type { SettingsUpdatePayload } from '@/shared/messages'
 import { parseChannelFromPathname, TwitchMessageHandler, type ContentSettings } from './twitch-handler'
 import {
   ATTR_PROCESSED,
@@ -134,9 +136,27 @@ const retryUnprocessed = (): void => {
   }
 }
 
+export const getSettings = async (): Promise<Record<string, unknown>> => {
+  const items = await chrome.storage.local.get('userSettings')
+
+  return (items.userSettings as Record<string, unknown>) ?? {}
+}
+
+export const handleSettingsUpdate = async (payload: SettingsUpdatePayload): Promise<void> => {
+  const current = await getSettings()
+
+  await chrome.storage.local.set({ userSettings: { ...current, ...payload } })
+}
+
 const main = (): void => {
   console.info('tachi-lens content script loaded')
   observeChat()
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (isSettingsUpdateMessage(message)) {
+      void handleSettingsUpdate(message.payload)
+    }
+  })
 }
 
 main()

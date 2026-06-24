@@ -532,6 +532,20 @@ export function App() {
           ))}
         </div>
       )}
+
+      {/* 快捷鍵資訊 */}
+      <div
+        style={{
+          marginTop: '1rem',
+          paddingTop: '0.75rem',
+          borderTop: '1px solid #eee',
+          fontSize: '0.75rem',
+          color: '#999',
+        }}
+      >
+        <div>{t('shortcutToggleTranslation')}</div>
+        <div>{t('shortcutToggleDisplayMode')}</div>
+      </div>
     </div>
   )
 }

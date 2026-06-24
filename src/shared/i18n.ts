@@ -40,6 +40,8 @@ export type MessageKey =
   | 'errorUnknown'
   | 'errorNotificationTitle'
   | 'dismiss'
+  | 'shortcutToggleTranslation'
+  | 'shortcutToggleDisplayMode'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -111,6 +113,8 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   errorUnknown: '發生未知錯誤',
   errorNotificationTitle: '錯誤通知',
   dismiss: '關閉',
+  shortcutToggleTranslation: '切換翻譯 (Ctrl+Shift+T)',
+  shortcutToggleDisplayMode: '切換顯示模式 (Ctrl+Shift+M)',
 }
 
 /**
