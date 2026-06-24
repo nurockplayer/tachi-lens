@@ -1,5 +1,11 @@
 import type { MessageType, TranslationResult } from '@/shared/messages'
-import { CHAT_MESSAGE_BODY, CHAT_USERNAME, ATTR_PROCESSED, ATTR_TRANSLATED } from './twitch-selectors'
+import {
+  ATTR_PROCESSED,
+  ATTR_TRANSLATED,
+  CHAT_MESSAGE_BODY,
+  CHAT_USERNAME,
+  type PageSelectors,
+} from './twitch-selectors'
 
 export type DisplayMode = 'below' | 'hover' | 'collapse'
 
@@ -28,6 +34,16 @@ export const parseChannelFromPathname = (pathname: string): string | undefined =
 
 export class TwitchMessageHandler {
   private counter = 0
+  private selectors: PageSelectors
+
+  constructor(selectors?: PageSelectors) {
+    this.selectors = selectors ?? {
+      CHAT_MESSAGE_BODY,
+      CHAT_USERNAME,
+      CHAT_CONTAINER: '',
+      CHAT_MESSAGE: '',
+    }
+  }
 
   getChannelName(pathname?: string): string | undefined {
     return parseChannelFromPathname(pathname ?? window.location.pathname)
@@ -39,12 +55,12 @@ export class TwitchMessageHandler {
   }
 
   getMessageText(element: HTMLElement): string {
-    const body = element.querySelector(CHAT_MESSAGE_BODY)
+    const body = element.querySelector(this.selectors.CHAT_MESSAGE_BODY)
     return body?.textContent?.trim() ?? ''
   }
 
   getMessageUsername(element: HTMLElement): string {
-    const usernameEl = element.querySelector(CHAT_USERNAME)
+    const usernameEl = element.querySelector(this.selectors.CHAT_USERNAME)
     return usernameEl?.textContent?.trim() ?? ''
   }
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TwitchMessageHandler, parseChannelFromPathname, type ContentSettings } from './twitch-handler'
+import type { PageSelectors } from './twitch-selectors'
 
 const DEFAULT_SETTINGS: ContentSettings = {
   botNameBlacklist: [],
@@ -140,6 +141,51 @@ describe('TwitchMessageHandler', () => {
     it('returns false if element is not processed', () => {
       const el = createMessageElement()
       expect(handler.isAlreadyProcessed(el)).toBe(false)
+    })
+  })
+
+  describe('custom selectors', () => {
+    it('uses custom CHAT_USERNAME selector when provided', () => {
+      const customSelectors: PageSelectors = {
+        CHAT_CONTAINER: '#custom-container',
+        CHAT_MESSAGE: '.custom-msg',
+        CHAT_MESSAGE_BODY: '.custom-body',
+        CHAT_USERNAME: '.custom-username',
+      }
+      const customHandler = new TwitchMessageHandler(customSelectors)
+
+      const el = document.createElement('div')
+      const usernameEl = document.createElement('span')
+      usernameEl.className = 'custom-username'
+      usernameEl.textContent = 'custom-user'
+      el.appendChild(usernameEl)
+
+      expect(customHandler.getMessageUsername(el)).toBe('custom-user')
+    })
+
+    it('uses custom CHAT_MESSAGE_BODY selector when provided', () => {
+      const customSelectors: PageSelectors = {
+        CHAT_CONTAINER: '#custom-container',
+        CHAT_MESSAGE: '.custom-msg',
+        CHAT_MESSAGE_BODY: '.custom-body-text',
+        CHAT_USERNAME: '.custom-username',
+      }
+      const customHandler = new TwitchMessageHandler(customSelectors)
+
+      const el = document.createElement('div')
+      const body = document.createElement('span')
+      body.className = 'custom-body-text'
+      body.textContent = 'Custom body text'
+      el.appendChild(body)
+
+      expect(customHandler.getMessageText(el)).toBe('Custom body text')
+    })
+
+    it('falls back to default selectors when none provided', () => {
+      // Without custom selectors, uses existing class-based selectors
+      const el = createMessageElement({ text: 'Hello default', username: 'defaultuser' })
+      expect(handler.getMessageText(el)).toBe('Hello default')
+      expect(handler.getMessageUsername(el)).toBe('defaultuser')
     })
   })
 

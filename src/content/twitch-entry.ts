@@ -1,13 +1,27 @@
 import { getChannelSettings, getUserSettings, mergeSettings } from '@/storage/settings'
 import { parseChannelFromPathname, TwitchMessageHandler, type ContentSettings } from './twitch-handler'
-import { CHAT_CONTAINER, CHAT_MESSAGE, ATTR_PROCESSED } from './twitch-selectors'
+import {
+  ATTR_PROCESSED,
+  detectPageType,
+  getSelectorsForPage,
+  type PageSelectors,
+} from './twitch-selectors'
 
-const handler = new TwitchMessageHandler()
+let handler = new TwitchMessageHandler()
+let currentSelectors: PageSelectors = getSelectorsForPage('channel')
 
 let chatObserver: MutationObserver | null = null
 
+const setupPage = (): void => {
+  const pageType = detectPageType(window.location.href)
+  currentSelectors = getSelectorsForPage(pageType)
+  handler = new TwitchMessageHandler(currentSelectors)
+}
+
 const observeChat = (): void => {
-  const container = document.querySelector(CHAT_CONTAINER)
+  setupPage()
+
+  const container = document.querySelector(currentSelectors.CHAT_CONTAINER)
 
   if (!container) {
     setTimeout(observeChat, 500)
@@ -33,7 +47,7 @@ const observeChat = (): void => {
         for (const node of mutation.addedNodes) {
           if (
             node instanceof HTMLElement &&
-            node.matches(CHAT_MESSAGE) &&
+            node.matches(currentSelectors.CHAT_MESSAGE) &&
             !node.hasAttribute(ATTR_PROCESSED)
           ) {
             hasNewMessages = true
@@ -53,7 +67,7 @@ const observeChat = (): void => {
 
   // Watch for container replacement (Twitch SPA navigation)
   const bodyObserver = new MutationObserver(() => {
-    if (!document.body.contains(container) || !document.querySelector(CHAT_CONTAINER)) {
+    if (!document.body.contains(container) || !document.querySelector(currentSelectors.CHAT_CONTAINER)) {
       bodyObserver.disconnect()
       observeChat()
     }
@@ -107,12 +121,12 @@ const processMessage = async (element: HTMLElement): Promise<void> => {
 }
 
 const retryUnprocessed = (): void => {
-  const container = document.querySelector(CHAT_CONTAINER)
+  const container = document.querySelector(currentSelectors.CHAT_CONTAINER)
 
   if (!container) return
 
   const messages = container.querySelectorAll<HTMLElement>(
-    `${CHAT_MESSAGE}:not([${ATTR_PROCESSED}])`,
+    `${currentSelectors.CHAT_MESSAGE}:not([${ATTR_PROCESSED}])`,
   )
 
   for (const msg of messages) {
