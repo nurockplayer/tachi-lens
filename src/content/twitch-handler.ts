@@ -158,15 +158,40 @@ export class TwitchMessageHandler {
     }
   }
 
+  private getErrorIcon(type?: string): string {
+    switch (type) {
+      case 'auth': return '🔑'
+      case 'rate_limited': return '⏳'
+      case 'timeout': return '⏰'
+      case 'network': return '🌐'
+      case 'unsupported_model': return '⚙️'
+      default: return '⚠️'
+    }
+  }
+
+  private getErrorColor(type?: string): string {
+    switch (type) {
+      case 'auth': return '#e74c3c'
+      case 'rate_limited': return '#f39c12'
+      case 'timeout': return '#e67e22'
+      case 'network': return '#9b59b6'
+      case 'unsupported_model': return '#3498db'
+      default: return '#95a5a6'
+    }
+  }
+
   private injectError(element: HTMLElement, error?: { type: string; message: string }): void {
     const existing = element.querySelector(`[${ATTR_TRANSLATED}]`)
     if (existing) return
 
+    const errorIcon = this.getErrorIcon(error?.type)
+    const errorColor = this.getErrorColor(error?.type)
+
     const errorEl = document.createElement('span')
     errorEl.setAttribute(ATTR_TRANSLATED, 'true')
-    errorEl.textContent = '⚠️'
+    errorEl.textContent = errorIcon
     errorEl.title = error?.message ?? '翻譯失敗'
-    errorEl.style.cssText = 'margin-left: 0.25rem; cursor: help; font-size: 0.85em; opacity: 0.6;'
+    errorEl.style.cssText = `margin-left: 0.25rem; cursor: help; font-size: 0.85em; opacity: 0.6; color: ${errorColor};`
 
     element.appendChild(errorEl)
   }

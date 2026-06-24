@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
 import {
@@ -10,6 +10,7 @@ import {
 } from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
+import type { ErrorNotification } from '@/shared/messages'
 
 export const extractChannelFromUrl = (url: string): string | undefined => {
   try {
@@ -44,6 +45,13 @@ const loadApiKeyPreview = async (providerId: string): Promise<string> => {
   return previews?.[providerId] ?? ''
 }
 
+interface ErrorNotificationItem {
+  id: string
+  type: string
+  message: string
+  timestamp: number
+}
+
 export function App() {
   const [settings, setSettings] = useState<UserSettings | null>(null)
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({})
@@ -53,6 +61,8 @@ export function App() {
   const [blacklistInput, setBlacklistInput] = useState('')
   const [channelName, setChannelName] = useState<string | undefined>(undefined)
   const [useChannelSettings, setUseChannelSettings] = useState(false)
+  const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
+  const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
 
   const providers = listProviderMetadata()
 
@@ -97,9 +107,31 @@ export function App() {
       }
     })
 
+    // Listen for error notifications
+    const handleErrorNotification = (message: unknown) => {
+      const msg = message as { type?: string; payload?: ErrorNotification } | undefined
+      if (msg?.type === 'error_notification' && msg.payload) {
+        const { id, type, message: errMsg, timestamp } = msg.payload
+        setErrorNotifications((prev) => [
+          { id, type, message: errMsg, timestamp },
+          ...prev.slice(0, 19), // keep max 20 notifications
+        ])
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(handleErrorNotification)
+    errorListenerRef.current = handleErrorNotification
+
     return () => {
       cancelled = true
+      if (errorListenerRef.current) {
+        chrome.runtime.onMessage.removeListener(errorListenerRef.current)
+      }
     }
+  }, [])
+
+  const dismissError = useCallback((id: string) => {
+    setErrorNotifications((prev) => prev.filter((n) => n.id !== id))
   }, [])
 
   const updateSetting = useCallback(
@@ -460,6 +492,46 @@ export function App() {
           <span style={{ color: 'green', fontSize: '0.85rem' }}>{t('settingsSaved')}</span>
         )}
       </div>
+
+      {/* 錯誤通知區 */}
+      {errorNotifications.length > 0 && (
+        <div style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
+          <h3 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem', color: '#666' }}>
+            {t('errorNotificationTitle')}
+          </h3>
+          {errorNotifications.map((n) => (
+            <div
+              key={n.id}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.25rem',
+                padding: '0.25rem 0',
+                fontSize: '0.8rem',
+                color: '#c0392b',
+                wordBreak: 'break-word',
+              }}
+            >
+              <span style={{ flex: 1 }}>{n.message}</span>
+              <button
+                onClick={() => dismissError(n.id)}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  padding: '0',
+                  fontSize: '0.8rem',
+                  color: '#999',
+                  lineHeight: 1,
+                }}
+                aria-label={t('dismiss')}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
