@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TwitchMessageHandler, type ContentSettings } from './twitch-handler'
+import { TwitchMessageHandler, parseChannelFromPathname, type ContentSettings } from './twitch-handler'
 
 const DEFAULT_SETTINGS: ContentSettings = {
   botNameBlacklist: [],
@@ -45,6 +45,41 @@ describe('TwitchMessageHandler', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  describe('getChannelName', () => {
+    it.each([
+      ['/somerchannel', 'somerchannel'],
+      ['/channel_name', 'channel_name'],
+      ['/UserChannel', 'userchannel'],
+      ['/', undefined],
+      ['', undefined],
+      ['/somechannel/video/12345', 'somechannel'],
+    ])('parses %s into %s', (pathname, expected) => {
+      expect(handler.getChannelName(pathname)).toBe(expected)
+    })
+  })
+
+  describe('parseChannelFromPathname', () => {
+    it('returns channel name for a valid Twitch channel path', () => {
+      expect(parseChannelFromPathname('/somerchannel')).toBe('somerchannel')
+    })
+
+    it('returns undefined for root path', () => {
+      expect(parseChannelFromPathname('/')).toBeUndefined()
+    })
+
+    it('returns undefined for empty string', () => {
+      expect(parseChannelFromPathname('')).toBeUndefined()
+    })
+
+    it('ignores sub-paths after channel name', () => {
+      expect(parseChannelFromPathname('/channel/video/abc')).toBe('channel')
+    })
+
+    it('returns lowercase channel name', () => {
+      expect(parseChannelFromPathname('/SomeChannel')).toBe('somechannel')
+    })
   })
 
   describe('getMessageId', () => {

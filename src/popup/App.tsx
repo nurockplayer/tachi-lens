@@ -1,9 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
-import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
+import {
+  DEFAULT_SETTINGS,
+  getChannelSettings,
+  maskApiKey,
+  mergeSettings,
+  saveChannelSettings,
+} from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
+
+export const extractChannelFromUrl = (url: string): string | undefined => {
+  try {
+    const { hostname, pathname } = new URL(url)
+
+    if (!hostname.endsWith('twitch.tv')) return undefined
+    if (hostname !== 'twitch.tv' && hostname !== 'www.twitch.tv') return undefined
+
+    const match = pathname.match(/^\/([^/]+)/)
+
+    return match?.[1]?.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
 
 type ValidationStatus = 'valid' | 'invalid' | 'checking' | null
 
@@ -30,6 +51,8 @@ export function App() {
   const [validationStatus, setValidationStatus] = useState<Record<string, ValidationStatus>>({})
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [blacklistInput, setBlacklistInput] = useState('')
+  const [channelName, setChannelName] = useState<string | undefined>(undefined)
+  const [useChannelSettings, setUseChannelSettings] = useState(false)
 
   const providers = listProviderMetadata()
 
@@ -48,6 +71,31 @@ export function App() {
         setApiKeyInputs((prev) => ({ ...prev, [p.id]: preview }))
       })
     }
+
+    // Detect current channel from active tab
+    chrome.tabs?.query({ active: true, currentWindow: true }).then((tabs) => {
+      if (cancelled) return
+      const tab = tabs[0]
+
+      if (!tab?.url) return
+
+      const name = extractChannelFromUrl(tab.url)
+
+      setChannelName(name)
+
+      if (name) {
+        // Check if there are per-channel settings for this channel
+        getChannelSettings(name).then((channel) => {
+          if (cancelled) return
+          if (channel && Object.keys(channel).length > 0) {
+            setUseChannelSettings(true)
+            setSettings((prev) =>
+              prev ? mergeSettings(prev, channel) : prev,
+            )
+          }
+        })
+      }
+    })
 
     return () => {
       cancelled = true
@@ -89,11 +137,15 @@ export function App() {
 
     const updatedSettings = { ...settings, botNameBlacklist: parsedBlacklist }
 
-    await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+    if (useChannelSettings && channelName) {
+      await saveChannelSettings(channelName, updatedSettings)
+    } else {
+      await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+    }
     setSettings(updatedSettings)
     setSaveMessage(t('settingsSaved'))
     setTimeout(() => setSaveMessage(null), 2000)
-  }, [settings, blacklistInput])
+  }, [settings, blacklistInput, useChannelSettings, channelName])
 
   const handleValidateKey = useCallback(
     async (providerId: string) => {
@@ -175,6 +227,37 @@ export function App() {
       <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 1rem' }}>
         {t('appDescription')}
       </p>
+
+      {/* 頻道資訊 */}
+      {channelName && (
+        <div
+          style={{
+            marginBottom: '0.75rem',
+            padding: '0.4rem 0.5rem',
+            background: '#f0f0f0',
+            borderRadius: '4px',
+            fontSize: '0.85rem',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>頻道：</span>
+          <span>{channelName}</span>
+        </div>
+      )}
+
+      {/* 每頻道設定 */}
+      {channelName && (
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
+        >
+          <input
+            type='checkbox'
+            checked={useChannelSettings}
+            onChange={(e) => setUseChannelSettings(e.target.checked)}
+            aria-label='使用此頻道的專用設定'
+          />
+          <span style={{ fontSize: '0.9rem' }}>使用此頻道的專用設定</span>
+        </label>
+      )}
 
       {/* 翻譯啟用 */}
       <label

@@ -1,4 +1,5 @@
-import { TwitchMessageHandler, type ContentSettings } from './twitch-handler'
+import { getChannelSettings, getUserSettings, mergeSettings } from '@/storage/settings'
+import { parseChannelFromPathname, TwitchMessageHandler, type ContentSettings } from './twitch-handler'
 import { CHAT_CONTAINER, CHAT_MESSAGE, ATTR_PROCESSED } from './twitch-selectors'
 
 const handler = new TwitchMessageHandler()
@@ -65,14 +66,26 @@ const observeChat = (): void => {
 }
 
 const getContentSettings = async (): Promise<ContentSettings> => {
-  const items = await chrome.storage.local.get('userSettings')
-  const settings = items.userSettings as Record<string, unknown> | undefined
+  const global = await getUserSettings()
+  const channelName = parseChannelFromPathname(window.location.pathname)
+
+  if (!channelName) {
+    return {
+      botNameBlacklist: global.botNameBlacklist,
+      minTextLength: global.minTextLength,
+      displayMode: global.displayMode,
+      translationEnabled: global.translationEnabled,
+    }
+  }
+
+  const channel = await getChannelSettings(channelName)
+  const merged = channel ? mergeSettings(global, channel) : global
 
   return {
-    botNameBlacklist: (settings?.botNameBlacklist as string[]) ?? [],
-    minTextLength: (settings?.minTextLength as number) ?? 2,
-    displayMode: (settings?.displayMode as ContentSettings['displayMode']) ?? 'below',
-    translationEnabled: (settings?.translationEnabled as boolean) ?? true,
+    botNameBlacklist: merged.botNameBlacklist,
+    minTextLength: merged.minTextLength,
+    displayMode: merged.displayMode,
+    translationEnabled: merged.translationEnabled,
   }
 }
 

@@ -3,7 +3,43 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
 import { listProviderMetadata } from '@/providers/registry'
-import { App } from './App'
+import { App, extractChannelFromUrl } from './App'
+
+describe('extractChannelFromUrl', () => {
+  it('extracts channel name from a standard Twitch URL', () => {
+    expect(extractChannelFromUrl('https://www.twitch.tv/somerchannel')).toBe('somerchannel')
+  })
+
+  it('extracts channel name from twitch.tv base domain', () => {
+    expect(extractChannelFromUrl('https://twitch.tv/mychannel')).toBe('mychannel')
+  })
+
+  it('returns lowercase channel name', () => {
+    expect(extractChannelFromUrl('https://www.twitch.tv/SomeChannel')).toBe('somechannel')
+  })
+
+  it('returns undefined for non-Twitch URLs', () => {
+    expect(extractChannelFromUrl('https://www.youtube.com')).toBeUndefined()
+  })
+
+  it('returns undefined for Twitch root URL', () => {
+    expect(extractChannelFromUrl('https://www.twitch.tv')).toBeUndefined()
+  })
+
+  it('returns undefined for Twitch subdomain pages', () => {
+    expect(extractChannelFromUrl('https://dashboard.twitch.tv')).toBeUndefined()
+  })
+
+  it('returns undefined for empty string', () => {
+    expect(extractChannelFromUrl('')).toBeUndefined()
+  })
+
+  it('ignores sub-paths after channel name', () => {
+    expect(extractChannelFromUrl('https://www.twitch.tv/somerchannel/video/12345')).toBe(
+      'somerchannel',
+    )
+  })
+})
 
 describe('Popup App', () => {
   it('exports a valid React component', () => {
