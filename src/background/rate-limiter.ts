@@ -1,39 +1,44 @@
+import { ExponentialBackoff, type BackoffStrategy } from './backoff-strategy'
+
 export interface RateLimiterOptions {
   maxBackoffMs: number
   baseBackoffMs?: number
+  strategy?: BackoffStrategy
 }
 
 interface ProviderState {
   retryAfterMs: number
   backoffMultiplier: number
   limitedAt: number
+  attemptCount: number
 }
 
 export class RateLimiter {
   private state = new Map<string, ProviderState>()
   private maxBackoffMs: number
-  private baseBackoffMs: number
+  private strategy: BackoffStrategy
 
   constructor(options: RateLimiterOptions) {
     this.maxBackoffMs = options.maxBackoffMs
-    this.baseBackoffMs = options.baseBackoffMs ?? 1_000
+    this.strategy = options.strategy ?? new ExponentialBackoff(options.baseBackoffMs ?? 1_000, options.maxBackoffMs)
   }
 
   recordError(providerId: string, retryAfterMs: number): void {
     const current = this.state.get(providerId)
 
     if (current) {
-      current.backoffMultiplier *= 2
+      current.attemptCount++
     } else {
       this.state.set(providerId, {
         retryAfterMs: 0,
         backoffMultiplier: 1,
         limitedAt: 0,
+        attemptCount: 0,
       })
     }
 
     const entry = this.state.get(providerId)!
-    const backoffMs = this.baseBackoffMs * entry.backoffMultiplier
+    const backoffMs = this.strategy.nextDelay(entry.attemptCount)
     const effectiveWait = Math.min(
       Math.max(retryAfterMs, backoffMs),
       this.maxBackoffMs,
@@ -63,5 +68,9 @@ export class RateLimiter {
 
   reset(providerId: string): void {
     this.state.delete(providerId)
+  }
+
+  getAttemptCount(providerId: string): number {
+    return this.state.get(providerId)?.attemptCount ?? 0
   }
 }
