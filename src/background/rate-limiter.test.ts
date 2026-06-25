@@ -104,4 +104,35 @@ describe('RateLimiter', () => {
 
     expect(limiter.isLimited('gemini')).toBe(false)
   })
+
+  it('tracks attempt count across errors', () => {
+    expect(limiter.getAttemptCount('deepseek')).toBe(0)
+
+    limiter.recordError('deepseek', 1_000)
+    expect(limiter.getAttemptCount('deepseek')).toBe(0) // first call: attemptCount starts at 0
+
+    limiter.recordError('deepseek', 1_000)
+    expect(limiter.getAttemptCount('deepseek')).toBe(1)
+
+    limiter.reset('deepseek')
+    expect(limiter.getAttemptCount('deepseek')).toBe(0)
+  })
+
+  it('supports custom backoff strategy injection', () => {
+    const customStrategy = {
+      nextDelay: vi.fn()
+        .mockReturnValueOnce(500)
+        .mockReturnValueOnce(1_000),
+    }
+    const limiter = new RateLimiter({
+      maxBackoffMs: 60_000,
+      strategy: customStrategy,
+    })
+
+    limiter.recordError('custom', 1_000)
+    expect(customStrategy.nextDelay).toHaveBeenCalledWith(0)
+
+    limiter.recordError('custom', 2_000)
+    expect(customStrategy.nextDelay).toHaveBeenCalledWith(1)
+  })
 })

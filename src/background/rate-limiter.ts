@@ -8,7 +8,6 @@ export interface RateLimiterOptions {
 
 interface ProviderState {
   retryAfterMs: number
-  backoffMultiplier: number
   limitedAt: number
   attemptCount: number
 }
@@ -31,7 +30,6 @@ export class RateLimiter {
     } else {
       this.state.set(providerId, {
         retryAfterMs: 0,
-        backoffMultiplier: 1,
         limitedAt: 0,
         attemptCount: 0,
       })

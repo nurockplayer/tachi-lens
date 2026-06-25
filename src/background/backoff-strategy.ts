@@ -36,7 +36,7 @@ export class LinearBackoff implements BackoffStrategy {
 export class FixedBackoff implements BackoffStrategy {
   constructor(private delayMs: number = 5_000) {}
 
-  nextDelay(): number {
+  nextDelay(_attempt?: number): number {
     return this.delayMs
   }
 }
