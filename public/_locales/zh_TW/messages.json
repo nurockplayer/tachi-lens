@@ -23,5 +23,15 @@
   "loading": { "message": "載入中..." },
   "hide": { "message": "隱藏" },
   "show": { "message": "顯示" },
-  "translationFailed": { "message": "翻譯失敗" }
+  "translationFailed": { "message": "翻譯失敗" },
+  "errorAuth": { "message": "API 驗證失敗，請檢查 API Key" },
+  "errorRateLimited": { "message": "請求次數過多，請稍後再試" },
+  "errorTimeout": { "message": "請求超時，請檢查網路連線" },
+  "errorNetwork": { "message": "網路錯誤，請檢查連線狀態" },
+  "errorUnsupportedModel": { "message": "不支援的模型" },
+  "errorUnknown": { "message": "發生未知錯誤" },
+  "errorNotificationTitle": { "message": "錯誤通知" },
+  "dismiss": { "message": "關閉" },
+  "shortcutToggleTranslation": { "message": "切換翻譯 (Ctrl+Shift+T)" },
+  "shortcutToggleDisplayMode": { "message": "切換顯示模式 (Ctrl+Shift+M)" }
 }
