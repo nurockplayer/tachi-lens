@@ -22,42 +22,26 @@ describe('content script entry', () => {
   })
 
   describe('handleSettingsUpdate', () => {
-    it('merges settings into chrome.storage.local', async () => {
+    it('invalidates the settings cache (does not write storage directly)', async () => {
       vi.stubGlobal('chrome', {
         storage: { local: { get: vi.fn().mockResolvedValue({}), set: vi.fn() } },
         runtime: { onMessage: { addListener: vi.fn() } },
       })
 
-      const { handleSettingsUpdate } = await import('./twitch-entry')
+      const { handleSettingsUpdate, getSettings } = await import('./twitch-entry')
       const setSpy = vi.mocked(chrome.storage.local.set)
 
+      // getSettings reads raw storage
+      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+        userSettings: { translationEnabled: true },
+      })
+
+      const before = await getSettings()
+      expect(before).toEqual({ translationEnabled: true })
+
+      // handleSettingsUpdate should NOT write to storage
       await handleSettingsUpdate({ translationEnabled: false })
-
-      expect(setSpy).toHaveBeenCalledWith({
-        userSettings: { translationEnabled: false },
-      })
-
-      vi.unstubAllGlobals()
-    })
-
-    it('merges with existing settings', async () => {
-      vi.stubGlobal('chrome', {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValue({ userSettings: { displayMode: 'hover' } }),
-            set: vi.fn(),
-          },
-        },
-        runtime: { onMessage: { addListener: vi.fn() } },
-      })
-
-      const { handleSettingsUpdate } = await import('./twitch-entry')
-
-      await handleSettingsUpdate({ translationEnabled: false })
-
-      expect(vi.mocked(chrome.storage.local.set)).toHaveBeenCalledWith({
-        userSettings: { displayMode: 'hover', translationEnabled: false },
-      })
+      expect(setSpy).not.toHaveBeenCalled()
 
       vi.unstubAllGlobals()
     })

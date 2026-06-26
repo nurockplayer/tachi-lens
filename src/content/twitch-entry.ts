@@ -13,12 +13,68 @@ let handler = new TwitchMessageHandler()
 let currentSelectors: PageSelectors = getSelectorsForPage('channel')
 
 let chatObserver: MutationObserver | null = null
+let bodyObserver: MutationObserver | null = null
+
+// --- Settings cache ---
+let cachedSettings: ContentSettings | null = null
+
+const invalidateSettingsCache = (): void => {
+  cachedSettings = null
+}
+
+const getContentSettings = async (forceRefresh = false): Promise<ContentSettings> => {
+  if (cachedSettings && !forceRefresh) return cachedSettings
+
+  const global = await getUserSettings()
+  const channelName = parseChannelFromPathname(window.location.pathname)
+
+  let merged: typeof global
+
+  if (channelName) {
+    const channel = await getChannelSettings(channelName)
+    merged = channel ? mergeSettings(global, channel) : global
+  } else {
+    merged = global
+  }
+
+  cachedSettings = {
+    botNameBlacklist: merged.botNameBlacklist,
+    minTextLength: merged.minTextLength,
+    displayMode: merged.displayMode,
+    translationEnabled: merged.translationEnabled,
+  }
+
+  return cachedSettings!
+}
+
+// --- Timer-driven retry for rate-limited / errored messages ---
+let retryTimer: ReturnType<typeof setInterval> | null = null
+
+const startRetryTimer = (): void => {
+  if (retryTimer) return
+
+  retryTimer = setInterval(() => {
+    void retryUnprocessed()
+  }, 5_000)
+}
+
+const stopRetryTimer = (): void => {
+  if (retryTimer !== null) {
+    clearInterval(retryTimer)
+    retryTimer = null
+  }
+}
+
+// --- Page setup ---
 
 const setupPage = (): void => {
+  invalidateSettingsCache()
   const pageType = detectPageType(window.location.href)
   currentSelectors = getSelectorsForPage(pageType)
   handler = new TwitchMessageHandler(currentSelectors)
 }
+
+// --- Observation ---
 
 const observeChat = (): void => {
   setupPage()
@@ -30,11 +86,12 @@ const observeChat = (): void => {
     return
   }
 
-  // Disconnect previous observer when container is replaced (SPA navigation)
   if (chatObserver) {
     chatObserver.disconnect()
     chatObserver = null
   }
+
+  startRetryTimer()
 
   const config: MutationObserverInit = {
     childList: true,
@@ -42,8 +99,6 @@ const observeChat = (): void => {
   }
 
   chatObserver = new MutationObserver((mutations) => {
-    let hasNewMessages = false
-
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         for (const node of mutation.addedNodes) {
@@ -52,58 +107,32 @@ const observeChat = (): void => {
             node.matches(currentSelectors.CHAT_MESSAGE) &&
             !node.hasAttribute(ATTR_PROCESSED)
           ) {
-            hasNewMessages = true
             void processMessage(node)
           }
         }
       }
     }
-
-    // Re-process existing elements that may have been skipped due to rate limiting
-    if (!hasNewMessages) {
-      retryUnprocessed()
-    }
   })
 
   chatObserver.observe(container, config)
 
-  // Watch for container replacement (Twitch SPA navigation)
-  const bodyObserver = new MutationObserver(() => {
+  // SPA navigation: watch only the chat sidebar area, not the entire document.body
+  const chatSidebar = container.closest('[data-test-selector="chat-room-container"]') ?? container
+
+  bodyObserver = new MutationObserver(() => {
     if (!document.body.contains(container) || !document.querySelector(currentSelectors.CHAT_CONTAINER)) {
-      bodyObserver.disconnect()
+      cleanup()
       observeChat()
     }
   })
 
-  bodyObserver.observe(document.body, { childList: true, subtree: true })
+  bodyObserver.observe(chatSidebar, { childList: true, subtree: true })
 
   // Process any existing messages on load
-  retryUnprocessed()
+  void retryUnprocessed()
 }
 
-const getContentSettings = async (): Promise<ContentSettings> => {
-  const global = await getUserSettings()
-  const channelName = parseChannelFromPathname(window.location.pathname)
-
-  if (!channelName) {
-    return {
-      botNameBlacklist: global.botNameBlacklist,
-      minTextLength: global.minTextLength,
-      displayMode: global.displayMode,
-      translationEnabled: global.translationEnabled,
-    }
-  }
-
-  const channel = await getChannelSettings(channelName)
-  const merged = channel ? mergeSettings(global, channel) : global
-
-  return {
-    botNameBlacklist: merged.botNameBlacklist,
-    minTextLength: merged.minTextLength,
-    displayMode: merged.displayMode,
-    translationEnabled: merged.translationEnabled,
-  }
-}
+// --- Processing ---
 
 const inFlight = new WeakSet<HTMLElement>()
 
@@ -116,7 +145,8 @@ const processMessage = async (element: HTMLElement): Promise<void> => {
     const settings = await getContentSettings()
     await handler.translateAndInject(element, settings)
   } catch {
-    // Silently ignore — element can be retried on next mutation
+    // Mark as processed to prevent infinite retry on persistent DOM errors
+    element.setAttribute(ATTR_PROCESSED, 'true')
   } finally {
     inFlight.delete(element)
   }
@@ -136,6 +166,22 @@ const retryUnprocessed = (): void => {
   }
 }
 
+// --- Cleanup ---
+
+const cleanup = (): void => {
+  if (chatObserver) {
+    chatObserver.disconnect()
+    chatObserver = null
+  }
+  if (bodyObserver) {
+    bodyObserver.disconnect()
+    bodyObserver = null
+  }
+  stopRetryTimer()
+}
+
+// --- Exports (for testing) ---
+
 export const getSettings = async (): Promise<Record<string, unknown>> => {
   const items = await chrome.storage.local.get('userSettings')
 
@@ -143,10 +189,10 @@ export const getSettings = async (): Promise<Record<string, unknown>> => {
 }
 
 export const handleSettingsUpdate = async (payload: SettingsUpdatePayload): Promise<void> => {
-  const current = await getSettings()
-
-  await chrome.storage.local.set({ userSettings: { ...current, ...payload } })
+  invalidateSettingsCache()
 }
+
+// --- Main ---
 
 const main = (): void => {
   console.info('tachi-lens content script loaded')
