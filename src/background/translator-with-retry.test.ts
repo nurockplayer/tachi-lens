@@ -1,7 +1,4 @@
-// Translator with Retry Tests
-// Tests for automatic retry on rate limit errors.
-
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { TranslationCache } from './cache'
 import { RateLimiter } from './rate-limiter'
 import { TranslatorWithRetry } from './translator-with-retry'
@@ -23,7 +20,7 @@ const mockProvider = {
   validateKey: vi.fn(),
 }
 
-const createTranslator = () =>
+const createTranslator = (opts?: { maxRetries?: number }) =>
   new TranslatorWithRetry(
     {
       cache: new TranslationCache(),
@@ -31,118 +28,65 @@ const createTranslator = () =>
       getSettings: async () => mockSettings,
       getApiKey: async () => mockApiKey,
       getProvider: () => mockProvider,
-      maxRetries: 3,
+      maxRetries: opts?.maxRetries ?? 3,
     },
-    { debounceMs: 0, maxBatchSize: 1 }, // Force single request per batch
+    { debounceMs: 0, maxBatchSize: 1 },
   )
 
 describe('TranslatorWithRetry', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.resetAllMocks()
-  })
+  beforeEach(() => vi.resetAllMocks())
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('succeeds on first attempt when no error', async () => {
-    mockProvider.translateBatch.mockResolvedValue([
-      { id: 'msg1', translatedText: '翻譯結果' },
-    ])
-
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
-    expect(result).toEqual({ messageId: 'msg1', translatedText: '翻譯結果' })
+  it('returns success on first attempt', async () => {
+    mockProvider.translateBatch.mockResolvedValue([{ id: 'msg1', translatedText: 'OK' }])
+    expect(await createTranslator().translate({ messageId: 'msg1', text: 'Hi' }))
+      .toEqual({ messageId: 'msg1', translatedText: 'OK' })
     expect(mockProvider.translateBatch).toHaveBeenCalledTimes(1)
   })
 
-  it('retries on rate limit error and succeeds on second attempt', async () => {
+  it('retries on rate limit then succeeds', async () => {
     mockProvider.translateBatch
-      .mockResolvedValueOnce([
-        { id: 'msg1', translatedText: undefined, error: 'Rate limited' },
-      ])
-      .mockResolvedValueOnce([
-        { id: 'msg1', translatedText: '翻譯結果' },
-      ])
+      .mockResolvedValueOnce([{ id: 'msg1', translatedText: undefined, error: 'Rate limited (429)' }])
+      .mockResolvedValueOnce([{ id: 'msg1', translatedText: 'OK' }])
 
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
-    expect(result).toEqual({ messageId: 'msg1', translatedText: '翻譯結果' })
+    expect(await createTranslator().translate({ messageId: 'msg1', text: 'Hi' }))
+      .toEqual({ messageId: 'msg1', translatedText: 'OK' })
     expect(mockProvider.translateBatch).toHaveBeenCalledTimes(2)
   })
 
-  it('gives up after max retries and returns last error', async () => {
-    mockProvider.translateBatch.mockResolvedValue([
-      { id: 'msg1', translatedText: undefined, error: 'Rate limited' },
-    ])
+  it('gives up after max retries', async () => {
+    mockProvider.translateBatch.mockResolvedValue([{ id: 'msg1', translatedText: undefined, error: 'Rate limited (429)' }])
 
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
+    const result = await createTranslator({ maxRetries: 2 }).translate({ messageId: 'msg1', text: 'Hi' })
     expect(result).toEqual({
       messageId: 'msg1',
-      error: { type: 'rate_limited', message: 'Rate limited', retryAfterMs: 1_000 },
+      error: { type: 'rate_limited', message: 'Rate limited (429)', retryAfterMs: 1_000 },
     })
-    expect(mockProvider.translateBatch).toHaveBeenCalledTimes(4) // 1 initial + 3 retries
+    expect(mockProvider.translateBatch).toHaveBeenCalledTimes(3)
   })
 
-  it('does not retry on non-rate-limit errors', async () => {
-    mockProvider.translateBatch.mockResolvedValue([
-      { id: 'msg1', translatedText: undefined, error: 'Invalid API key' },
-    ])
+  it('does not retry non-rate-limit errors', async () => {
+    mockProvider.translateBatch.mockResolvedValue([{ id: 'msg1', translatedText: undefined, error: 'Invalid API key' }])
 
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
-    expect(result).toEqual({
-      messageId: 'msg1',
-      error: { type: 'unknown', message: 'Invalid API key' },
-    })
+    expect(await createTranslator().translate({ messageId: 'msg1', text: 'Hi' }))
+      .toEqual({ messageId: 'msg1', error: { type: 'unknown', message: 'Invalid API key' } })
     expect(mockProvider.translateBatch).toHaveBeenCalledTimes(1)
   })
 
-  it('respects retry-after delay from provider', async () => {
-    mockProvider.translateBatch
-      .mockResolvedValueOnce([
-        { id: 'msg1', translatedText: undefined, error: 'Rate limited' },
-      ])
-      .mockResolvedValueOnce([
-        { id: 'msg1', translatedText: '翻譯結果' },
-      ])
-
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
-    expect(result).toEqual({ messageId: 'msg1', translatedText: '翻譯結果' })
-  })
-
-  it('handles network errors during retry', async () => {
+  it('retries on network error then succeeds', async () => {
     mockProvider.translateBatch
       .mockRejectedValueOnce(new Error('Network error'))
-      .mockResolvedValueOnce([
-        { id: 'msg1', translatedText: '翻譯結果' },
-      ])
+      .mockResolvedValueOnce([{ id: 'msg1', translatedText: 'OK' }])
 
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
-    expect(result).toEqual({ messageId: 'msg1', translatedText: '翻譯結果' })
+    expect(await createTranslator().translate({ messageId: 'msg1', text: 'Hi' }))
+      .toEqual({ messageId: 'msg1', translatedText: 'OK' })
     expect(mockProvider.translateBatch).toHaveBeenCalledTimes(2)
   })
 
-  it('returns unknown error after max retries on network errors', async () => {
+  it('returns network error after max retries', async () => {
     mockProvider.translateBatch.mockRejectedValue(new Error('Network error'))
 
-    const translator = createTranslator()
-    const result = await translator.translate({ messageId: 'msg1', text: 'Hello' })
-
-    expect(result).toEqual({
-      messageId: 'msg1',
-      error: { type: 'unknown', message: 'Network error' },
-    })
-    expect(mockProvider.translateBatch).toHaveBeenCalledTimes(4) // 1 initial + 3 retries
+    const result = await createTranslator({ maxRetries: 2 }).translate({ messageId: 'msg1', text: 'Hi' })
+    expect(result).toEqual({ messageId: 'msg1', error: { type: 'network', message: 'Network error' } })
+    expect(mockProvider.translateBatch).toHaveBeenCalledTimes(3)
   })
 })

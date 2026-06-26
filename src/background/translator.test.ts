@@ -222,7 +222,7 @@ describe('Translator', () => {
 
       expect(result.messageId).toBe('msg1')
       expect(result.error).toBeDefined()
-      expect(result.error!.type).toBe('unknown')
+      expect(result.error!.type).toBe('network')
     })
 
     it('resolves with error when provider is not registered', async () => {
