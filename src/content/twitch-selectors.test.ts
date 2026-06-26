@@ -82,6 +82,10 @@ describe('detectPageType', () => {
   it('recognizes twitch.tv without subdomain as channel', () => {
     expect(detectPageType('https://twitch.tv/forsen')).toBe('channel')
   })
+  it('detects clip page', () => {
+    expect(detectPageType('https://www.twitch.tv/clip/SomeClip123')).toBe('clip')
+    expect(detectPageType('https://clips.twitch.tv/SomeClip123')).toBe('clip')
+  })
   it('returns unknown for invalid URL', () => {
     expect(detectPageType('not-a-url')).toBe('unknown')
   })
