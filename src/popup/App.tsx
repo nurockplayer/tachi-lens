@@ -10,7 +10,7 @@ import {
 } from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
-import type { ErrorNotification } from '@/shared/messages'
+import type { ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
 
 export const extractChannelFromUrl = (url: string): string | undefined => {
   try {
@@ -177,6 +177,16 @@ export function App() {
     setSettings(updatedSettings)
     setSaveMessage(t('settingsSaved'))
     setTimeout(() => setSaveMessage(null), 2000)
+
+    // Notify content script of settings change via SW broadcast
+    const payload: SettingsUpdatePayload = {
+      translationEnabled: updatedSettings.translationEnabled,
+      displayMode: updatedSettings.displayMode,
+    }
+    await chrome.runtime.sendMessage({
+      type: 'settings_updated',
+      payload,
+    })
   }, [settings, blacklistInput, useChannelSettings, channelName])
 
   const handleValidateKey = useCallback(
