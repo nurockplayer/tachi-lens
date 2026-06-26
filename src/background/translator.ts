@@ -143,7 +143,7 @@ export class Translator {
       this.deps.rateLimiter.recordError(settings.selectedProvider, 30_000)
 
       const error: ProviderError = {
-        type: 'unknown',
+        type: 'network',
         message: err instanceof Error ? err.message : 'Unknown error',
       }
 
@@ -196,9 +196,23 @@ export class Translator {
       return { messageId, translatedText: batchResult.translatedText }
     }
 
+    const errorMsg = batchResult.error ?? 'Unknown error'
+
+    // Detect rate limit patterns in error string
+    if (/rate\s*limit|429|too many requests/i.test(errorMsg)) {
+      return {
+        messageId,
+        error: {
+          type: 'rate_limited',
+          retryAfterMs: (batchResult as { retryAfterMs?: number }).retryAfterMs ?? 1_000,
+          message: errorMsg,
+        },
+      }
+    }
+
     return {
       messageId,
-      error: { type: 'unknown', message: batchResult.error ?? 'Unknown error' },
+      error: { type: 'unknown', message: errorMsg },
     }
   }
 }
