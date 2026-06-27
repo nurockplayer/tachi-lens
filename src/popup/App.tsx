@@ -69,11 +69,14 @@ export function App() {
   useEffect(() => {
     let cancelled = false
 
-    loadSettings().then((s) => {
+    const load = async (): Promise<void> => {
+      const s = await loadSettings()
       if (cancelled) return
       setSettings(s)
       setBlacklistInput(s.botNameBlacklist.join(', '))
-    })
+    }
+    load()
+
     // Load API key previews for all providers
     for (const p of providers) {
       loadApiKeyPreview(p.id).then((preview) => {
@@ -182,6 +185,9 @@ export function App() {
     const payload: SettingsUpdatePayload = {
       translationEnabled: updatedSettings.translationEnabled,
       displayMode: updatedSettings.displayMode,
+      targetLanguage: updatedSettings.targetLanguage,
+      minTextLength: updatedSettings.minTextLength,
+      botNameBlacklist: updatedSettings.botNameBlacklist,
     }
     await chrome.runtime.sendMessage({
       type: 'settings_updated',
