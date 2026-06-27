@@ -1,4 +1,4 @@
-import type { MessageType, TranslationResult } from '@/shared/messages'
+import type { ErrorNotification, MessageType, TranslationResult } from '@/shared/messages'
 import {
   ATTR_PROCESSED,
   ATTR_TRANSLATED,
@@ -194,5 +194,26 @@ export class TwitchMessageHandler {
     errorEl.style.cssText = `margin-left: 0.25rem; cursor: help; font-size: 0.85em; opacity: 0.6; color: ${errorColor};`
 
     element.appendChild(errorEl)
+
+    // Also send error notification to Popup
+    this.sendErrorNotification(error)
+  }
+
+  private sendErrorNotification(error?: { type: string; message: string }): void {
+    const notification: ErrorNotification = {
+      id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: error?.type ?? 'unknown',
+      message: error?.message ?? 'Unknown error',
+      timestamp: Date.now(),
+    }
+
+    try {
+      void chrome.runtime.sendMessage({
+        type: 'error_notification',
+        payload: notification,
+      } as const)
+    } catch {
+      // SW may not be available — silently ignore
+    }
   }
 }
