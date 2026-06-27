@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/storage/settings', () => ({
   getUserSettings: vi.fn(async () => ({
@@ -29,10 +29,9 @@ describe('content script entry', () => {
       })
 
       const { handleSettingsUpdate, getSettings } = await import('./twitch-entry')
-      const setSpy = vi.mocked(chrome.storage.local.set)
 
       // getSettings reads raw storage
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      chrome.storage.local.get = vi.fn().mockResolvedValue({
         userSettings: { translationEnabled: true },
       })
 
@@ -41,7 +40,7 @@ describe('content script entry', () => {
 
       // handleSettingsUpdate should NOT write to storage
       await handleSettingsUpdate({ translationEnabled: false })
-      expect(setSpy).not.toHaveBeenCalled()
+      expect(vi.mocked(chrome.storage.local.set)).not.toHaveBeenCalled()
 
       vi.unstubAllGlobals()
     })

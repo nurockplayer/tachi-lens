@@ -13,7 +13,6 @@ let handler = new TwitchMessageHandler()
 let currentSelectors: PageSelectors = getSelectorsForPage('channel')
 
 let chatObserver: MutationObserver | null = null
-let bodyObserver: MutationObserver | null = null
 
 // --- SPA navigation via popstate ---
 const onLocationChange = (): void => {
@@ -202,7 +201,7 @@ export const getSettings = async (): Promise<Record<string, unknown>> => {
   return (items.userSettings as Record<string, unknown>) ?? {}
 }
 
-export const handleSettingsUpdate = async (payload: SettingsUpdatePayload): Promise<void> => {
+export const handleSettingsUpdate = async (_payload: SettingsUpdatePayload): Promise<void> => {
   invalidateSettingsCache()
 }
 

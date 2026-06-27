@@ -30,7 +30,6 @@ const createTranslator = (opts?: { maxRetries?: number }) =>
       getProvider: () => mockProvider,
       maxRetries: opts?.maxRetries ?? 3,
     },
-    { debounceMs: 0, maxBatchSize: 1 },
   )
 
 describe('TranslatorWithRetry', () => {

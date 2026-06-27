@@ -24,7 +24,7 @@ export interface BatchItemResult {
 export interface TranslationProvider {
   readonly id: ProviderId
   readonly displayName: string
-  readonly models: ProviderModel[]
+  readonly models: readonly ProviderModel[]
   readonly defaultModel: string
 
   /** Translate a batch of messages. Each item may succeed or fail independently. */

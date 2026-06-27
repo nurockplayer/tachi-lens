@@ -1,8 +1,8 @@
 // Claude Provider Adapter Tests
 // Tests for translateBatch() and validateKey() with success/failure cases.
 
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClaudeProvider } from './claude'
-import type { BatchItemResult, KeyValidationResult } from '../types'
 
 const MOCK_API_KEY = 'mock-claude-key'
 const MOCK_MODEL = 'claude-3-5-sonnet-20240620'
@@ -96,7 +96,7 @@ describe('Claude Provider', () => {
         json: () => Promise.resolve(mockResponse),
       })
 
-      const result: KeyValidationResult = await provider.validateKey(MOCK_API_KEY)
+      const result = await provider.validateKey(MOCK_API_KEY)
       expect(result).toEqual({ valid: true })
     })
 
@@ -107,7 +107,7 @@ describe('Claude Provider', () => {
         json: () => Promise.resolve({ error: { message: 'Invalid API key' } }),
       })
 
-      const result: KeyValidationResult = await provider.validateKey('invalid-key')
+      const result = await provider.validateKey('invalid-key')
       expect(result).toEqual({ valid: false, error: 'Invalid API key' })
     })
   })

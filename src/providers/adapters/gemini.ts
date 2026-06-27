@@ -2,7 +2,7 @@
 // Implements TranslationProvider for Google's Gemini API.
 
 import { buildTranslationPrompt, parseTranslationResponse } from '../prompt'
-import type { BatchItemResult, KeyValidationResult, TranslationProvider } from '../types'
+import type { TranslationProvider } from '../types'
 
 const GEMINI_MODELS = [
   { id: 'gemini-1.5-flash', displayName: 'Gemini 1.5 Flash', maxTokens: 1_048_576 },
@@ -72,8 +72,6 @@ export const createGeminiProvider = (fetchFn: typeof globalThis.fetch = globalTh
         if (response.status === 401) {
           return { id: request.id, error: errorMessage }
         } else if (response.status === 429) {
-          const retryAfter = response.headers.get('retry-after')
-          const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 0
           return { id: request.id, error: `Rate limited: ${errorMessage}` }
         } else {
           return { id: request.id, error: errorMessage }

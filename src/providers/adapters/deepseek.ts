@@ -2,7 +2,7 @@
 // Implements TranslationProvider for DeepSeek API.
 
 import { buildTranslationPrompt, parseTranslationResponse } from '../prompt'
-import type { BatchItemResult, KeyValidationResult, TranslationProvider } from '../types'
+import type { TranslationProvider } from '../types'
 
 const DEEPSEEK_MODELS = [
   { id: 'deepseek-chat', displayName: 'DeepSeek Chat', maxTokens: 32_768 },
@@ -72,8 +72,6 @@ export const createDeepSeekProvider = (fetchFn: typeof globalThis.fetch = global
         if (response.status === 401) {
           return { id: request.id, error: errorMessage }
         } else if (response.status === 429) {
-          const retryAfter = response.headers.get('retry-after')
-          const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 0
           return { id: request.id, error: `Rate limited: ${errorMessage}` }
         } else {
           return { id: request.id, error: errorMessage }

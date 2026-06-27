@@ -25,7 +25,6 @@ export class TranslatorWithRetry {
 
   constructor(
     deps: TranslatorWithRetryDependencies,
-    private options: { debounceMs: number; maxBatchSize: number },
   ) {
     this.deps = deps
     this.maxRetries = deps.maxRetries ?? 3

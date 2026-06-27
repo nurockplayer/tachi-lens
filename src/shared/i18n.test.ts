@@ -75,14 +75,14 @@ describe('i18n', () => {
     })
 
     it('en locale has non-empty messages', () => {
-      for (const [key, val] of Object.entries(en)) {
+      for (const [_key, val] of Object.entries(en)) {
         expect(val.message).toBeTypeOf('string')
         expect(val.message.length).toBeGreaterThan(0)
       }
     })
 
     it('zh_TW locale has non-empty messages', () => {
-      for (const [key, val] of Object.entries(zh_TW)) {
+      for (const [_key, val] of Object.entries(zh_TW)) {
         expect(val.message).toBeTypeOf('string')
         expect(val.message.length).toBeGreaterThan(0)
       }

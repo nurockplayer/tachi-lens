@@ -2,7 +2,7 @@
 // Implements TranslationProvider for OpenAI API.
 
 import { buildTranslationPrompt, parseTranslationResponse } from '../prompt'
-import type { BatchItemResult, KeyValidationResult, TranslationProvider } from '../types'
+import type { TranslationProvider } from '../types'
 
 const OPENAI_MODELS = [
   { id: 'gpt-4o-mini', displayName: 'GPT-4o Mini', maxTokens: 128_000 },
@@ -73,8 +73,6 @@ export const createOpenAIProvider = (fetchFn: typeof globalThis.fetch = globalTh
         if (response.status === 401) {
           return { id: request.id, error: errorMessage }
         } else if (response.status === 429) {
-          const retryAfter = response.headers.get('retry-after')
-          const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 0
           return { id: request.id, error: `Rate limited: ${errorMessage}` }
         } else {
           return { id: request.id, error: errorMessage }

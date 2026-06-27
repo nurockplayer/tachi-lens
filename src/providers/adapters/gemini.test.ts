@@ -1,8 +1,8 @@
 // Gemini Provider Adapter Tests
 // Tests for translateBatch() and validateKey() with success/failure cases.
 
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createGeminiProvider } from './gemini'
-import type { BatchItemResult, KeyValidationResult } from '../types'
 
 const MOCK_API_KEY = 'mock-gemini-key'
 const MOCK_MODEL = 'gemini-1.5-flash'
@@ -101,7 +101,7 @@ describe('Gemini Provider', () => {
         json: () => Promise.resolve(mockResponse),
       })
 
-      const result: KeyValidationResult = await provider.validateKey(MOCK_API_KEY)
+      const result = await provider.validateKey(MOCK_API_KEY)
       expect(result).toEqual({ valid: true })
     })
 
@@ -112,7 +112,7 @@ describe('Gemini Provider', () => {
         json: () => Promise.resolve({ error: { message: 'API key invalid' } }),
       })
 
-      const result: KeyValidationResult = await provider.validateKey('invalid-key')
+      const result = await provider.validateKey('invalid-key')
       expect(result).toEqual({ valid: false, error: 'API key invalid' })
     })
   })

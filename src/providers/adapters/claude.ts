@@ -2,7 +2,7 @@
 // Implements TranslationProvider for Anthropic's Claude API.
 
 import { buildTranslationPrompt, parseTranslationResponse } from '../prompt'
-import type { BatchItemResult, KeyValidationResult, TranslationProvider } from '../types'
+import type { TranslationProvider } from '../types'
 
 const CLAUDE_MODELS = [
   { id: 'claude-3-5-sonnet-20240620', displayName: 'Claude 3.5 Sonnet', maxTokens: 200_000 },
@@ -73,8 +73,6 @@ export const createClaudeProvider = (fetchFn: typeof globalThis.fetch = globalTh
         if (response.status === 401) {
           return { id: request.id, error: errorMessage }
         } else if (response.status === 429) {
-          const retryAfter = response.headers.get('retry-after')
-          const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 0
           return { id: request.id, error: `Rate limited: ${errorMessage}` }
         } else {
           return { id: request.id, error: errorMessage }
