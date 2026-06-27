@@ -15,6 +15,32 @@ let currentSelectors: PageSelectors = getSelectorsForPage('channel')
 let chatObserver: MutationObserver | null = null
 let bodyObserver: MutationObserver | null = null
 
+// --- SPA navigation via popstate ---
+const onLocationChange = (): void => {
+  cleanup()
+  observeChat()
+}
+
+let popstateAttached = false
+
+const attachPopstateListener = (): void => {
+  if (popstateAttached) return
+  window.addEventListener('popstate', onLocationChange)
+  // Monkey-patch pushState/replaceState to detect SPA navigation
+  const origPushState = history.pushState.bind(history)
+  const origReplaceState = history.replaceState.bind(history)
+
+  history.pushState = (...args) => {
+    origPushState(...args)
+    onLocationChange()
+  }
+  history.replaceState = (...args) => {
+    origReplaceState(...args)
+    onLocationChange()
+  }
+  popstateAttached = true
+}
+
 // --- Settings cache ---
 let cachedSettings: ContentSettings | null = null
 
@@ -116,17 +142,8 @@ const observeChat = (): void => {
 
   chatObserver.observe(container, config)
 
-  // SPA navigation: watch only the chat sidebar area, not the entire document.body
-  const chatSidebar = container.closest('[data-test-selector="chat-room-container"]') ?? container
-
-  bodyObserver = new MutationObserver(() => {
-    if (!document.body.contains(container) || !document.querySelector(currentSelectors.CHAT_CONTAINER)) {
-      cleanup()
-      observeChat()
-    }
-  })
-
-  bodyObserver.observe(chatSidebar, { childList: true, subtree: true })
+  // SPA navigation detection via history API
+  attachPopstateListener()
 
   // Process any existing messages on load
   void retryUnprocessed()
@@ -173,11 +190,8 @@ const cleanup = (): void => {
     chatObserver.disconnect()
     chatObserver = null
   }
-  if (bodyObserver) {
-    bodyObserver.disconnect()
-    bodyObserver = null
-  }
   stopRetryTimer()
+  invalidateSettingsCache()
 }
 
 // --- Exports (for testing) ---

@@ -12,7 +12,7 @@ export const ATTR_PROCESSED = 'data-tachi-lens-processed'
 export const ATTR_TRANSLATED = 'data-tachi-lens-translated'
 
 // Page types supported by the content script
-export type PageType = 'channel' | 'popout' | 'vod' | 'unknown'
+export type PageType = 'channel' | 'popout' | 'vod' | 'clip' | 'unknown'
 
 /** Selectors for a specific Twitch page type. */
 export interface PageSelectors {
@@ -40,6 +40,7 @@ const SELECTOR_MAP: Record<PageType, PageSelectors> = {
   channel: CHANNEL_SELECTORS,
   popout: POPOUT_SELECTORS,
   vod: CHANNEL_SELECTORS,
+  clip: CHANNEL_SELECTORS,
   unknown: CHANNEL_SELECTORS,
 }
 
@@ -48,14 +49,18 @@ export const detectPageType = (url: string): PageType => {
   try {
     const { hostname, pathname } = new URL(url)
 
-    // Only handle twitch.tv domains
+    // Only handle twitch.tv domains (including clips.twitch.tv)
     if (!hostname.endsWith('.twitch.tv') && hostname !== 'twitch.tv') {
       return 'unknown'
     }
 
+    // clips have their own subdomain
+    if (hostname === 'clips.twitch.tv') return 'clip'
+
     if (pathname.startsWith('/popout/')) return 'popout'
     if (pathname.startsWith('/videos/')) return 'vod'
     if (pathname.startsWith('/directory/')) return 'channel'
+    if (pathname.startsWith('/clip/')) return 'clip'
 
     // Single segment pathname is a channel page
     const segments = pathname.replace(/^\/+|\/+$/g, '').split('/')
