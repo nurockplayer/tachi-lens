@@ -19,10 +19,13 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'settings_updated',
 ]
 
-/** Payload for settings_updated: partial settings sent from SW to content scripts. */
+/** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
 export type SettingsUpdatePayload = Partial<{
   translationEnabled: boolean
   displayMode: 'below' | 'hover' | 'collapse'
+  targetLanguage: string
+  minTextLength: number
+  botNameBlacklist: string[]
 }>
 
 export interface TranslationRequest {
