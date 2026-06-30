@@ -8,6 +8,12 @@ export type MessageType =
   | 'provider_status'
   | 'error_notification'
   | 'settings_updated'
+  | 'save_api_key'
+  | 'save_api_key_result'
+  | 'delete_api_key'
+  | 'delete_api_key_result'
+  | 'get_api_key_preview'
+  | 'api_key_preview'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -17,6 +23,12 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'provider_status',
   'error_notification',
   'settings_updated',
+  'save_api_key',
+  'save_api_key_result',
+  'delete_api_key',
+  'delete_api_key_result',
+  'get_api_key_preview',
+  'api_key_preview',
 ]
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */

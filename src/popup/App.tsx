@@ -4,7 +4,6 @@ import type { ProviderId } from '@/providers/types'
 import {
   DEFAULT_SETTINGS,
   getChannelSettings,
-  maskApiKey,
   mergeSettings,
   saveChannelSettings,
 } from '@/storage/settings'
@@ -39,10 +38,16 @@ const loadSettings = async (): Promise<UserSettings> => {
 }
 
 const loadApiKeyPreview = async (providerId: string): Promise<string> => {
-  const items = await chrome.storage.local.get('providerApiKeyPreviews')
-  const previews = items.providerApiKeyPreviews as Record<string, string> | undefined
+  try {
+    const response = (await chrome.runtime.sendMessage({
+      type: 'get_api_key_preview',
+      payload: { providerId },
+    })) as { type: string; payload: { preview?: string } }
 
-  return previews?.[providerId] ?? ''
+    return response.payload?.preview ?? ''
+  } catch {
+    return ''
+  }
 }
 
 interface ErrorNotificationItem {
@@ -232,28 +237,18 @@ export function App() {
       // Skip auto-save for masked preview values (contain "***")
       if (trimmed.includes('***')) return
 
+      // Save or delete via SW message — Popup never reads/writes full keys directly
       if (!trimmed) {
-        // Delete key when input is cleared
-        const oldKeys = await chrome.storage.local.get('providerApiKeys')
-        const keys = { ...(oldKeys.providerApiKeys as Record<string, string> | undefined) }
-        const oldPreviews = await chrome.storage.local.get('providerApiKeyPreviews')
-        const previews = { ...(oldPreviews.providerApiKeyPreviews as Record<string, string> | undefined) }
-
-        delete keys[providerId]
-        delete previews[providerId]
-        await chrome.storage.local.set({ providerApiKeys: keys, providerApiKeyPreviews: previews })
+        await chrome.runtime.sendMessage({
+          type: 'delete_api_key',
+          payload: { providerId },
+        })
         return
       }
 
-      // Auto-save real API key on change
-      const items = await chrome.storage.local.get('providerApiKeys')
-      const keys = items.providerApiKeys as Record<string, string> | undefined
-      const previewItems = await chrome.storage.local.get('providerApiKeyPreviews')
-      const previews = previewItems.providerApiKeyPreviews as Record<string, string> | undefined
-
-      await chrome.storage.local.set({
-        providerApiKeys: { ...keys, [providerId]: trimmed },
-        providerApiKeyPreviews: { ...previews, [providerId]: maskApiKey(trimmed) },
+      await chrome.runtime.sendMessage({
+        type: 'save_api_key',
+        payload: { providerId, apiKey: trimmed },
       })
     },
     [],

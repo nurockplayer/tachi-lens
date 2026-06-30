@@ -1,6 +1,6 @@
 import { getProvider } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
-import { getApiKeyForServiceWorker, getRuntimeState, getUserSettings, initializeStorageAccess, saveUserSettings } from '@/storage/settings'
+import { getApiKeyForServiceWorker, getMaskedApiKeyForPopup, getRuntimeState, getUserSettings, initializeStorageAccess, saveApiKey, deleteApiKey, saveUserSettings } from '@/storage/settings'
 import { isBaseMessage } from '@/shared/messages'
 import type { SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
@@ -34,6 +34,9 @@ const router = createMessageRouter({
   getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
   getProvider: (providerId) => getProvider(providerId),
   getRuntimeState: () => getRuntimeState(),
+  saveApiKey: (providerId, apiKey) => saveApiKey(providerId, apiKey),
+  deleteApiKey: (providerId) => deleteApiKey(providerId),
+  getMaskedApiKeyForPopup: (providerId) => getMaskedApiKeyForPopup(providerId),
 })
 
 const handleMessage = (
