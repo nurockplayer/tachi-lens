@@ -33,5 +33,14 @@
   "errorNotificationTitle": { "message": "Error Notifications" },
   "dismiss": { "message": "Dismiss" },
   "shortcutToggleTranslation": { "message": "Toggle Translation (Ctrl+Shift+T)" },
-  "shortcutToggleDisplayMode": { "message": "Toggle Display Mode (Ctrl+Shift+M)" }
+  "shortcutToggleDisplayMode": { "message": "Toggle Display Mode (Ctrl+Shift+M)" },
+  "filterSection": { "message": "Message Filtering" },
+  "skipEmotesOnly": { "message": "Skip Emote-only Messages" },
+  "skipCheermotes": { "message": "Skip Cheermotes" },
+  "skipSlashMe": { "message": "Skip /me Actions" },
+  "skipWhispers": { "message": "Skip Whispers" },
+  "skipReplies": { "message": "Skip Replies" },
+  "skipLinksOnly": { "message": "Skip Links-only" },
+  "skipNumbersOnly": { "message": "Skip Numbers-only" },
+  "skipSystemMessages": { "message": "Skip System Messages" }
 }

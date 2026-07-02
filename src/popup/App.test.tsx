@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
 import { listProviderMetadata } from '@/providers/registry'
+import { FILTER_CONFIG_KEYS } from '@/content/message-filter'
+import type { FilterConfig } from '@/content/message-filter'
 import { App, extractChannelFromUrl } from './App'
 
 describe('extractChannelFromUrl', () => {
@@ -98,5 +100,54 @@ describe('Popup App', () => {
         expect.objectContaining({ value: 'claude' }),
       ]),
     )
+  })
+
+  describe('filter toggles', () => {
+    const filterDefaults: Record<keyof FilterConfig, boolean> = {
+      skipEmotesOnly: true,
+      skipCheermotes: true,
+      skipSlashMe: true,
+      skipWhispers: true,
+      skipReplies: true,
+      skipLinksOnly: true,
+      skipNumbersOnly: true,
+      skipSystemMessages: true,
+    }
+
+    it('all filter config keys are present in DEFAULT_SETTINGS', () => {
+      for (const key of FILTER_CONFIG_KEYS) {
+        expect(DEFAULT_SETTINGS).toHaveProperty(key)
+      }
+    })
+
+    it('DEFAULT_SETTINGS has correct filter key types (boolean)', () => {
+      for (const key of FILTER_CONFIG_KEYS) {
+        expect(typeof DEFAULT_SETTINGS[key]).toBe('boolean')
+      }
+    })
+
+    it('all filter toggles default to true (skip enabled)', () => {
+      for (const [key, expected] of Object.entries(filterDefaults)) {
+        expect(DEFAULT_SETTINGS[key as keyof FilterConfig]).toBe(expected)
+      }
+    })
+
+    it('FILTER_CONFIG_KEYS has all 8 entries', () => {
+      expect(FILTER_CONFIG_KEYS).toHaveLength(8)
+    })
+
+    it('filter config key types match FilterConfig interface', () => {
+      const keys: (keyof FilterConfig)[] = [
+        'skipEmotesOnly',
+        'skipCheermotes',
+        'skipSlashMe',
+        'skipWhispers',
+        'skipReplies',
+        'skipLinksOnly',
+        'skipNumbersOnly',
+        'skipSystemMessages',
+      ]
+      expect(keys).toHaveLength(8)
+    })
   })
 })

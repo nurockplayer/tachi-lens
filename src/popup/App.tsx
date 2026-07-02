@@ -10,6 +10,18 @@ import {
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
 import type { ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
+import type { FilterConfig } from '@/content/message-filter'
+
+const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
+  { key: 'skipEmotesOnly', labelKey: 'skipEmotesOnly' },
+  { key: 'skipCheermotes', labelKey: 'skipCheermotes' },
+  { key: 'skipSlashMe', labelKey: 'skipSlashMe' },
+  { key: 'skipWhispers', labelKey: 'skipWhispers' },
+  { key: 'skipReplies', labelKey: 'skipReplies' },
+  { key: 'skipLinksOnly', labelKey: 'skipLinksOnly' },
+  { key: 'skipNumbersOnly', labelKey: 'skipNumbersOnly' },
+  { key: 'skipSystemMessages', labelKey: 'skipSystemMessages' },
+]
 
 export const extractChannelFromUrl = (url: string): string | undefined => {
   try {
@@ -193,6 +205,14 @@ export function App() {
       targetLanguage: updatedSettings.targetLanguage,
       minTextLength: updatedSettings.minTextLength,
       botNameBlacklist: updatedSettings.botNameBlacklist,
+      skipEmotesOnly: updatedSettings.skipEmotesOnly,
+      skipCheermotes: updatedSettings.skipCheermotes,
+      skipSlashMe: updatedSettings.skipSlashMe,
+      skipWhispers: updatedSettings.skipWhispers,
+      skipReplies: updatedSettings.skipReplies,
+      skipLinksOnly: updatedSettings.skipLinksOnly,
+      skipNumbersOnly: updatedSettings.skipNumbersOnly,
+      skipSystemMessages: updatedSettings.skipSystemMessages,
     }
     await chrome.runtime.sendMessage({
       type: 'settings_updated',
@@ -467,6 +487,39 @@ export function App() {
           }
           style={{ width: '100%', padding: '0.3rem' }}
         />
+      </div>
+
+      {/* 訊息過濾 */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <div
+          style={{
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            marginBottom: '0.3rem',
+            color: '#444',
+          }}
+        >
+          {t('filterSection')}
+        </div>
+        {FILTER_TOGGLES.map(({ key, labelKey }) => (
+          <label
+            key={key}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              marginBottom: '0.15rem',
+              fontSize: '0.82rem',
+            }}
+          >
+            <input
+              type='checkbox'
+              checked={settings[key] as boolean}
+              onChange={(e) => updateSetting(key, e.target.checked)}
+            />
+            {t(labelKey)}
+          </label>
+        ))}
       </div>
 
       {/* Bot 黑名單 */}

@@ -33,5 +33,14 @@
   "errorNotificationTitle": { "message": "錯誤通知" },
   "dismiss": { "message": "關閉" },
   "shortcutToggleTranslation": { "message": "切換翻譯 (Ctrl+Shift+T)" },
-  "shortcutToggleDisplayMode": { "message": "切換顯示模式 (Ctrl+Shift+M)" }
+  "shortcutToggleDisplayMode": { "message": "切換顯示模式 (Ctrl+Shift+M)" },
+  "filterSection": { "message": "訊息過濾" },
+  "skipEmotesOnly": { "message": "略過純表情符號" },
+  "skipCheermotes": { "message": "略過 Cheermote" },
+  "skipSlashMe": { "message": "略過 /me 訊息" },
+  "skipWhispers": { "message": "略過悄悄話" },
+  "skipReplies": { "message": "略過回覆訊息" },
+  "skipLinksOnly": { "message": "略過純連結" },
+  "skipNumbersOnly": { "message": "略過純數字" },
+  "skipSystemMessages": { "message": "略過系統訊息" }
 }

@@ -42,6 +42,15 @@ export type MessageKey =
   | 'dismiss'
   | 'shortcutToggleTranslation'
   | 'shortcutToggleDisplayMode'
+  | 'filterSection'
+  | 'skipEmotesOnly'
+  | 'skipCheermotes'
+  | 'skipSlashMe'
+  | 'skipWhispers'
+  | 'skipReplies'
+  | 'skipLinksOnly'
+  | 'skipNumbersOnly'
+  | 'skipSystemMessages'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -79,6 +88,15 @@ export const MESSAGE_KEYS: readonly string[] = [
   'dismiss',
   'shortcutToggleTranslation',
   'shortcutToggleDisplayMode',
+  'filterSection',
+  'skipEmotesOnly',
+  'skipCheermotes',
+  'skipSlashMe',
+  'skipWhispers',
+  'skipReplies',
+  'skipLinksOnly',
+  'skipNumbersOnly',
+  'skipSystemMessages',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -117,6 +135,15 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   dismiss: '關閉',
   shortcutToggleTranslation: '切換翻譯 (Ctrl+Shift+T)',
   shortcutToggleDisplayMode: '切換顯示模式 (Ctrl+Shift+M)',
+  filterSection: '訊息過濾',
+  skipEmotesOnly: '略過純表情符號',
+  skipCheermotes: '略過 Cheermote',
+  skipSlashMe: '略過 /me 訊息',
+  skipWhispers: '略過悄悄話',
+  skipReplies: '略過回覆訊息',
+  skipLinksOnly: '略過純連結',
+  skipNumbersOnly: '略過純數字',
+  skipSystemMessages: '略過系統訊息',
 }
 
 /**
