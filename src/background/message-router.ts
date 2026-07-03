@@ -11,6 +11,9 @@ export interface RouterDependencies {
   getApiKey: (providerId: ProviderId) => Promise<string | undefined>
   getProvider: (providerId: ProviderId) => TranslationProvider | undefined
   getRuntimeState: () => Promise<RuntimeState | undefined>
+  saveApiKey?: (providerId: ProviderId, apiKey: string) => Promise<void>
+  deleteApiKey?: (providerId: ProviderId) => Promise<void>
+  getMaskedApiKeyForPopup?: (providerId: ProviderId) => Promise<string | undefined>
 }
 
 type SendResponse = (response: unknown) => void
@@ -49,6 +52,24 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
               payload: state ?? {},
             }),
           )
+
+        return true
+      }
+
+      if (message.type === 'save_api_key') {
+        handleSaveApiKey(message.payload, sendResponse, deps)
+
+        return true
+      }
+
+      if (message.type === 'delete_api_key') {
+        handleDeleteApiKey(message.payload, sendResponse, deps)
+
+        return true
+      }
+
+      if (message.type === 'get_api_key_preview') {
+        handleGetApiKeyPreview(message.payload, sendResponse, deps)
 
         return true
       }
@@ -99,4 +120,63 @@ const handleValidateKey = async (
   const result = await provider.validateKey(apiKey)
 
   sendResponse({ type: 'key_validation_result', payload: result })
+}
+
+const handleSaveApiKey = async (
+  payload: unknown,
+  sendResponse: SendResponse,
+  deps: RouterDependencies,
+): Promise<void> => {
+  const p = payload as Record<string, unknown> | undefined
+  const providerId = p?.providerId as string | undefined
+  const apiKey = p?.apiKey as string | undefined
+
+  if (!providerId) {
+    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Missing providerId' } })
+    return
+  }
+
+  if (!deps.saveApiKey) {
+    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'saveApiKey not available' } })
+    return
+  }
+
+  await deps.saveApiKey(providerId as ProviderId, apiKey ?? '')
+
+  const preview = await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
+
+  sendResponse({ type: 'save_api_key_result', payload: { success: true, preview } })
+}
+
+const handleDeleteApiKey = async (
+  payload: unknown,
+  sendResponse: SendResponse,
+  deps: RouterDependencies,
+): Promise<void> => {
+  const providerId = (payload as Record<string, unknown> | undefined)?.providerId as string | undefined
+
+  if (!providerId) {
+    sendResponse({ type: 'delete_api_key_result', payload: { success: false, error: 'Missing providerId' } })
+    return
+  }
+
+  await deps.deleteApiKey?.(providerId as ProviderId)
+  sendResponse({ type: 'delete_api_key_result', payload: { success: true } })
+}
+
+const handleGetApiKeyPreview = async (
+  payload: unknown,
+  sendResponse: SendResponse,
+  deps: RouterDependencies,
+): Promise<void> => {
+  const providerId = (payload as Record<string, unknown> | undefined)?.providerId as string | undefined
+
+  if (!providerId) {
+    sendResponse({ type: 'api_key_preview', payload: { preview: '' } })
+    return
+  }
+
+  const preview = await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
+
+  sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '' } })
 }

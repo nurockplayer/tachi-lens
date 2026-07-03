@@ -5,14 +5,19 @@ import {
   RUNTIME_STATE_STORAGE_KEY,
   DEFAULT_SETTINGS,
   deleteApiKey,
+  deleteChannelSettings,
   getApiKeyForServiceWorker,
+  getChannelSettings,
   getMaskedApiKeyForPopup,
+  getPerChannelSettings,
   getRuntimeState,
   getUserSettings,
   initializeStorageAccess,
   maskApiKey,
+  mergeSettings,
   rotateApiKey,
   saveApiKey,
+  saveChannelSettings,
   saveRuntimeState,
   saveUserSettings,
   type StorageAreaLike,
@@ -157,5 +162,145 @@ describe('settings storage', () => {
     })
     expect(storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({ [RUNTIME_STATE_STORAGE_KEY]: expect.anything() }))
     await expect(getRuntimeState(storage)).resolves.toEqual({ activeProvider: 'deepseek', validationInProgress: true })
+  })
+
+  describe('per-channel settings', () => {
+    it('returns empty per-channel settings when none have been saved', async () => {
+      const storage = createChromeStorage()
+
+      const perChannel = await getPerChannelSettings(storage)
+
+      expect(perChannel).toEqual({})
+    })
+
+    it('returns all per-channel settings', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = {
+        somerchannel: { targetLanguage: 'ja' },
+        otherchannel: { translationEnabled: false },
+      }
+
+      const perChannel = await getPerChannelSettings(storage)
+
+      expect(perChannel).toEqual({
+        somerchannel: { targetLanguage: 'ja' },
+        otherchannel: { translationEnabled: false },
+      })
+    })
+
+    it('returns settings for a specific channel', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = {
+        mychannel: { targetLanguage: 'ko', displayMode: 'hover' },
+      }
+
+      const channelSettings = await getChannelSettings('mychannel', storage)
+
+      expect(channelSettings).toEqual({ targetLanguage: 'ko', displayMode: 'hover' })
+    })
+
+    it('returns undefined for a channel with no saved settings', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = { other: { minTextLength: 5 } }
+
+      const channelSettings = await getChannelSettings('nonexistent', storage)
+
+      expect(channelSettings).toBeUndefined()
+    })
+
+    it('saves settings for a channel', async () => {
+      const storage = createChromeStorage()
+
+      await saveChannelSettings('testchannel', { targetLanguage: 'en' }, storage)
+
+      expect(storage.local.data.perChannelSettings).toEqual({
+        testchannel: { targetLanguage: 'en' },
+      })
+    })
+
+    it('merges new channel settings with existing per-channel entries', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = {
+        existing: { minTextLength: 10 },
+      }
+
+      await saveChannelSettings('testchannel', { targetLanguage: 'th' }, storage)
+
+      expect(storage.local.data.perChannelSettings).toEqual({
+        existing: { minTextLength: 10 },
+        testchannel: { targetLanguage: 'th' },
+      })
+    })
+
+    it('overwrites existing settings for the same channel', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = {
+        mychannel: { targetLanguage: 'ja' },
+      }
+
+      await saveChannelSettings('mychannel', { targetLanguage: 'ko' }, storage)
+
+      expect(storage.local.data.perChannelSettings).toEqual({
+        mychannel: { targetLanguage: 'ko' },
+      })
+    })
+
+    it('deletes settings for a specific channel', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = {
+        keep: { minTextLength: 3 },
+        remove: { targetLanguage: 'vi' },
+      }
+
+      await deleteChannelSettings('remove', storage)
+
+      expect(storage.local.data.perChannelSettings).toEqual({
+        keep: { minTextLength: 3 },
+      })
+    })
+
+    it('does not error when deleting a non-existent channel', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.perChannelSettings = { existing: { minTextLength: 1 } }
+
+      await expect(deleteChannelSettings('nonexistent', storage)).resolves.toBeUndefined()
+
+      expect(storage.local.data.perChannelSettings).toEqual({ existing: { minTextLength: 1 } })
+    })
+
+    it('mergeSettings returns global settings when no channel settings given', () => {
+      const result = mergeSettings(DEFAULT_SETTINGS, undefined)
+
+      expect(result).toEqual(DEFAULT_SETTINGS)
+    })
+
+    it('mergeSettings applies channel settings on top of global settings', () => {
+      const global = { ...DEFAULT_SETTINGS, targetLanguage: 'zh-TW', minTextLength: 2 }
+
+      const result = mergeSettings(global, { targetLanguage: 'ja', minTextLength: 10 })
+
+      expect(result.targetLanguage).toBe('ja')
+      expect(result.minTextLength).toBe(10)
+      // Remaining fields come from global
+      expect(result.selectedProvider).toBe(DEFAULT_SETTINGS.selectedProvider)
+      expect(result.translationEnabled).toBe(true)
+    })
+
+    it('mergeSettings preserves global values when channel settings are empty', () => {
+      const global = { ...DEFAULT_SETTINGS, targetLanguage: 'zh-TW' }
+
+      const result = mergeSettings(global, {})
+
+      expect(result).toEqual(global)
+    })
+
+    it('mergeSettings applies partial channel settings over global', () => {
+      const global = { ...DEFAULT_SETTINGS, targetLanguage: 'zh-TW', displayMode: 'below' as const }
+
+      const result = mergeSettings(global, { targetLanguage: 'en' })
+
+      expect(result.targetLanguage).toBe('en')
+      expect(result.displayMode).toBe('below') // from global
+    })
   })
 })

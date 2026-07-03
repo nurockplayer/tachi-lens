@@ -1,9 +1,42 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
-import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
+import {
+  DEFAULT_SETTINGS,
+  getChannelSettings,
+  mergeSettings,
+  saveChannelSettings,
+} from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
+import type { ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
+import type { FilterConfig } from '@/content/message-filter'
+
+const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
+  { key: 'skipEmotesOnly', labelKey: 'skipEmotesOnly' },
+  { key: 'skipCheermotes', labelKey: 'skipCheermotes' },
+  { key: 'skipSlashMe', labelKey: 'skipSlashMe' },
+  { key: 'skipWhispers', labelKey: 'skipWhispers' },
+  { key: 'skipReplies', labelKey: 'skipReplies' },
+  { key: 'skipLinksOnly', labelKey: 'skipLinksOnly' },
+  { key: 'skipNumbersOnly', labelKey: 'skipNumbersOnly' },
+  { key: 'skipSystemMessages', labelKey: 'skipSystemMessages' },
+]
+
+export const extractChannelFromUrl = (url: string): string | undefined => {
+  try {
+    const { hostname, pathname } = new URL(url)
+
+    if (!hostname.endsWith('twitch.tv')) return undefined
+    if (hostname !== 'twitch.tv' && hostname !== 'www.twitch.tv') return undefined
+
+    const match = pathname.match(/^\/([^/]+)/)
+
+    return match?.[1]?.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
 
 type ValidationStatus = 'valid' | 'invalid' | 'checking' | null
 
@@ -17,10 +50,23 @@ const loadSettings = async (): Promise<UserSettings> => {
 }
 
 const loadApiKeyPreview = async (providerId: string): Promise<string> => {
-  const items = await chrome.storage.local.get('providerApiKeyPreviews')
-  const previews = items.providerApiKeyPreviews as Record<string, string> | undefined
+  try {
+    const response = (await chrome.runtime.sendMessage({
+      type: 'get_api_key_preview',
+      payload: { providerId },
+    })) as { type: string; payload: { preview?: string } }
 
-  return previews?.[providerId] ?? ''
+    return response.payload?.preview ?? ''
+  } catch {
+    return ''
+  }
+}
+
+interface ErrorNotificationItem {
+  id: string
+  type: string
+  message: string
+  timestamp: number
 }
 
 export function App() {
@@ -30,17 +76,24 @@ export function App() {
   const [validationStatus, setValidationStatus] = useState<Record<string, ValidationStatus>>({})
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [blacklistInput, setBlacklistInput] = useState('')
+  const [channelName, setChannelName] = useState<string | undefined>(undefined)
+  const [useChannelSettings, setUseChannelSettings] = useState(false)
+  const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
+  const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
 
   const providers = listProviderMetadata()
 
   useEffect(() => {
     let cancelled = false
 
-    loadSettings().then((s) => {
+    const load = async (): Promise<void> => {
+      const s = await loadSettings()
       if (cancelled) return
       setSettings(s)
       setBlacklistInput(s.botNameBlacklist.join(', '))
-    })
+    }
+    load()
+
     // Load API key previews for all providers
     for (const p of providers) {
       loadApiKeyPreview(p.id).then((preview) => {
@@ -49,9 +102,56 @@ export function App() {
       })
     }
 
+    // Detect current channel from active tab
+    chrome.tabs?.query({ active: true, currentWindow: true }).then((tabs) => {
+      if (cancelled) return
+      const tab = tabs[0]
+
+      if (!tab?.url) return
+
+      const name = extractChannelFromUrl(tab.url)
+
+      setChannelName(name)
+
+      if (name) {
+        // Check if there are per-channel settings for this channel
+        getChannelSettings(name).then((channel) => {
+          if (cancelled) return
+          if (channel && Object.keys(channel).length > 0) {
+            setUseChannelSettings(true)
+            setSettings((prev) =>
+              prev ? mergeSettings(prev, channel) : prev,
+            )
+          }
+        })
+      }
+    })
+
+    // Listen for error notifications
+    const handleErrorNotification = (message: unknown) => {
+      const msg = message as { type?: string; payload?: ErrorNotification } | undefined
+      if (msg?.type === 'error_notification' && msg.payload) {
+        const { id, type, message: errMsg, timestamp } = msg.payload
+        setErrorNotifications((prev) => [
+          { id, type, message: errMsg, timestamp },
+          ...prev.slice(0, 19), // keep max 20 notifications
+        ])
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(handleErrorNotification)
+    errorListenerRef.current = handleErrorNotification
+
     return () => {
       cancelled = true
+      if (errorListenerRef.current) {
+        chrome.runtime.onMessage.removeListener(errorListenerRef.current)
+      }
     }
+  }, [])
+
+  const dismissError = useCallback((id: string) => {
+    setErrorNotifications((prev) => prev.filter((n) => n.id !== id))
   }, [])
 
   const updateSetting = useCallback(
@@ -89,11 +189,36 @@ export function App() {
 
     const updatedSettings = { ...settings, botNameBlacklist: parsedBlacklist }
 
-    await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+    if (useChannelSettings && channelName) {
+      await saveChannelSettings(channelName, updatedSettings)
+    } else {
+      await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+    }
     setSettings(updatedSettings)
-    setSaveMessage('設定已儲存')
+    setSaveMessage(t('settingsSaved'))
     setTimeout(() => setSaveMessage(null), 2000)
-  }, [settings, blacklistInput])
+
+    // Notify content script of settings change via SW broadcast
+    const payload: SettingsUpdatePayload = {
+      translationEnabled: updatedSettings.translationEnabled,
+      displayMode: updatedSettings.displayMode,
+      targetLanguage: updatedSettings.targetLanguage,
+      minTextLength: updatedSettings.minTextLength,
+      botNameBlacklist: updatedSettings.botNameBlacklist,
+      skipEmotesOnly: updatedSettings.skipEmotesOnly,
+      skipCheermotes: updatedSettings.skipCheermotes,
+      skipSlashMe: updatedSettings.skipSlashMe,
+      skipWhispers: updatedSettings.skipWhispers,
+      skipReplies: updatedSettings.skipReplies,
+      skipLinksOnly: updatedSettings.skipLinksOnly,
+      skipNumbersOnly: updatedSettings.skipNumbersOnly,
+      skipSystemMessages: updatedSettings.skipSystemMessages,
+    }
+    await chrome.runtime.sendMessage({
+      type: 'settings_updated',
+      payload,
+    })
+  }, [settings, blacklistInput, useChannelSettings, channelName])
 
   const handleValidateKey = useCallback(
     async (providerId: string) => {
@@ -132,28 +257,18 @@ export function App() {
       // Skip auto-save for masked preview values (contain "***")
       if (trimmed.includes('***')) return
 
+      // Save or delete via SW message — Popup never reads/writes full keys directly
       if (!trimmed) {
-        // Delete key when input is cleared
-        const oldKeys = await chrome.storage.local.get('providerApiKeys')
-        const keys = { ...(oldKeys.providerApiKeys as Record<string, string> | undefined) }
-        const oldPreviews = await chrome.storage.local.get('providerApiKeyPreviews')
-        const previews = { ...(oldPreviews.providerApiKeyPreviews as Record<string, string> | undefined) }
-
-        delete keys[providerId]
-        delete previews[providerId]
-        await chrome.storage.local.set({ providerApiKeys: keys, providerApiKeyPreviews: previews })
+        await chrome.runtime.sendMessage({
+          type: 'delete_api_key',
+          payload: { providerId },
+        })
         return
       }
 
-      // Auto-save real API key on change
-      const items = await chrome.storage.local.get('providerApiKeys')
-      const keys = items.providerApiKeys as Record<string, string> | undefined
-      const previewItems = await chrome.storage.local.get('providerApiKeyPreviews')
-      const previews = previewItems.providerApiKeyPreviews as Record<string, string> | undefined
-
-      await chrome.storage.local.set({
-        providerApiKeys: { ...keys, [providerId]: trimmed },
-        providerApiKeyPreviews: { ...previews, [providerId]: maskApiKey(trimmed) },
+      await chrome.runtime.sendMessage({
+        type: 'save_api_key',
+        payload: { providerId, apiKey: trimmed },
       })
     },
     [],
@@ -164,7 +279,7 @@ export function App() {
   }, [])
 
   if (!settings) {
-    return <div style={{ padding: '1rem' }}>載入中...</div>
+    return <div style={{ padding: '1rem' }}>{t('loading')}</div>
   }
 
   const currentModels = getModelsForProvider(settings.selectedProvider)
@@ -173,8 +288,39 @@ export function App() {
     <div style={{ width: '320px', padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
       <h1 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem' }}>tachi-lens</h1>
       <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 1rem' }}>
-        Twitch 聊天室沉浸式翻譯
+        {t('appDescription')}
       </p>
+
+      {/* 頻道資訊 */}
+      {channelName && (
+        <div
+          style={{
+            marginBottom: '0.75rem',
+            padding: '0.4rem 0.5rem',
+            background: '#f0f0f0',
+            borderRadius: '4px',
+            fontSize: '0.85rem',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>頻道：</span>
+          <span>{channelName}</span>
+        </div>
+      )}
+
+      {/* 每頻道設定 */}
+      {channelName && (
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
+        >
+          <input
+            type='checkbox'
+            checked={useChannelSettings}
+            onChange={(e) => setUseChannelSettings(e.target.checked)}
+            aria-label='使用此頻道的專用設定'
+          />
+          <span style={{ fontSize: '0.9rem' }}>使用此頻道的專用設定</span>
+        </label>
+      )}
 
       {/* 翻譯啟用 */}
       <label
@@ -184,9 +330,9 @@ export function App() {
           type='checkbox'
           checked={settings.translationEnabled}
           onChange={(e) => updateSetting('translationEnabled', e.target.checked)}
-          aria-label='啟用翻譯'
+          aria-label={t('enableTranslation')}
         />
-        <span style={{ fontSize: '0.9rem' }}>啟用翻譯</span>
+        <span style={{ fontSize: '0.9rem' }}>{t('enableTranslation')}</span>
       </label>
 
       {/* 翻譯提供者 */}
@@ -195,11 +341,11 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='provider-select'
         >
-          翻譯提供者
+          {t('translationProvider')}
         </label>
         <select
           id='provider-select'
-          aria-label='翻譯提供者'
+          aria-label={t('translationProvider')}
           value={settings.selectedProvider}
           onChange={(e) => handleProviderChange(e.target.value)}
           style={{ width: '100%', padding: '0.3rem' }}
@@ -218,7 +364,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='model-select'
         >
-          模型
+          {t('model')}
         </label>
         <select
           id='model-select'
@@ -240,7 +386,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='api-key-input'
         >
-          API Key
+          {t('apiKey')}
         </label>
         <div style={{ display: 'flex', gap: '0.25rem' }}>
           <input
@@ -248,13 +394,13 @@ export function App() {
             type={visibleKeys[settings.selectedProvider] ? 'text' : 'password'}
             value={apiKeyInputs[settings.selectedProvider] ?? ''}
             onChange={(e) => handleApiKeyChange(settings.selectedProvider, e.target.value)}
-            placeholder='輸入 API Key'
+            placeholder={t('apiKeyPlaceholder')}
             style={{ flex: 1, padding: '0.3rem', fontFamily: 'monospace' }}
           />
           <button
             onClick={() => toggleKeyVisibility(settings.selectedProvider)}
             style={{ padding: '0.3rem 0.5rem' }}
-            title={visibleKeys[settings.selectedProvider] ? '隱藏' : '顯示'}
+            title={visibleKeys[settings.selectedProvider] ? t('hide') : t('show')}
           >
             {visibleKeys[settings.selectedProvider] ? '🙈' : '👁️'}
           </button>
@@ -265,13 +411,13 @@ export function App() {
             disabled={validationStatus[settings.selectedProvider] === 'checking'}
             style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
           >
-            {validationStatus[settings.selectedProvider] === 'checking' ? '驗證中...' : '驗證'}
+            {validationStatus[settings.selectedProvider] === 'checking' ? t('validating') : t('validate')}
           </button>
           {validationStatus[settings.selectedProvider] === 'valid' && (
-            <span style={{ color: 'green', fontSize: '0.8rem' }}>✓ 有效</span>
+            <span style={{ color: 'green', fontSize: '0.8rem' }}>{t('valid')}</span>
           )}
           {validationStatus[settings.selectedProvider] === 'invalid' && (
-            <span style={{ color: 'red', fontSize: '0.8rem' }}>✗ 無效</span>
+            <span style={{ color: 'red', fontSize: '0.8rem' }}>{t('invalid')}</span>
           )}
         </div>
       </div>
@@ -282,7 +428,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='language-select'
         >
-          目標語言
+          {t('targetLanguage')}
         </label>
         <select
           id='language-select'
@@ -306,7 +452,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='display-mode-select'
         >
-          顯示模式
+          {t('displayMode')}
         </label>
         <select
           id='display-mode-select'
@@ -316,9 +462,9 @@ export function App() {
           }
           style={{ width: '100%', padding: '0.3rem' }}
         >
-          <option value='below'>原文下方</option>
-          <option value='hover'>懸停顯示</option>
-          <option value='collapse'>收合</option>
+          <option value='below'>{t('displayBelow')}</option>
+          <option value='hover'>{t('displayHover')}</option>
+          <option value='collapse'>{t('displayCollapse')}</option>
         </select>
       </div>
 
@@ -328,7 +474,7 @@ export function App() {
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='min-length-input'
         >
-          最短翻譯字數
+          {t('minTextLength')}
         </label>
         <input
           id='min-length-input'
@@ -343,20 +489,53 @@ export function App() {
         />
       </div>
 
+      {/* 訊息過濾 */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <div
+          style={{
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            marginBottom: '0.3rem',
+            color: '#444',
+          }}
+        >
+          {t('filterSection')}
+        </div>
+        {FILTER_TOGGLES.map(({ key, labelKey }) => (
+          <label
+            key={key}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              marginBottom: '0.15rem',
+              fontSize: '0.82rem',
+            }}
+          >
+            <input
+              type='checkbox'
+              checked={settings[key] as boolean}
+              onChange={(e) => updateSetting(key, e.target.checked)}
+            />
+            {t(labelKey)}
+          </label>
+        ))}
+      </div>
+
       {/* Bot 黑名單 */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
           htmlFor='blacklist-input'
         >
-          Bot 黑名單（逗號分隔）
+          {t('botBlacklist')}
         </label>
         <input
           id='blacklist-input'
           type='text'
           value={blacklistInput}
           onChange={(e) => setBlacklistInput(e.target.value)}
-          placeholder='streamelements, nightbot'
+          placeholder={t('botBlacklistPlaceholder')}
           style={{ width: '100%', padding: '0.3rem' }}
         />
       </div>
@@ -371,12 +550,52 @@ export function App() {
             cursor: 'pointer',
           }}
         >
-          儲存設定
+          {t('saveSettings')}
         </button>
         {saveMessage && (
-          <span style={{ color: 'green', fontSize: '0.85rem' }}>{saveMessage}</span>
+          <span style={{ color: 'green', fontSize: '0.85rem' }}>{t('settingsSaved')}</span>
         )}
       </div>
+
+      {/* 錯誤通知區 */}
+      {errorNotifications.length > 0 && (
+        <div style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
+          <h3 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem', color: '#666' }}>
+            {t('errorNotificationTitle')}
+          </h3>
+          {errorNotifications.map((n) => (
+            <div
+              key={n.id}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.25rem',
+                padding: '0.25rem 0',
+                fontSize: '0.8rem',
+                color: '#c0392b',
+                wordBreak: 'break-word',
+              }}
+            >
+              <span style={{ flex: 1 }}>{n.message}</span>
+              <button
+                onClick={() => dismissError(n.id)}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  padding: '0',
+                  fontSize: '0.8rem',
+                  color: '#999',
+                  lineHeight: 1,
+                }}
+                aria-label={t('dismiss')}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 快捷鍵資訊 */}
       <div

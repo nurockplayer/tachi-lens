@@ -14,7 +14,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["chrome"],
+    "types": ["chrome", "vitest/globals"],
     "outDir": "dist",
     "rootDir": ".",
     "baseUrl": ".",

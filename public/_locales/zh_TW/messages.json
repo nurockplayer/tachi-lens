@@ -1,16 +1,46 @@
 {
-  "appName": {
-    "message": "tachi-lens"
-  },
-  "appDesc": {
-    "message": "Twitch 聊天室沉浸式翻譯"
-  },
-  "shortcutToggleTranslation": {
-    "message": "切換翻譯 (Ctrl+Shift+T)",
-    "description": "切換翻譯啟用/停用的快捷鍵標籤"
-  },
-  "shortcutToggleDisplayMode": {
-    "message": "切換顯示模式 (Ctrl+Shift+M)",
-    "description": "循環切換顯示模式的快捷鍵標籤"
-  }
+  "appTitle": { "message": "tachi-lens" },
+  "appDescription": { "message": "Twitch 聊天室沉浸式翻譯" },
+  "enableTranslation": { "message": "啟用翻譯" },
+  "translationProvider": { "message": "翻譯提供者" },
+  "model": { "message": "模型" },
+  "apiKey": { "message": "API Key" },
+  "apiKeyPlaceholder": { "message": "輸入 API Key" },
+  "targetLanguage": { "message": "目標語言" },
+  "displayMode": { "message": "顯示模式" },
+  "displayBelow": { "message": "原文下方" },
+  "displayHover": { "message": "懸停顯示" },
+  "displayCollapse": { "message": "收合" },
+  "minTextLength": { "message": "最短翻譯字數" },
+  "botBlacklist": { "message": "Bot 黑名單（逗號分隔）" },
+  "botBlacklistPlaceholder": { "message": "streamelements, nightbot" },
+  "saveSettings": { "message": "儲存設定" },
+  "settingsSaved": { "message": "設定已儲存" },
+  "validate": { "message": "驗證" },
+  "validating": { "message": "驗證中..." },
+  "valid": { "message": "✓ 有效" },
+  "invalid": { "message": "✗ 無效" },
+  "loading": { "message": "載入中..." },
+  "hide": { "message": "隱藏" },
+  "show": { "message": "顯示" },
+  "translationFailed": { "message": "翻譯失敗" },
+  "errorAuth": { "message": "API 驗證失敗，請檢查 API Key" },
+  "errorRateLimited": { "message": "請求次數過多，請稍後再試" },
+  "errorTimeout": { "message": "請求超時，請檢查網路連線" },
+  "errorNetwork": { "message": "網路錯誤，請檢查連線狀態" },
+  "errorUnsupportedModel": { "message": "不支援的模型" },
+  "errorUnknown": { "message": "發生未知錯誤" },
+  "errorNotificationTitle": { "message": "錯誤通知" },
+  "dismiss": { "message": "關閉" },
+  "shortcutToggleTranslation": { "message": "切換翻譯 (Ctrl+Shift+T)" },
+  "shortcutToggleDisplayMode": { "message": "切換顯示模式 (Ctrl+Shift+M)" },
+  "filterSection": { "message": "訊息過濾" },
+  "skipEmotesOnly": { "message": "略過純表情符號" },
+  "skipCheermotes": { "message": "略過 Cheermote" },
+  "skipSlashMe": { "message": "略過 /me 訊息" },
+  "skipWhispers": { "message": "略過悄悄話" },
+  "skipReplies": { "message": "略過回覆訊息" },
+  "skipLinksOnly": { "message": "略過純連結" },
+  "skipNumbersOnly": { "message": "略過純數字" },
+  "skipSystemMessages": { "message": "略過系統訊息" }
 }

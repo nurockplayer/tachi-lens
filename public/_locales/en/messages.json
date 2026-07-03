@@ -1,16 +1,46 @@
 {
-  "appName": {
-    "message": "tachi-lens"
-  },
-  "appDesc": {
-    "message": "Immersive Twitch chat translation"
-  },
-  "shortcutToggleTranslation": {
-    "message": "Toggle Translation (Ctrl+Shift+T)",
-    "description": "Keyboard shortcut label for toggling translation on/off"
-  },
-  "shortcutToggleDisplayMode": {
-    "message": "Toggle Display Mode (Ctrl+Shift+M)",
-    "description": "Keyboard shortcut label for cycling display mode"
-  }
+  "appTitle": { "message": "tachi-lens" },
+  "appDescription": { "message": "Immersive Twitch Chat Translation" },
+  "enableTranslation": { "message": "Enable Translation" },
+  "translationProvider": { "message": "Provider" },
+  "model": { "message": "Model" },
+  "apiKey": { "message": "API Key" },
+  "apiKeyPlaceholder": { "message": "Enter API Key" },
+  "targetLanguage": { "message": "Target Language" },
+  "displayMode": { "message": "Display Mode" },
+  "displayBelow": { "message": "Below Original" },
+  "displayHover": { "message": "Show on Hover" },
+  "displayCollapse": { "message": "Collapse Original" },
+  "minTextLength": { "message": "Min Text Length" },
+  "botBlacklist": { "message": "Bot Blacklist (comma-separated)" },
+  "botBlacklistPlaceholder": { "message": "streamelements, nightbot" },
+  "saveSettings": { "message": "Save Settings" },
+  "settingsSaved": { "message": "Settings saved" },
+  "validate": { "message": "Validate" },
+  "validating": { "message": "Checking..." },
+  "valid": { "message": "✓ Valid" },
+  "invalid": { "message": "✗ Invalid" },
+  "loading": { "message": "Loading..." },
+  "hide": { "message": "Hide" },
+  "show": { "message": "Show" },
+  "translationFailed": { "message": "Translation failed" },
+  "errorAuth": { "message": "API authentication failed. Please check your API Key" },
+  "errorRateLimited": { "message": "Too many requests. Please try again later" },
+  "errorTimeout": { "message": "Request timed out. Please check your connection" },
+  "errorNetwork": { "message": "Network error. Please check your connection" },
+  "errorUnsupportedModel": { "message": "Unsupported model" },
+  "errorUnknown": { "message": "An unknown error occurred" },
+  "errorNotificationTitle": { "message": "Error Notifications" },
+  "dismiss": { "message": "Dismiss" },
+  "shortcutToggleTranslation": { "message": "Toggle Translation (Ctrl+Shift+T)" },
+  "shortcutToggleDisplayMode": { "message": "Toggle Display Mode (Ctrl+Shift+M)" },
+  "filterSection": { "message": "Message Filtering" },
+  "skipEmotesOnly": { "message": "Skip Emote-only Messages" },
+  "skipCheermotes": { "message": "Skip Cheermotes" },
+  "skipSlashMe": { "message": "Skip /me Actions" },
+  "skipWhispers": { "message": "Skip Whispers" },
+  "skipReplies": { "message": "Skip Replies" },
+  "skipLinksOnly": { "message": "Skip Links-only" },
+  "skipNumbersOnly": { "message": "Skip Numbers-only" },
+  "skipSystemMessages": { "message": "Skip System Messages" }
 }
