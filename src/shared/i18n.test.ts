@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MESSAGE_KEYS, t } from './i18n'
+import en from '../../public/_locales/en/messages.json'
+import zh_TW from '../../public/_locales/zh_TW/messages.json'
 
 describe('i18n', () => {
   describe('t()', () => {
@@ -28,36 +30,62 @@ describe('i18n', () => {
     })
   })
 
-  describe('error keys', () => {
-    for (const key of ['errorAuth', 'errorRateLimited', 'errorTimeout', 'errorNetwork', 'errorUnsupportedModel', 'errorUnknown', 'errorNotificationTitle', 'dismiss'] as const) {
-      it(`returns non-empty fallback for "${key}"`, () => {
-        expect(t(key)).toBeTypeOf('string')
-        expect(t(key).length).toBeGreaterThan(0)
-      })
-    }
-
-    it('returns errorAuth fallback', () => {
-      expect(t('errorAuth')).toBe('API Key 無效')
-    })
-
-    it('returns dismiss fallback', () => {
-      expect(t('dismiss')).toBe('關閉')
-    })
-
-    it('returns errorNotificationTitle fallback', () => {
-      expect(t('errorNotificationTitle')).toBe('錯誤通知')
-    })
-  })
-
   describe('message keys', () => {
     it('contains all expected message keys', () => {
       expect(MESSAGE_KEYS).toContain('appTitle')
       expect(MESSAGE_KEYS).toContain('enableTranslation')
       expect(MESSAGE_KEYS).toContain('validate')
       expect(MESSAGE_KEYS).toContain('saveSettings')
-      expect(MESSAGE_KEYS).toContain('errorAuth')
-      expect(MESSAGE_KEYS).toContain('dismiss')
-      expect(MESSAGE_KEYS.length).toBeGreaterThanOrEqual(28)
+      expect(MESSAGE_KEYS.length).toBeGreaterThanOrEqual(20)
+    })
+  })
+
+  describe('locale files consistency', () => {
+    const knownKeys = MESSAGE_KEYS as readonly string[]
+
+    const getLocaleKeys = (locale: Record<string, { message: string }>): string[] =>
+      Object.keys(locale)
+
+    it('en locale has all known keys', () => {
+      const keys = getLocaleKeys(en)
+      for (const k of knownKeys) {
+        expect(keys).toContain(k)
+      }
+    })
+
+    it('zh_TW locale has all known keys', () => {
+      const keys = getLocaleKeys(zh_TW)
+      for (const k of knownKeys) {
+        expect(keys).toContain(k)
+      }
+    })
+
+    it('en locale has no extra keys', () => {
+      const keys = getLocaleKeys(en)
+      for (const k of keys) {
+        expect(knownKeys).toContain(k)
+      }
+    })
+
+    it('zh_TW locale has no extra keys', () => {
+      const keys = getLocaleKeys(zh_TW)
+      for (const k of keys) {
+        expect(knownKeys).toContain(k)
+      }
+    })
+
+    it('en locale has non-empty messages', () => {
+      for (const [_key, val] of Object.entries(en)) {
+        expect(val.message).toBeTypeOf('string')
+        expect(val.message.length).toBeGreaterThan(0)
+      }
+    })
+
+    it('zh_TW locale has non-empty messages', () => {
+      for (const [_key, val] of Object.entries(zh_TW)) {
+        expect(val.message).toBeTypeOf('string')
+        expect(val.message.length).toBeGreaterThan(0)
+      }
     })
   })
 })

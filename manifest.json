@@ -26,6 +26,20 @@
     "default_popup": "src/popup/index.html",
     "default_title": "tachi-lens"
   },
+  "commands": {
+    "toggle-translation": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+T"
+      },
+      "description": "Toggle translation on/off"
+    },
+    "toggle-display-mode": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+M"
+      },
+      "description": "Cycle display mode (below → hover → collapse)"
+    }
+  },
   "icons": {
     "16": "public/icons/icon16.png",
     "48": "public/icons/icon48.png",

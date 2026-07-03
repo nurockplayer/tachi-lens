@@ -7,6 +7,13 @@ export type MessageType =
   | 'key_validation_result'
   | 'provider_status'
   | 'error_notification'
+  | 'settings_updated'
+  | 'save_api_key'
+  | 'save_api_key_result'
+  | 'delete_api_key'
+  | 'delete_api_key_result'
+  | 'get_api_key_preview'
+  | 'api_key_preview'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -15,7 +22,23 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'key_validation_result',
   'provider_status',
   'error_notification',
+  'settings_updated',
+  'save_api_key',
+  'save_api_key_result',
+  'delete_api_key',
+  'delete_api_key_result',
+  'get_api_key_preview',
+  'api_key_preview',
 ]
+
+/** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
+export type SettingsUpdatePayload = Partial<{
+  translationEnabled: boolean
+  displayMode: 'below' | 'hover' | 'collapse'
+  targetLanguage: string
+  minTextLength: number
+  botNameBlacklist: string[]
+}>
 
 export interface TranslationRequest {
   messageId: string
@@ -91,6 +114,16 @@ export const isErrorNotificationMessage = (
     typeof p.message === 'string' &&
     typeof p.timestamp === 'number'
   )
+}
+
+export const isSettingsUpdateMessage = (
+  value: unknown,
+): value is BaseMessage<'settings_updated', SettingsUpdatePayload> => {
+  if (!isBaseMessage(value) || value.type !== 'settings_updated') {
+    return false
+  }
+
+  return typeof value.payload === 'object' && value.payload !== null && !Array.isArray(value.payload)
 }
 
 export const serializeMessage = <T extends MessageType, P>(message: BaseMessage<T, P>): string => JSON.stringify(message)

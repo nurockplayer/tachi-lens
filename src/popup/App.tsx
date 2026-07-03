@@ -1,10 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
-import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
+import {
+  DEFAULT_SETTINGS,
+  getChannelSettings,
+  mergeSettings,
+  saveChannelSettings,
+} from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
-import type { ErrorNotification } from '@/shared/messages'
+import type { ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
+import type { FilterConfig } from '@/content/message-filter'
+
+const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
+  { key: 'skipEmotesOnly', labelKey: 'skipEmotesOnly' },
+  { key: 'skipCheermotes', labelKey: 'skipCheermotes' },
+  { key: 'skipSlashMe', labelKey: 'skipSlashMe' },
+  { key: 'skipWhispers', labelKey: 'skipWhispers' },
+  { key: 'skipReplies', labelKey: 'skipReplies' },
+  { key: 'skipLinksOnly', labelKey: 'skipLinksOnly' },
+  { key: 'skipNumbersOnly', labelKey: 'skipNumbersOnly' },
+  { key: 'skipSystemMessages', labelKey: 'skipSystemMessages' },
+]
+
+export const extractChannelFromUrl = (url: string): string | undefined => {
+  try {
+    const { hostname, pathname } = new URL(url)
+
+    if (!hostname.endsWith('twitch.tv')) return undefined
+    if (hostname !== 'twitch.tv' && hostname !== 'www.twitch.tv') return undefined
+
+    const match = pathname.match(/^\/([^/]+)/)
+
+    return match?.[1]?.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
 
 type ValidationStatus = 'valid' | 'invalid' | 'checking' | null
 
@@ -18,10 +50,16 @@ const loadSettings = async (): Promise<UserSettings> => {
 }
 
 const loadApiKeyPreview = async (providerId: string): Promise<string> => {
-  const items = await chrome.storage.local.get('providerApiKeyPreviews')
-  const previews = items.providerApiKeyPreviews as Record<string, string> | undefined
+  try {
+    const response = (await chrome.runtime.sendMessage({
+      type: 'get_api_key_preview',
+      payload: { providerId },
+    })) as { type: string; payload: { preview?: string } }
 
-  return previews?.[providerId] ?? ''
+    return response.payload?.preview ?? ''
+  } catch {
+    return ''
+  }
 }
 
 interface ErrorNotificationItem {
@@ -38,6 +76,8 @@ export function App() {
   const [validationStatus, setValidationStatus] = useState<Record<string, ValidationStatus>>({})
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [blacklistInput, setBlacklistInput] = useState('')
+  const [channelName, setChannelName] = useState<string | undefined>(undefined)
+  const [useChannelSettings, setUseChannelSettings] = useState(false)
   const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
   const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
 
@@ -46,11 +86,14 @@ export function App() {
   useEffect(() => {
     let cancelled = false
 
-    loadSettings().then((s) => {
+    const load = async (): Promise<void> => {
+      const s = await loadSettings()
       if (cancelled) return
       setSettings(s)
       setBlacklistInput(s.botNameBlacklist.join(', '))
-    })
+    }
+    load()
+
     // Load API key previews for all providers
     for (const p of providers) {
       loadApiKeyPreview(p.id).then((preview) => {
@@ -59,7 +102,32 @@ export function App() {
       })
     }
 
-    // Listen for error notifications from service worker
+    // Detect current channel from active tab
+    chrome.tabs?.query({ active: true, currentWindow: true }).then((tabs) => {
+      if (cancelled) return
+      const tab = tabs[0]
+
+      if (!tab?.url) return
+
+      const name = extractChannelFromUrl(tab.url)
+
+      setChannelName(name)
+
+      if (name) {
+        // Check if there are per-channel settings for this channel
+        getChannelSettings(name).then((channel) => {
+          if (cancelled) return
+          if (channel && Object.keys(channel).length > 0) {
+            setUseChannelSettings(true)
+            setSettings((prev) =>
+              prev ? mergeSettings(prev, channel) : prev,
+            )
+          }
+        })
+      }
+    })
+
+    // Listen for error notifications
     const handleErrorNotification = (message: unknown) => {
       const msg = message as { type?: string; payload?: ErrorNotification } | undefined
       if (msg?.type === 'error_notification' && msg.payload) {
@@ -121,11 +189,36 @@ export function App() {
 
     const updatedSettings = { ...settings, botNameBlacklist: parsedBlacklist }
 
-    await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+    if (useChannelSettings && channelName) {
+      await saveChannelSettings(channelName, updatedSettings)
+    } else {
+      await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+    }
     setSettings(updatedSettings)
     setSaveMessage(t('settingsSaved'))
     setTimeout(() => setSaveMessage(null), 2000)
-  }, [settings, blacklistInput])
+
+    // Notify content script of settings change via SW broadcast
+    const payload: SettingsUpdatePayload = {
+      translationEnabled: updatedSettings.translationEnabled,
+      displayMode: updatedSettings.displayMode,
+      targetLanguage: updatedSettings.targetLanguage,
+      minTextLength: updatedSettings.minTextLength,
+      botNameBlacklist: updatedSettings.botNameBlacklist,
+      skipEmotesOnly: updatedSettings.skipEmotesOnly,
+      skipCheermotes: updatedSettings.skipCheermotes,
+      skipSlashMe: updatedSettings.skipSlashMe,
+      skipWhispers: updatedSettings.skipWhispers,
+      skipReplies: updatedSettings.skipReplies,
+      skipLinksOnly: updatedSettings.skipLinksOnly,
+      skipNumbersOnly: updatedSettings.skipNumbersOnly,
+      skipSystemMessages: updatedSettings.skipSystemMessages,
+    }
+    await chrome.runtime.sendMessage({
+      type: 'settings_updated',
+      payload,
+    })
+  }, [settings, blacklistInput, useChannelSettings, channelName])
 
   const handleValidateKey = useCallback(
     async (providerId: string) => {
@@ -164,28 +257,18 @@ export function App() {
       // Skip auto-save for masked preview values (contain "***")
       if (trimmed.includes('***')) return
 
+      // Save or delete via SW message — Popup never reads/writes full keys directly
       if (!trimmed) {
-        // Delete key when input is cleared
-        const oldKeys = await chrome.storage.local.get('providerApiKeys')
-        const keys = { ...(oldKeys.providerApiKeys as Record<string, string> | undefined) }
-        const oldPreviews = await chrome.storage.local.get('providerApiKeyPreviews')
-        const previews = { ...(oldPreviews.providerApiKeyPreviews as Record<string, string> | undefined) }
-
-        delete keys[providerId]
-        delete previews[providerId]
-        await chrome.storage.local.set({ providerApiKeys: keys, providerApiKeyPreviews: previews })
+        await chrome.runtime.sendMessage({
+          type: 'delete_api_key',
+          payload: { providerId },
+        })
         return
       }
 
-      // Auto-save real API key on change
-      const items = await chrome.storage.local.get('providerApiKeys')
-      const keys = items.providerApiKeys as Record<string, string> | undefined
-      const previewItems = await chrome.storage.local.get('providerApiKeyPreviews')
-      const previews = previewItems.providerApiKeyPreviews as Record<string, string> | undefined
-
-      await chrome.storage.local.set({
-        providerApiKeys: { ...keys, [providerId]: trimmed },
-        providerApiKeyPreviews: { ...previews, [providerId]: maskApiKey(trimmed) },
+      await chrome.runtime.sendMessage({
+        type: 'save_api_key',
+        payload: { providerId, apiKey: trimmed },
       })
     },
     [],
@@ -207,6 +290,37 @@ export function App() {
       <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 1rem' }}>
         {t('appDescription')}
       </p>
+
+      {/* 頻道資訊 */}
+      {channelName && (
+        <div
+          style={{
+            marginBottom: '0.75rem',
+            padding: '0.4rem 0.5rem',
+            background: '#f0f0f0',
+            borderRadius: '4px',
+            fontSize: '0.85rem',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>頻道：</span>
+          <span>{channelName}</span>
+        </div>
+      )}
+
+      {/* 每頻道設定 */}
+      {channelName && (
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
+        >
+          <input
+            type='checkbox'
+            checked={useChannelSettings}
+            onChange={(e) => setUseChannelSettings(e.target.checked)}
+            aria-label='使用此頻道的專用設定'
+          />
+          <span style={{ fontSize: '0.9rem' }}>使用此頻道的專用設定</span>
+        </label>
+      )}
 
       {/* 翻譯啟用 */}
       <label
@@ -375,6 +489,39 @@ export function App() {
         />
       </div>
 
+      {/* 訊息過濾 */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <div
+          style={{
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            marginBottom: '0.3rem',
+            color: '#444',
+          }}
+        >
+          {t('filterSection')}
+        </div>
+        {FILTER_TOGGLES.map(({ key, labelKey }) => (
+          <label
+            key={key}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              marginBottom: '0.15rem',
+              fontSize: '0.82rem',
+            }}
+          >
+            <input
+              type='checkbox'
+              checked={settings[key] as boolean}
+              onChange={(e) => updateSetting(key, e.target.checked)}
+            />
+            {t(labelKey)}
+          </label>
+        ))}
+      </div>
+
       {/* Bot 黑名單 */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
@@ -406,7 +553,7 @@ export function App() {
           {t('saveSettings')}
         </button>
         {saveMessage && (
-          <span style={{ color: 'green', fontSize: '0.85rem' }}>{saveMessage}</span>
+          <span style={{ color: 'green', fontSize: '0.85rem' }}>{t('settingsSaved')}</span>
         )}
       </div>
 
@@ -449,6 +596,20 @@ export function App() {
           ))}
         </div>
       )}
+
+      {/* 快捷鍵資訊 */}
+      <div
+        style={{
+          marginTop: '1rem',
+          paddingTop: '0.75rem',
+          borderTop: '1px solid #eee',
+          fontSize: '0.75rem',
+          color: '#999',
+        }}
+      >
+        <div>{t('shortcutToggleTranslation')}</div>
+        <div>{t('shortcutToggleDisplayMode')}</div>
+      </div>
     </div>
   )
 }

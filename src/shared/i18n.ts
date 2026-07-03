@@ -40,6 +40,17 @@ export type MessageKey =
   | 'errorUnknown'
   | 'errorNotificationTitle'
   | 'dismiss'
+  | 'shortcutToggleTranslation'
+  | 'shortcutToggleDisplayMode'
+  | 'filterSection'
+  | 'skipEmotesOnly'
+  | 'skipCheermotes'
+  | 'skipSlashMe'
+  | 'skipWhispers'
+  | 'skipReplies'
+  | 'skipLinksOnly'
+  | 'skipNumbersOnly'
+  | 'skipSystemMessages'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -75,6 +86,17 @@ export const MESSAGE_KEYS: readonly string[] = [
   'errorUnknown',
   'errorNotificationTitle',
   'dismiss',
+  'shortcutToggleTranslation',
+  'shortcutToggleDisplayMode',
+  'filterSection',
+  'skipEmotesOnly',
+  'skipCheermotes',
+  'skipSlashMe',
+  'skipWhispers',
+  'skipReplies',
+  'skipLinksOnly',
+  'skipNumbersOnly',
+  'skipSystemMessages',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -103,14 +125,25 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   hide: '隱藏',
   show: '顯示',
   translationFailed: '翻譯失敗',
-  errorAuth: 'API Key 無效',
+  errorAuth: 'API 驗證失敗，請檢查 API Key',
   errorRateLimited: '請求次數過多，請稍後再試',
-  errorTimeout: '請求逾時',
-  errorNetwork: '網路錯誤',
+  errorTimeout: '請求超時，請檢查網路連線',
+  errorNetwork: '網路錯誤，請檢查連線狀態',
   errorUnsupportedModel: '不支援的模型',
-  errorUnknown: '未知錯誤',
+  errorUnknown: '發生未知錯誤',
   errorNotificationTitle: '錯誤通知',
   dismiss: '關閉',
+  shortcutToggleTranslation: '切換翻譯 (Ctrl+Shift+T)',
+  shortcutToggleDisplayMode: '切換顯示模式 (Ctrl+Shift+M)',
+  filterSection: '訊息過濾',
+  skipEmotesOnly: '略過純表情符號',
+  skipCheermotes: '略過 Cheermote',
+  skipSlashMe: '略過 /me 訊息',
+  skipWhispers: '略過悄悄話',
+  skipReplies: '略過回覆訊息',
+  skipLinksOnly: '略過純連結',
+  skipNumbersOnly: '略過純數字',
+  skipSystemMessages: '略過系統訊息',
 }
 
 /**

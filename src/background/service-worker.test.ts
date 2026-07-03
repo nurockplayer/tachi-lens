@@ -25,6 +25,11 @@ const createChromeRuntime = () => ({
       addListener: vi.fn(),
     },
   },
+  commands: {
+    onCommand: {
+      addListener: vi.fn(),
+    },
+  },
 })
 
 describe('service worker startup', () => {

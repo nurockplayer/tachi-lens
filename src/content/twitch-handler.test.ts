@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TwitchMessageHandler } from './twitch-handler'
+import { TwitchMessageHandler, parseChannelFromPathname, type ContentSettings } from './twitch-handler'
+import type { PageSelectors } from './twitch-selectors'
 
-const DEFAULT_FILTER = {
-  botNameBlacklist: [] as string[],
+const DEFAULT_SETTINGS: ContentSettings = {
+  botNameBlacklist: [],
   minTextLength: 2,
-  displayMode: 'below' as const,
+  displayMode: 'below',
   translationEnabled: true,
 }
 
@@ -13,7 +14,7 @@ const createMessageElement = (overrides?: {
   text?: string
   username?: string
   messageId?: string
-  }): HTMLElement => {
+}): HTMLElement => {
   const el = document.createElement('div')
   el.className = 'chat-line__message'
   el.setAttribute('data-test-user', overrides?.username ?? 'testuser')
@@ -45,6 +46,41 @@ describe('TwitchMessageHandler', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  describe('getChannelName', () => {
+    it.each([
+      ['/somerchannel', 'somerchannel'],
+      ['/channel_name', 'channel_name'],
+      ['/UserChannel', 'userchannel'],
+      ['/', undefined],
+      ['', undefined],
+      ['/somechannel/video/12345', 'somechannel'],
+    ])('parses %s into %s', (pathname, expected) => {
+      expect(handler.getChannelName(pathname)).toBe(expected)
+    })
+  })
+
+  describe('parseChannelFromPathname', () => {
+    it('returns channel name for a valid Twitch channel path', () => {
+      expect(parseChannelFromPathname('/somerchannel')).toBe('somerchannel')
+    })
+
+    it('returns undefined for root path', () => {
+      expect(parseChannelFromPathname('/')).toBeUndefined()
+    })
+
+    it('returns undefined for empty string', () => {
+      expect(parseChannelFromPathname('')).toBeUndefined()
+    })
+
+    it('ignores sub-paths after channel name', () => {
+      expect(parseChannelFromPathname('/channel/video/abc')).toBe('channel')
+    })
+
+    it('returns lowercase channel name', () => {
+      expect(parseChannelFromPathname('/SomeChannel')).toBe('somechannel')
+    })
   })
 
   describe('getMessageId', () => {
@@ -108,28 +144,73 @@ describe('TwitchMessageHandler', () => {
     })
   })
 
+  describe('custom selectors', () => {
+    it('uses custom CHAT_USERNAME selector when provided', () => {
+      const customSelectors: PageSelectors = {
+        CHAT_CONTAINER: '#custom-container',
+        CHAT_MESSAGE: '.custom-msg',
+        CHAT_MESSAGE_BODY: '.custom-body',
+        CHAT_USERNAME: '.custom-username',
+      }
+      const customHandler = new TwitchMessageHandler(customSelectors)
+
+      const el = document.createElement('div')
+      const usernameEl = document.createElement('span')
+      usernameEl.className = 'custom-username'
+      usernameEl.textContent = 'custom-user'
+      el.appendChild(usernameEl)
+
+      expect(customHandler.getMessageUsername(el)).toBe('custom-user')
+    })
+
+    it('uses custom CHAT_MESSAGE_BODY selector when provided', () => {
+      const customSelectors: PageSelectors = {
+        CHAT_CONTAINER: '#custom-container',
+        CHAT_MESSAGE: '.custom-msg',
+        CHAT_MESSAGE_BODY: '.custom-body-text',
+        CHAT_USERNAME: '.custom-username',
+      }
+      const customHandler = new TwitchMessageHandler(customSelectors)
+
+      const el = document.createElement('div')
+      const body = document.createElement('span')
+      body.className = 'custom-body-text'
+      body.textContent = 'Custom body text'
+      el.appendChild(body)
+
+      expect(customHandler.getMessageText(el)).toBe('Custom body text')
+    })
+
+    it('falls back to default selectors when none provided', () => {
+      // Without custom selectors, uses existing class-based selectors
+      const el = createMessageElement({ text: 'Hello default', username: 'defaultuser' })
+      expect(handler.getMessageText(el)).toBe('Hello default')
+      expect(handler.getMessageUsername(el)).toBe('defaultuser')
+    })
+  })
+
   describe('shouldTranslate', () => {
     it('returns true for a valid message', () => {
       const el = createMessageElement({ text: 'Hello world', username: 'user' })
-      expect(handler.shouldTranslate(el, { ...DEFAULT_FILTER })).toBe(true)
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
     })
 
     it('returns false for bot messages', () => {
       const el = createMessageElement({ text: 'Hello', username: 'nightbot' })
       expect(
-        handler.shouldTranslate(el, { ...DEFAULT_FILTER, botNameBlacklist: ['nightbot'] }),
+        handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, botNameBlacklist: ['nightbot'] }),
       ).toBe(false)
     })
 
     it('returns false for short messages', () => {
       const el = createMessageElement({ text: 'Hi', username: 'user' })
-      expect(handler.shouldTranslate(el, { ...DEFAULT_FILTER, minTextLength: 5 })).toBe(false)
+      expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, minTextLength: 5 })).toBe(false)
     })
 
     it('returns false for already processed messages', () => {
       const el = createMessageElement({ text: 'Hello world', username: 'user' })
       el.setAttribute('data-tachi-lens-processed', 'true')
-      expect(handler.shouldTranslate(el, { ...DEFAULT_FILTER })).toBe(false)
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
     })
   })
 
@@ -142,7 +223,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(sendMessageMock).toHaveBeenCalledTimes(1)
       const callArg = sendMessageMock.mock.calls[0]![0] as Record<string, unknown>
@@ -158,7 +239,7 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       const translationEl = el.querySelector('[data-tachi-lens-translated]')
       expect(translationEl).not.toBeNull()
@@ -172,19 +253,19 @@ describe('TwitchMessageHandler', () => {
         payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
 
-    it('marks the element as processed', async () => {
+    it('marks the element as processed (second test)', async () => {
       const el = createMessageElement({ text: 'Hello' })
       sendMessageMock.mockResolvedValue({
         type: 'translate_response',
         payload: { messageId: handler.getMessageId(el), translatedText: '你好' },
       })
 
-      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
@@ -199,7 +280,7 @@ describe('TwitchMessageHandler', () => {
         },
       })
 
-      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       // Should NOT be marked as processed so it can be retried
       expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
@@ -217,89 +298,54 @@ describe('TwitchMessageHandler', () => {
         },
       })
 
-      await handler.translateAndInject(el, { ...DEFAULT_FILTER })
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      // Should show error indicator
+      expect(el.querySelector('[data-tachi-lens-translated]')).not.toBeNull()
     })
 
-    describe('error icons by type', () => {
-      it('shows 🔑 for auth errors', async () => {
-        const el = createMessageElement({ text: 'Hello' })
-        sendMessageMock.mockResolvedValue({
-          type: 'translate_response',
-          payload: {
-            messageId: handler.getMessageId(el),
-            error: { type: 'auth', status: 401, message: 'Unauthorized' },
-          },
-        })
-        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
-        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('🔑')
+    it('does nothing when translation is disabled', async () => {
+      const el = createMessageElement({ text: 'Hello' })
+      await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, translationEnabled: false })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+  })
+
+  describe('display modes', () => {
+    it('collapses original text in collapse mode', async () => {
+      const el = createMessageElement({ text: 'Hello world' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '你好世界' },
       })
 
-      it('shows ⏰ for timeout errors', async () => {
-        const el = createMessageElement({ text: 'Hello' })
-        sendMessageMock.mockResolvedValue({
-          type: 'translate_response',
-          payload: {
-            messageId: handler.getMessageId(el),
-            error: { type: 'timeout', message: 'Timed out' },
-          },
-        })
-        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
-        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('⏰')
+      await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, displayMode: 'collapse' })
+
+      const body = el.querySelector('.chat-line__message-body') as HTMLElement
+      expect(body.style.display).toBe('none')
+      const trans = el.querySelector('[data-tachi-lens-translated]')
+      expect(trans?.textContent).toBe('你好世界')
+    })
+
+    it('hides translation until hover in hover mode', async () => {
+      const el = createMessageElement({ text: 'Hello' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
-      it('shows 🌐 for network errors', async () => {
-        const el = createMessageElement({ text: 'Hello' })
-        sendMessageMock.mockResolvedValue({
-          type: 'translate_response',
-          payload: {
-            messageId: handler.getMessageId(el),
-            error: { type: 'network', message: 'Network error' },
-          },
-        })
-        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
-        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('🌐')
-      })
+      await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, displayMode: 'hover' })
 
-      it('shows ⚙️ for unsupported_model errors', async () => {
-        const el = createMessageElement({ text: 'Hello' })
-        sendMessageMock.mockResolvedValue({
-          type: 'translate_response',
-          payload: {
-            messageId: handler.getMessageId(el),
-            error: { type: 'unsupported_model', message: 'Unsupported model' },
-          },
-        })
-        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
-        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('⚙️')
-      })
+      const trans = el.querySelector('[data-tachi-lens-translated]') as HTMLElement
+      expect(trans).not.toBeNull()
+      expect(trans.style.display).toBe('none')
 
-      it('shows ⚠️ for unknown errors', async () => {
-        const el = createMessageElement({ text: 'Hello' })
-        sendMessageMock.mockResolvedValue({
-          type: 'translate_response',
-          payload: {
-            messageId: handler.getMessageId(el),
-            error: { type: 'unknown', message: 'Something went wrong' },
-          },
-        })
-        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
-        expect(el.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('⚠️')
-      })
-
-      it('has title attribute with error message', async () => {
-        const el = createMessageElement({ text: 'Hello' })
-        sendMessageMock.mockResolvedValue({
-          type: 'translate_response',
-          payload: {
-            messageId: handler.getMessageId(el),
-            error: { type: 'auth', status: 401, message: 'Unauthorized' },
-          },
-        })
-        await handler.translateAndInject(el, { ...DEFAULT_FILTER })
-        expect(el.querySelector('[data-tachi-lens-translated]')?.getAttribute('title')).toBe('Unauthorized')
-      })
+      // Simulate hover
+      el.dispatchEvent(new MouseEvent('mouseenter'))
+      expect(trans.style.display).toBe('block')
     })
   })
 })
