@@ -21,9 +21,19 @@ Twitch 聊天室沉浸式翻譯 Chrome Extension，支援 Gemini、DeepSeek、Op
 
 ```bash
 pnpm install
-pnpm dev        # 開發模式
+pnpm dev        # 開發模式：持續輸出到 dist/
 pnpm build      # 正式建置
 ```
+
+## 安裝到 Chrome
+
+1. 執行 `pnpm build` 產生 `dist/`。
+2. 打開 `chrome://extensions`。
+3. 開啟「開發人員模式」。
+4. 點「載入未封裝項目」。
+5. 選擇專案底下的 `dist/` 資料夾，不要選 repo 根目錄。
+
+若載入 repo 根目錄，Chrome 會直接讀到 `src/popup/index.html` 裡的 `main.tsx`，popup 會無法執行 React，常見現象就是只出現一個白色小方塊。
 
 ## 架構
 
