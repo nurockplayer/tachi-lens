@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   isBaseMessage,
+  isErrorNotificationMessage,
   isSettingsUpdateMessage,
   isTranslationRequestMessage,
   serializeMessage,
   type BaseMessage,
+  type ErrorNotification,
   type TranslationRequest,
   type SettingsUpdatePayload,
 } from './messages'
@@ -40,6 +42,49 @@ describe('message protocol guards', () => {
     }
 
     expect(serializeMessage(message)).toBe('{"type":"translate_request","payload":{"messageId":"m1","text":"Hello"}}')
+  })
+
+  describe('error_notification messages', () => {
+    it('accepts a valid error_notification message', () => {
+      const msg = {
+        type: 'error_notification',
+        payload: { id: 'e1', type: 'auth', message: 'Invalid API Key', timestamp: 1000 },
+      }
+      expect(isBaseMessage(msg)).toBe(true)
+    })
+
+    it('narrows valid error_notification payload', () => {
+      const msg = {
+        type: 'error_notification' as const,
+        payload: { id: 'e1', type: 'auth', message: 'Invalid API Key', timestamp: 1000 },
+      }
+      expect(isErrorNotificationMessage(msg)).toBe(true)
+    })
+
+    it('rejects error_notification with non-object payload', () => {
+      const msg = { type: 'error_notification', payload: 'invalid' }
+      expect(isErrorNotificationMessage(msg)).toBe(false)
+    })
+
+    it('rejects error_notification with missing required fields', () => {
+      const msg = { type: 'error_notification', payload: { id: 'e1' } }
+      expect(isErrorNotificationMessage(msg)).toBe(false)
+    })
+
+    it('serializes an error_notification message', () => {
+      const notification: ErrorNotification = {
+        id: 'e1', type: 'auth', message: 'Invalid API Key', timestamp: 1000,
+      }
+      const msg: BaseMessage<'error_notification', ErrorNotification> = {
+        type: 'error_notification',
+        payload: notification,
+      }
+      const serialized = serializeMessage(msg)
+      const parsed = JSON.parse(serialized)
+      expect(parsed.type).toBe('error_notification')
+      expect(parsed.payload.id).toBe('e1')
+      expect(parsed.payload.type).toBe('auth')
+    })
   })
 })
 
