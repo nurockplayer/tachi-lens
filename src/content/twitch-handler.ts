@@ -162,13 +162,12 @@ export class TwitchMessageHandler {
         this.injectTranslation(element, result.translatedText, settings.displayMode)
         element.setAttribute(ATTR_PROCESSED, 'true')
       } else if (result.error?.type === 'rate_limited') {
-        // Don't mark as processed — allow retry
       } else {
         element.setAttribute(ATTR_PROCESSED, 'true')
         this.injectError(element, result.error)
       }
     } catch {
-      // Network error or SW unavailable
+      element.setAttribute(ATTR_PROCESSED, 'true')
     }
   }
 

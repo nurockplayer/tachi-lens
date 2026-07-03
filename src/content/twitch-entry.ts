@@ -155,11 +155,6 @@ const observeChat = (): void => {
     return
   }
 
-  if (chatObserver) {
-    chatObserver.disconnect()
-    chatObserver = null
-  }
-
   startRetryTimer()
 
   const config: MutationObserverInit = {
@@ -171,12 +166,15 @@ const observeChat = (): void => {
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         for (const node of mutation.addedNodes) {
-          if (
-            node instanceof HTMLElement &&
-            matchesFirst(node, currentSelectors.CHAT_MESSAGE) &&
-            !node.hasAttribute(ATTR_PROCESSED)
-          ) {
-            scheduleProcess(node)
+          if (node instanceof HTMLElement) {
+            if (matchesFirst(node, currentSelectors.CHAT_MESSAGE) && !node.hasAttribute(ATTR_PROCESSED)) {
+              scheduleProcess(node)
+              continue
+            }
+            const inner = node.querySelector(currentSelectors.CHAT_MESSAGE)
+            if (inner instanceof HTMLElement && !inner.hasAttribute(ATTR_PROCESSED)) {
+              scheduleProcess(inner)
+            }
           }
         }
       }

@@ -22,7 +22,7 @@ function mountChannelChat(count = 3): void {
     const msg = document.createElement('div')
     msg.className = 'chat-line__message'
     const body = document.createElement('span')
-    body.className = 'chat-line__message-body'
+    body.setAttribute('data-a-target', 'chat-line-message-body')
     body.textContent = `Message ${i}`
     msg.appendChild(body)
     const meta = document.createElement('span')
@@ -45,7 +45,7 @@ function mountPopoutChat(count = 3): void {
     const msg = document.createElement('div')
     msg.className = 'chat-line__message'
     const body = document.createElement('span')
-    body.className = 'chat-line__message-body'
+    body.setAttribute('data-a-target', 'chat-line-message-body')
     body.textContent = `Popout msg ${i}`
     msg.appendChild(body)
     const username = document.createElement('span')

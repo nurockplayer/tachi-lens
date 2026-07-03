@@ -4,7 +4,7 @@
 
 export const CHAT_CONTAINER = '[data-test-selector="chat-scrollable-area__message-container"]'
 export const CHAT_MESSAGE = '.chat-line__message'
-export const CHAT_MESSAGE_BODY = '.chat-line__message-body'
+export const CHAT_MESSAGE_BODY = '[data-a-target="chat-line-message-body"]'
 export const CHAT_USERNAME = '.chat-author__display-name'
 export const CHAT_WHISPER = '[data-test-selector="whisper-message"]'
 
@@ -22,6 +22,7 @@ const FALLBACKS: Record<string, string[]> = {
   ],
   [CHAT_MESSAGE_BODY]: [
     CHAT_MESSAGE_BODY,
+    '.chat-line__message-body',
     '[data-a-target="chat-message-text"]',
     '.text-fragment',
   ],
