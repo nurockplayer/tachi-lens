@@ -38,6 +38,14 @@ export type SettingsUpdatePayload = Partial<{
   targetLanguage: string
   minTextLength: number
   botNameBlacklist: string[]
+  skipEmotesOnly: boolean
+  skipCheermotes: boolean
+  skipSlashMe: boolean
+  skipWhispers: boolean
+  skipReplies: boolean
+  skipLinksOnly: boolean
+  skipNumbersOnly: boolean
+  skipSystemMessages: boolean
 }>
 
 export interface TranslationRequest {

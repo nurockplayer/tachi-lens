@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"git merge origin/main --no-edit 2>&1\",\"description\":\"Merge main into pr/14-error-ui\"}",
-  "error": "Exit code 1\nAuto-merging memory/last-report.md\nCONFLICT (add/add): Merge conflict in memory/last-report.md\nAuto-merging public/_locales/en/messages.json\nCONFLICT (add/add): Merge conflict in public/_locales/en/messages.json\nAuto-merging public/_locales/zh_TW/messages.json\nCONFLICT (add/add): Merge conflict in public/_locales/zh_TW/messages.json\nAuto-merging src/content/twitch-entry.ts\nCONFLICT (content): Merge conflict in src/content/twitch-entry.ts\nAuto-merging src/content/twitch-handler.test.t...",
-  "timestamp": "2026-07-03T12:26:14.569Z",
-  "retry_count": 1
+  "tool_input_preview": "{\"command\":\"pnpm tsc --noEmit 2>&1\",\"description\":\"Check remaining type errors after the SettingsUpdatePayload fix\"}",
+  "error": "Exit code 2\nsrc/content/twitch-handler.test.ts(6,7): error TS2741: Property 'filterConfig' is missing in type '{ botNameBlacklist: never[]; minTextLength: number; displayMode: \"below\"; translationEnabled: true; }' but required in type 'ContentSettings'.",
+  "timestamp": "2026-07-03T13:08:33.978Z",
+  "retry_count": 2
 }
