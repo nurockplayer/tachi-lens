@@ -7,6 +7,9 @@ import {
   CHAT_USERNAME,
   detectPageType,
   getSelectorsForPage,
+  matchesFirst,
+  queryFirst,
+  queryFirstAll,
   type PageType,
 } from './twitch-selectors'
 
@@ -175,5 +178,115 @@ describe('VOD selectors (integration)', () => {
   it('finds messages inside a channel-style DOM', () => {
     mountChannelChat()
     expect(document.querySelectorAll(CHAT_MESSAGE).length).toBe(3)
+  })
+})
+
+describe('matchesFirst', () => {
+  it('returns true when element matches the primary selector', () => {
+    mountChannelChat()
+    const msg = document.querySelector(CHAT_MESSAGE)
+    expect(matchesFirst(msg!, CHAT_MESSAGE)).toBe(true)
+  })
+
+  it('returns true when element matches a fallback selector', () => {
+    document.body.innerHTML = ''
+    const div = document.createElement('div')
+    div.setAttribute('data-test-selector', 'chat-message')
+    document.body.appendChild(div)
+    expect(matchesFirst(div, CHAT_MESSAGE)).toBe(true)
+  })
+
+  it('returns false when element matches none of the fallbacks', () => {
+    document.body.innerHTML = ''
+    const div = document.createElement('div')
+    div.className = 'unrelated'
+    document.body.appendChild(div)
+    expect(matchesFirst(div, CHAT_MESSAGE)).toBe(false)
+  })
+
+  it('falls back to element.matches() when primary has no fallback entry', () => {
+    document.body.innerHTML = ''
+    const div = document.createElement('div')
+    div.className = 'custom-message'
+    document.body.appendChild(div)
+    expect(matchesFirst(div, '.custom-message')).toBe(true)
+    expect(matchesFirst(div, '.no-such-class')).toBe(false)
+  })
+
+  it('returns false for non-existent fallback selector', () => {
+    document.body.innerHTML = ''
+    const div = document.createElement('div')
+    document.body.appendChild(div)
+    expect(matchesFirst(div, CHAT_USERNAME)).toBe(false)
+  })
+})
+
+describe('queryFirst', () => {
+  it('returns element matching primary selector', () => {
+    mountChannelChat()
+    const container = document.querySelector(CHAT_CONTAINER)!
+    const msg = queryFirst(container, CHAT_MESSAGE)
+    expect(msg).not.toBeNull()
+    expect(msg!.matches(CHAT_MESSAGE)).toBe(true)
+  })
+
+  it('returns element matching a fallback selector', () => {
+    document.body.innerHTML = ''
+    const container = document.createElement('div')
+    const msg = document.createElement('div')
+    msg.setAttribute('data-test-selector', 'chat-message')
+    msg.textContent = 'fallback match'
+    container.appendChild(msg)
+    document.body.appendChild(container)
+
+    const found = queryFirst(document.body, CHAT_MESSAGE)
+    expect(found).not.toBeNull()
+    expect(found!.textContent).toBe('fallback match')
+  })
+
+  it('returns null when no selector matches', () => {
+    document.body.innerHTML = ''
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    expect(queryFirst(container, CHAT_MESSAGE)).toBeNull()
+  })
+
+  it('uses native querySelector when primary has no fallback entry', () => {
+    document.body.innerHTML = ''
+    const span = document.createElement('span')
+    span.className = 'direct-only'
+    document.body.appendChild(span)
+    expect(queryFirst(document.body, '.direct-only')).toBe(span)
+    expect(queryFirst(document.body, '.no-match')).toBeNull()
+  })
+})
+
+describe('queryFirstAll', () => {
+  it('returns all matching elements via primary selector', () => {
+    mountChannelChat(3)
+    const container = document.querySelector(CHAT_CONTAINER)!
+    const nodes = queryFirstAll(container, CHAT_MESSAGE)
+    expect(nodes.length).toBe(3)
+  })
+
+  it('returns elements via fallback selector', () => {
+    document.body.innerHTML = ''
+    const container = document.createElement('div')
+    for (let i = 0; i < 2; i++) {
+      const div = document.createElement('div')
+      div.setAttribute('data-test-selector', 'chat-message')
+      container.appendChild(div)
+    }
+    document.body.appendChild(container)
+
+    const nodes = queryFirstAll(document.body, CHAT_MESSAGE)
+    expect(nodes.length).toBe(2)
+  })
+
+  it('returns empty NodeList when nothing matches', () => {
+    document.body.innerHTML = ''
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    expect(queryFirstAll(container, CHAT_MESSAGE).length).toBe(0)
   })
 })
