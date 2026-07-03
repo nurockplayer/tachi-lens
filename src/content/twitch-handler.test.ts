@@ -8,6 +8,16 @@ const DEFAULT_SETTINGS: ContentSettings = {
   minTextLength: 2,
   displayMode: 'below',
   translationEnabled: true,
+  filterConfig: {
+    skipEmotesOnly: true,
+    skipCheermotes: true,
+    skipSlashMe: true,
+    skipWhispers: true,
+    skipReplies: true,
+    skipLinksOnly: true,
+    skipNumbersOnly: true,
+    skipSystemMessages: true,
+  },
 }
 
 const createMessageElement = (overrides?: {

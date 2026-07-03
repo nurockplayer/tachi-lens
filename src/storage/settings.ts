@@ -1,6 +1,8 @@
 // Chrome storage wrapper — settings and API key management
 // Only Service Worker reads complete keys; Popup only sees masked versions.
 
+import type { FilterConfig } from '@/content/message-filter'
+import { DEFAULT_FILTER_CONFIG } from '@/content/message-filter'
 import type { ProviderId } from '@/providers/types'
 
 export interface StorageAreaLike {
@@ -18,7 +20,7 @@ export interface ChromeStorageLike {
   session: StorageAreaLike
 }
 
-export interface UserSettings {
+export interface UserSettings extends FilterConfig {
   selectedProvider: ProviderId
   selectedModel: string
   targetLanguage: string
@@ -26,9 +28,11 @@ export interface UserSettings {
   botNameBlacklist: string[]
   minTextLength: number
   translationEnabled: boolean
+  filterConfig: FilterConfig
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
+  ...DEFAULT_FILTER_CONFIG,
   selectedProvider: 'deepseek',
   selectedModel: 'deepseek-v4-flash',
   targetLanguage: 'zh-TW',
@@ -36,6 +40,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   botNameBlacklist: [],
   minTextLength: 2,
   translationEnabled: true,
+  filterConfig: DEFAULT_FILTER_CONFIG,
 }
 
 export interface RuntimeState {

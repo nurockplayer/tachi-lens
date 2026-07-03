@@ -144,6 +144,12 @@
   },
   "hotPaths": [
     {
+      "path": "src/storage/settings.ts",
+      "accessCount": 10,
+      "lastAccessed": 1783084039563,
+      "type": "file"
+    },
+    {
       "path": "src/providers/gemini.ts",
       "accessCount": 8,
       "lastAccessed": 1782143268001,
@@ -165,6 +171,12 @@
       "path": "src/providers/prompt.test.ts",
       "accessCount": 5,
       "lastAccessed": 1782131367071,
+      "type": "file"
+    },
+    {
+      "path": "src/content/twitch-handler.test.ts",
+      "accessCount": 5,
+      "lastAccessed": 1783084120084,
       "type": "file"
     },
     {
@@ -198,15 +210,33 @@
       "type": "file"
     },
     {
+      "path": "src/shared/messages.ts",
+      "accessCount": 3,
+      "lastAccessed": 1783084076719,
+      "type": "file"
+    },
+    {
       "path": "src/providers/types.ts",
       "accessCount": 2,
       "lastAccessed": 1782131339220,
       "type": "file"
     },
     {
-      "path": "src/storage/settings.ts",
-      "accessCount": 1,
-      "lastAccessed": 1782130177260,
+      "path": "src/shared/messages.test.ts",
+      "accessCount": 2,
+      "lastAccessed": 1783083541170,
+      "type": "file"
+    },
+    {
+      "path": "src/content/message-filter.ts",
+      "accessCount": 2,
+      "lastAccessed": 1783083944667,
+      "type": "file"
+    },
+    {
+      "path": "src/popup/App.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1783084080465,
       "type": "file"
     },
     {
@@ -255,6 +285,18 @@
       "path": "CLAUDE.md",
       "accessCount": 1,
       "lastAccessed": 1782147959591,
+      "type": "file"
+    },
+    {
+      "path": "src/content/twitch-handler.ts",
+      "accessCount": 1,
+      "lastAccessed": 1783083924305,
+      "type": "file"
+    },
+    {
+      "path": "src/content/twitch-entry.ts",
+      "accessCount": 1,
+      "lastAccessed": 1783083995030,
       "type": "file"
     }
   ],
