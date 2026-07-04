@@ -10,6 +10,12 @@ vi.mock('@/storage/settings', () => ({
   })),
   getApiKeyForServiceWorker: vi.fn(async () => undefined),
   getRuntimeState: vi.fn(async () => ({})),
+  getChannelSettings: vi.fn(async () => undefined),
+  mergeSettings: vi.fn((global: unknown) => global),
+  saveApiKey: vi.fn(async () => undefined),
+  deleteApiKey: vi.fn(async () => undefined),
+  getMaskedApiKeyForPopup: vi.fn(async () => undefined),
+  saveUserSettings: vi.fn(async () => undefined),
 }))
 
 vi.mock('@/providers/registry', () => ({

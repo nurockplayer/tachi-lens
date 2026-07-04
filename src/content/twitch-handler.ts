@@ -167,7 +167,7 @@ export class TwitchMessageHandler {
         this.injectError(element, result.error)
       }
     } catch {
-      element.setAttribute(ATTR_PROCESSED, 'true')
+      // Runtime messaging failures are transient; leave the message retryable.
     }
   }
 

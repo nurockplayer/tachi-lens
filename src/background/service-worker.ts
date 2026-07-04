@@ -1,6 +1,17 @@
 import { getProvider } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
-import { getApiKeyForServiceWorker, getMaskedApiKeyForPopup, getRuntimeState, getUserSettings, initializeStorageAccess, saveApiKey, deleteApiKey, saveUserSettings } from '@/storage/settings'
+import {
+  deleteApiKey,
+  getApiKeyForServiceWorker,
+  getChannelSettings,
+  getMaskedApiKeyForPopup,
+  getRuntimeState,
+  getUserSettings,
+  initializeStorageAccess,
+  mergeSettings,
+  saveApiKey,
+  saveUserSettings,
+} from '@/storage/settings'
 import { isBaseMessage } from '@/shared/messages'
 import type { SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
@@ -34,6 +45,12 @@ const router = createMessageRouter({
   getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
   getProvider: (providerId) => getProvider(providerId),
   getRuntimeState: () => getRuntimeState(),
+  getContentSettings: async (channelName) => {
+    const global = await getUserSettings()
+    const channel = channelName ? await getChannelSettings(channelName) : undefined
+
+    return channel ? mergeSettings(global, channel) : global
+  },
   saveApiKey: (providerId, apiKey) => saveApiKey(providerId, apiKey),
   deleteApiKey: (providerId) => deleteApiKey(providerId),
   getMaskedApiKeyForPopup: (providerId) => getMaskedApiKeyForPopup(providerId),

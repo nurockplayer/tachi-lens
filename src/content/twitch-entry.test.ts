@@ -1,20 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/storage/settings', () => ({
-  getUserSettings: vi.fn(async () => ({
-    selectedProvider: 'deepseek',
-    selectedModel: 'deepseek-v4-flash',
-    targetLanguage: 'zh-TW',
-    botNameBlacklist: [],
-    minTextLength: 2,
-    displayMode: 'below',
-    translationEnabled: true,
-  })),
-  getChannelSettings: vi.fn(async () => undefined),
-  mergeSettings: vi.fn((global: unknown) => global),
-}))
-
 describe('content script entry', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -23,45 +9,45 @@ describe('content script entry', () => {
 
   describe('handleSettingsUpdate', () => {
     it('invalidates the settings cache (does not write storage directly)', async () => {
+      const sendMessage = vi.fn().mockResolvedValue({
+        type: 'content_settings',
+        payload: { translationEnabled: true },
+      })
       vi.stubGlobal('chrome', {
-        storage: { local: { get: vi.fn().mockResolvedValue({}), set: vi.fn() } },
-        runtime: { onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
       })
 
       const { handleSettingsUpdate, getSettings } = await import('./twitch-entry')
 
-      // getSettings reads raw storage
-      chrome.storage.local.get = vi.fn().mockResolvedValue({
-        userSettings: { translationEnabled: true },
-      })
-
       const before = await getSettings()
       expect(before).toEqual({ translationEnabled: true })
 
-      // handleSettingsUpdate should NOT write to storage
+      // handleSettingsUpdate should only invalidate the in-memory cache.
       await handleSettingsUpdate({ translationEnabled: false })
-      expect(vi.mocked(chrome.storage.local.set)).not.toHaveBeenCalled()
+      expect(sendMessage).toHaveBeenCalledTimes(1)
 
       vi.unstubAllGlobals()
     })
   })
 
   describe('getSettings', () => {
-    it('returns settings from chrome.storage.local', async () => {
+    it('returns settings from the service worker', async () => {
+      const sendMessage = vi.fn().mockResolvedValue({
+        type: 'content_settings',
+        payload: { targetLanguage: 'en' },
+      })
       vi.stubGlobal('chrome', {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValue({ userSettings: { targetLanguage: 'en' } }),
-            set: vi.fn(),
-          },
-        },
-        runtime: { onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
       })
 
       const { getSettings } = await import('./twitch-entry')
-      const result = await getSettings()
+      const result = await getSettings('mychannel')
 
       expect(result).toEqual({ targetLanguage: 'en' })
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'get_content_settings',
+        payload: { channelName: 'mychannel' },
+      })
 
       vi.unstubAllGlobals()
     })

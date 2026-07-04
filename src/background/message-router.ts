@@ -1,6 +1,7 @@
 import type { ProviderId, TranslationProvider } from '../providers/types'
 import {
   isBaseMessage,
+  isContentSettingsRequestMessage,
   isTranslationRequestMessage,
 } from '../shared/messages'
 import type { RuntimeState } from '../storage/settings'
@@ -11,6 +12,7 @@ export interface RouterDependencies {
   getApiKey: (providerId: ProviderId) => Promise<string | undefined>
   getProvider: (providerId: ProviderId) => TranslationProvider | undefined
   getRuntimeState: () => Promise<RuntimeState | undefined>
+  getContentSettings?: (channelName?: string) => Promise<unknown>
   saveApiKey?: (providerId: ProviderId, apiKey: string) => Promise<void>
   deleteApiKey?: (providerId: ProviderId) => Promise<void>
   getMaskedApiKeyForPopup?: (providerId: ProviderId) => Promise<string | undefined>
@@ -32,6 +34,38 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
       deps.translator
         .translate(message.payload)
         .then((result) => sendResponse({ type: 'translate_response', payload: result }))
+        .catch((err: unknown) =>
+          sendResponse({
+            type: 'translate_response',
+            payload: {
+              messageId: message.payload.messageId,
+              error: { type: 'unknown', message: getErrorMessage(err) },
+            },
+          }),
+        )
+
+      return true
+    }
+
+    if (isContentSettingsRequestMessage(message)) {
+      if (!deps.getContentSettings) {
+        sendResponse({
+          type: 'content_settings',
+          payload: { error: 'getContentSettings not available' },
+        })
+
+        return false
+      }
+
+      deps
+        .getContentSettings(message.payload?.channelName)
+        .then((settings) => sendResponse({ type: 'content_settings', payload: settings }))
+        .catch((err: unknown) =>
+          sendResponse({
+            type: 'content_settings',
+            payload: { error: getErrorMessage(err) },
+          }),
+        )
 
       return true
     }
@@ -180,3 +214,6 @@ const handleGetApiKeyPreview = async (
 
   sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '' } })
 }
+
+const getErrorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : 'Unknown runtime error'

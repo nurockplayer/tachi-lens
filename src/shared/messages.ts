@@ -3,6 +3,8 @@
 export type MessageType =
   | 'translate_request'
   | 'translate_response'
+  | 'get_content_settings'
+  | 'content_settings'
   | 'validate_key'
   | 'key_validation_result'
   | 'provider_status'
@@ -18,6 +20,8 @@ export type MessageType =
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
   'translate_response',
+  'get_content_settings',
+  'content_settings',
   'validate_key',
   'key_validation_result',
   'provider_status',
@@ -60,6 +64,10 @@ export interface TranslationResult {
   error?: ProviderError
 }
 
+export interface ContentSettingsRequest {
+  channelName?: string
+}
+
 /** Error types covering both API failures and user-actionable states. */
 export type ProviderError =
   | { type: 'auth'; status: 401; message: string }
@@ -98,6 +106,24 @@ export const isTranslationRequestMessage = (
     typeof value.payload.text === 'string' &&
     (value.payload.sourceLang === undefined || typeof value.payload.sourceLang === 'string')
   )
+}
+
+export const isContentSettingsRequestMessage = (
+  value: unknown,
+): value is BaseMessage<'get_content_settings', ContentSettingsRequest> => {
+  if (!isBaseMessage(value) || value.type !== 'get_content_settings') {
+    return false
+  }
+
+  if (value.payload === undefined) {
+    return true
+  }
+
+  if (!isRecord(value.payload)) {
+    return false
+  }
+
+  return value.payload.channelName === undefined || typeof value.payload.channelName === 'string'
 }
 
 export interface ErrorNotification {

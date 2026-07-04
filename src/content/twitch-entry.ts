@@ -1,4 +1,3 @@
-import { getChannelSettings, getUserSettings, mergeSettings } from '@/storage/settings'
 import { isSettingsUpdateMessage } from '@/shared/messages'
 import type { SettingsUpdatePayload } from '@/shared/messages'
 import { parseChannelFromPathname, TwitchMessageHandler, type ContentSettings } from './twitch-handler'
@@ -12,6 +11,10 @@ import {
   type PageSelectors,
 } from './twitch-selectors'
 import { DEFAULT_FILTER_CONFIG, FILTER_CONFIG_KEYS } from './message-filter'
+
+type RemoteContentSettings = Partial<Omit<ContentSettings, 'filterConfig'>> & {
+  filterConfig?: Partial<ContentSettings['filterConfig']>
+} & Partial<Record<(typeof FILTER_CONFIG_KEYS)[number], boolean>>
 
 let handler = new TwitchMessageHandler()
 let currentSelectors: PageSelectors = getSelectorsForPage('channel')
@@ -54,20 +57,11 @@ const invalidateSettingsCache = (): void => {
 const getContentSettings = async (forceRefresh = false): Promise<ContentSettings> => {
   if (cachedSettings && !forceRefresh) return cachedSettings
 
-  const global = await getUserSettings()
   const channelName = parseChannelFromPathname(window.location.pathname)
-
-  let merged: typeof global
-
-  if (channelName) {
-    const channel = await getChannelSettings(channelName)
-    merged = channel ? mergeSettings(global, channel) : global
-  } else {
-    merged = global
-  }
+  const merged = await getSettings(channelName)
 
   // Build filter config from settings (with defaults for any missing keys)
-  const filterConfig = { ...DEFAULT_FILTER_CONFIG }
+  const filterConfig = { ...DEFAULT_FILTER_CONFIG, ...merged.filterConfig }
   for (const key of FILTER_CONFIG_KEYS) {
     const val = merged[key]
     if (typeof val === 'boolean') {
@@ -76,10 +70,10 @@ const getContentSettings = async (forceRefresh = false): Promise<ContentSettings
   }
 
   cachedSettings = {
-    botNameBlacklist: merged.botNameBlacklist,
-    minTextLength: merged.minTextLength,
-    displayMode: merged.displayMode,
-    translationEnabled: merged.translationEnabled,
+    botNameBlacklist: Array.isArray(merged.botNameBlacklist) ? merged.botNameBlacklist : [],
+    minTextLength: typeof merged.minTextLength === 'number' ? merged.minTextLength : 2,
+    displayMode: isDisplayMode(merged.displayMode) ? merged.displayMode : 'below',
+    translationEnabled: typeof merged.translationEnabled === 'boolean' ? merged.translationEnabled : true,
     filterConfig,
   }
 
@@ -197,7 +191,7 @@ const processMessage = async (element: HTMLElement): Promise<void> => {
     const settings = await getContentSettings()
     await handler.translateAndInject(element, settings)
   } catch {
-    element.setAttribute(ATTR_PROCESSED, 'true')
+    // Runtime/settings failures are transient; leave the message retryable.
   } finally {
     inFlight.delete(element)
   }
@@ -236,10 +230,25 @@ const cleanup = (): void => {
 }
 
 // --- Exports (for testing) ---
-export const getSettings = async (): Promise<Record<string, unknown>> => {
-  const items = await chrome.storage.local.get('userSettings')
-  return (items.userSettings as Record<string, unknown>) ?? {}
+export const getSettings = async (channelName?: string): Promise<RemoteContentSettings> => {
+  const response = (await chrome.runtime.sendMessage({
+    type: 'get_content_settings',
+    payload: { channelName },
+  } as const)) as { type?: string; payload?: RemoteContentSettings & { error?: unknown } } | undefined
+
+  if (response?.type !== 'content_settings' || !response.payload || typeof response.payload !== 'object') {
+    throw new Error('Content settings response missing payload')
+  }
+
+  if (typeof response.payload.error === 'string') {
+    throw new Error(response.payload.error)
+  }
+
+  return response.payload
 }
+
+const isDisplayMode = (value: unknown): value is ContentSettings['displayMode'] =>
+  value === 'below' || value === 'hover' || value === 'collapse'
 
 export const handleSettingsUpdate = async (_payload: SettingsUpdatePayload): Promise<void> => {
   invalidateSettingsCache()

@@ -43,6 +43,10 @@ const makeRouter = (routerDepOverrides?: Partial<RouterDependencies>) => {
         activeProvider: 'deepseek' as ProviderId,
         validationInProgress: false,
       })),
+      getContentSettings: vi.fn(async () => ({
+        translationEnabled: true,
+        targetLanguage: 'zh-TW',
+      })),
       ...routerDepOverrides,
     }),
     translator,
@@ -93,6 +97,62 @@ describe('MessageRouter', () => {
 
       expect(result).toBe(false)
       expect(sendResponse).not.toHaveBeenCalled()
+    })
+
+    it('sends a structured response when translation rejects', async () => {
+      const translator = {
+        translate: vi.fn(async () => {
+          throw new Error('settings unavailable')
+        }),
+      } as unknown as Translator
+      const { router } = makeRouter({ translator })
+      const sendResponse = vi.fn()
+
+      const result = router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm1', text: 'Hello' } },
+        undefined,
+        sendResponse,
+      )
+
+      expect(result).toBe(true)
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledTimes(1)
+      })
+
+      const response = sendResponse.mock.calls[0]![0]
+      expect(response.type).toBe('translate_response')
+      expect(response.payload.messageId).toBe('m1')
+      expect(response.payload.error.message).toBe('settings unavailable')
+    })
+  })
+
+  describe('get_content_settings', () => {
+    it('returns merged content settings from the service worker', async () => {
+      const getContentSettings = vi.fn(async () => ({
+        translationEnabled: true,
+        targetLanguage: 'ja',
+      }))
+      const { router } = makeRouter({ getContentSettings })
+      const sendResponse = vi.fn()
+
+      const result = router.handleMessage(
+        { type: 'get_content_settings', payload: { channelName: 'somechannel' } },
+        undefined,
+        sendResponse,
+      )
+
+      expect(result).toBe(true)
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledTimes(1)
+      })
+
+      expect(getContentSettings).toHaveBeenCalledWith('somechannel')
+      expect(sendResponse.mock.calls[0]![0]).toEqual({
+        type: 'content_settings',
+        payload: { translationEnabled: true, targetLanguage: 'ja' },
+      })
     })
   })
 

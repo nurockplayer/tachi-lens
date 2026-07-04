@@ -315,6 +315,16 @@ describe('TwitchMessageHandler', () => {
       expect(el.querySelector('[data-tachi-lens-translated]')).not.toBeNull()
     })
 
+    it('leaves messages retryable when runtime messaging fails', async () => {
+      const el = createMessageElement({ text: 'Hello' })
+      sendMessageMock.mockRejectedValue(new Error('Receiving end does not exist'))
+
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
+
+      expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+      expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+
     it('does nothing when translation is disabled', async () => {
       const el = createMessageElement({ text: 'Hello' })
       await handler.translateAndInject(el, { ...DEFAULT_SETTINGS, translationEnabled: false })

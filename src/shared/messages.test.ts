@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isBaseMessage,
+  isContentSettingsRequestMessage,
   isErrorNotificationMessage,
   isSettingsUpdateMessage,
   isTranslationRequestMessage,
@@ -42,6 +43,21 @@ describe('message protocol guards', () => {
     }
 
     expect(serializeMessage(message)).toBe('{"type":"translate_request","payload":{"messageId":"m1","text":"Hello"}}')
+  })
+
+  it('narrows content settings requests with an optional channel name', () => {
+    expect(isContentSettingsRequestMessage({
+      type: 'get_content_settings',
+      payload: { channelName: 'somechannel' },
+    })).toBe(true)
+    expect(isContentSettingsRequestMessage({
+      type: 'get_content_settings',
+      payload: {},
+    })).toBe(true)
+    expect(isContentSettingsRequestMessage({
+      type: 'get_content_settings',
+      payload: { channelName: 123 },
+    })).toBe(false)
   })
 
   describe('error_notification messages', () => {
