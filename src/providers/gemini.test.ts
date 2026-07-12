@@ -34,7 +34,64 @@ describe('Gemini provider', () => {
       const results = await provider.translateBatch(REQS, 'bad-key', 'gemini-2.5-flash', 'zh-TW')
 
       expect(results).toHaveLength(2)
-      expect(results[0]!.error).toContain('403')
+      expect(results[0]).toEqual({
+        id: 'm1',
+        error: 'API key not valid',
+        status: 403,
+      })
+    })
+
+    it('preserves Gemini 429 details and retry delay', async () => {
+      const fetchFn = mockFetch(429, {
+        error: {
+          message: 'Quota exceeded for gemini-2.5-flash',
+          details: [
+            {
+              '@type': 'type.googleapis.com/google.rpc.RetryInfo',
+              retryDelay: '44.5s',
+            },
+          ],
+        },
+      })
+      const provider = createGeminiProvider(fetchFn)
+
+      const results = await provider.translateBatch(
+        REQS,
+        'fake-key',
+        'gemini-2.5-flash',
+        'zh-TW',
+      )
+
+      expect(results[0]).toEqual({
+        id: 'm1',
+        error: 'Quota exceeded for gemini-2.5-flash',
+        status: 429,
+        retryAfterMs: 44_500,
+      })
+      expect(results[1]).toEqual({
+        id: 'm2',
+        error: 'Quota exceeded for gemini-2.5-flash',
+        status: 429,
+        retryAfterMs: 44_500,
+      })
+    })
+
+    it('returns safe metadata when the Gemini error body is malformed', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(new Response('not-json', { status: 503 }))
+      const provider = createGeminiProvider(fetchFn)
+
+      const results = await provider.translateBatch(
+        REQS,
+        'fake-key',
+        'gemini-2.5-flash',
+        'zh-TW',
+      )
+
+      expect(results[0]).toEqual({
+        id: 'm1',
+        error: 'Gemini API error (503)',
+        status: 503,
+      })
     })
 
     it('returns error when candidates array is missing', async () => {
