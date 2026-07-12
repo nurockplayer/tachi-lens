@@ -25,6 +25,11 @@ describe('DeepSeek provider', () => {
         { id: 'm1', translatedText: '你好' },
         { id: 'm2', translatedText: '世界' },
       ])
+      const request = vi.mocked(fetchFn).mock.calls[0]![1] as RequestInit
+      expect(JSON.parse(request.body as string)).toMatchObject({
+        model: 'deepseek-v4-flash',
+        thinking: { type: 'disabled' },
+      })
     })
 
     it('returns error for non-ok response', async () => {
@@ -33,7 +38,30 @@ describe('DeepSeek provider', () => {
 
       const results = await provider.translateBatch(REQS, 'bad-key', 'deepseek-v4-flash', 'zh-TW')
 
-      expect(results[0]!.error).toContain('401')
+      expect(results[0]).toEqual({
+        id: 'm1',
+        error: 'Invalid API Key',
+        status: 401,
+      })
+    })
+
+    it('preserves structured error status and Retry-After metadata', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        error: { message: 'DeepSeek rate limit reached' },
+      }), {
+        status: 429,
+        headers: { 'Retry-After': '12.5' },
+      }))
+      const provider = createDeepSeekProvider(fetchFn)
+
+      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+
+      expect(results[0]).toEqual({
+        id: 'm1',
+        error: 'DeepSeek rate limit reached',
+        status: 429,
+        retryAfterMs: 12_500,
+      })
     })
 
     it('returns error when choices are missing', async () => {
@@ -63,6 +91,16 @@ describe('DeepSeek provider', () => {
       const result = await provider.validateKey('good-key')
 
       expect(result.valid).toBe(true)
+    })
+
+    it('rejects a key whose model list does not include DeepSeek V4 Flash', async () => {
+      const fetchFn = mockFetch(200, { data: [{ id: 'another-model' }] })
+      const provider = createDeepSeekProvider(fetchFn)
+
+      const result = await provider.validateKey('valid-key-without-v4-flash')
+
+      expect(result.valid).toBe(false)
+      expect(result.error).toContain('deepseek-v4-flash')
     })
 
     it('rejects an invalid key', async () => {
