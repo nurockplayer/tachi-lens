@@ -1,5 +1,5 @@
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
-import type { ProviderModel, TranslationProvider } from './types'
+import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const DEEPSEEK_MODELS: ProviderModel[] = [
   { id: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash' },
@@ -30,6 +30,7 @@ export const createDeepSeekProvider = (
         },
         body: JSON.stringify({
           model,
+          thinking: { type: 'disabled' },
           messages: [
             { role: 'system', content: prompt.system },
             { role: 'user', content: prompt.user },
@@ -38,7 +39,14 @@ export const createDeepSeekProvider = (
       })
 
       if (!response.ok) {
-        return allErrors(requests, `DeepSeek API error (${response.status})`)
+        const body = await readErrorBody(response)
+        const error = getErrorMessage(body) ?? `DeepSeek API error (${response.status})`
+        const retryAfterMs = getRetryAfterMs(response)
+
+        return allErrors(requests, error, {
+          status: response.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+        })
       }
 
       const data: unknown = await response.json()
@@ -59,9 +67,18 @@ export const createDeepSeekProvider = (
       const response = await fetchFn(`${BASE_URL}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       })
+
+      if (!response.ok) {
+        return { valid: false, error: `DeepSeek key validation failed (${response.status})` }
+      }
+
+      const body: unknown = await response.json()
+      const models = isRecord(body) && Array.isArray(body.data) ? body.data : []
+      const hasV4Flash = models.some((model) => isRecord(model) && model.id === DEEPSEEK_DEFAULT_MODEL)
+
       return {
-        valid: response.ok,
-        error: response.ok ? undefined : `DeepSeek key validation failed (${response.status})`,
+        valid: hasV4Flash,
+        error: hasV4Flash ? undefined : `DeepSeek model "${DEEPSEEK_DEFAULT_MODEL}" is unavailable`,
       }
     } catch (err) {
       return { valid: false, error: err instanceof Error ? err.message : 'Unknown error' }
@@ -74,5 +91,36 @@ const extractChatText = (data: unknown): string | undefined => {
   return (choices?.[0]?.message as Record<string, unknown>)?.content as string | undefined
 }
 
-const allErrors = (requests: { id: string }[], error: string) =>
-  requests.map((r) => ({ id: r.id, error }))
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const readErrorBody = async (response: Response): Promise<Record<string, unknown> | undefined> => {
+  try {
+    const body: unknown = await response.json()
+    return isRecord(body) ? body : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const getErrorMessage = (body: Record<string, unknown> | undefined): string | undefined => {
+  const error = body?.error
+  if (!isRecord(error) || typeof error.message !== 'string') return undefined
+
+  const message = error.message.trim()
+  return message ? message.slice(0, 500) : undefined
+}
+
+const getRetryAfterMs = (response: Response): number | undefined => {
+  const value = response.headers.get('retry-after')?.trim()
+  if (!value || !/^\d+(?:\.\d+)?$/.test(value)) return undefined
+
+  const seconds = Number(value)
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
+}
+
+const allErrors = (
+  requests: { id: string }[],
+  error: string,
+  metadata: Partial<Pick<BatchItemResult, 'status' | 'retryAfterMs'>> = {},
+) => requests.map((r) => ({ id: r.id, error, ...metadata }))

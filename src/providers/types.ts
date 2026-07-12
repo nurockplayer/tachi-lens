@@ -19,6 +19,8 @@ export interface BatchItemResult {
   id: string
   translatedText?: string
   error?: string
+  status?: number
+  retryAfterMs?: number
 }
 
 export interface TranslationProvider {
