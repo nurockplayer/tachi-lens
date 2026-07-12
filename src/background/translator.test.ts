@@ -324,6 +324,58 @@ describe('Translator', () => {
   })
 
   describe('rate limiting', () => {
+    it('uses structured Gemini 429 metadata and provider retry delay', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        {
+          id: 'msg1',
+          error: 'Quota exceeded for gemini-2.5-flash',
+          status: 429,
+          retryAfterMs: 44_500,
+        },
+      ])
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'gemini' as ProviderId,
+        selectedModel: 'gemini-2.5-flash',
+        targetLanguage: 'zh-TW',
+      }))
+      deps.getProvider = vi.fn(() => provider)
+
+      const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+      const result = await resultPromise
+
+      expect(result).toEqual({
+        messageId: 'msg1',
+        error: {
+          type: 'rate_limited',
+          retryAfterMs: 44_500,
+          message: 'Quota exceeded for gemini-2.5-flash',
+        },
+      })
+      expect(deps.rateLimiter.getRemainingCooldown('gemini')).toBe(44_500)
+    })
+
+    it('does not poison the rate limiter after a network exception', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch)
+        .mockRejectedValueOnce(new Error('Network failure'))
+        .mockResolvedValueOnce([{ id: 'msg2', translatedText: '世界' }])
+      deps.getProvider = vi.fn(() => provider)
+
+      const firstPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+      const firstResult = await firstPromise
+
+      const secondPromise = translator.translate({ messageId: 'msg2', text: 'World' })
+      vi.advanceTimersByTime(150)
+      const secondResult = await secondPromise
+
+      expect(firstResult.error?.type).toBe('network')
+      expect(secondResult).toEqual({ messageId: 'msg2', translatedText: '世界' })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
+    })
+
     it('returns rate_limited error without calling provider when rate limited', async () => {
       const provider = createMockProvider()
       deps.getProvider = vi.fn(() => provider)

@@ -76,6 +76,33 @@ describe('Gemini provider', () => {
       })
     })
 
+    it('prefers the Retry-After header for Gemini 429 cooldown', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          error: {
+            message: 'Request rate exceeded',
+            details: [
+              {
+                '@type': 'type.googleapis.com/google.rpc.RetryInfo',
+                retryDelay: '44s',
+              },
+            ],
+          },
+        }),
+        { status: 429, headers: { 'Retry-After': '12.5' } },
+      ))
+      const provider = createGeminiProvider(fetchFn)
+
+      const results = await provider.translateBatch(
+        REQS,
+        'fake-key',
+        'gemini-2.5-flash',
+        'zh-TW',
+      )
+
+      expect(results[0]!.retryAfterMs).toBe(12_500)
+    })
+
     it('returns safe metadata when the Gemini error body is malformed', async () => {
       const fetchFn = vi.fn().mockResolvedValue(new Response('not-json', { status: 503 }))
       const provider = createGeminiProvider(fetchFn)

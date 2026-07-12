@@ -135,13 +135,7 @@ export class Translator {
         model,
         targetLang,
       )
-
-      // Reset rate limiter on successful API response
-      this.deps.rateLimiter.reset(settings.selectedProvider)
     } catch (err) {
-      // Record rate limit on network/provider errors
-      this.deps.rateLimiter.recordError(settings.selectedProvider, 30_000)
-
       const error: ProviderError = {
         type: 'network',
         message: err instanceof Error ? err.message : 'Unknown error',
@@ -152,9 +146,17 @@ export class Translator {
       return
     }
 
-    // Detect rate limit errors from batch response
-    if (batchResults.some((r) => r.error?.includes('(429)'))) {
-      this.deps.rateLimiter.recordError(settings.selectedProvider, 30_000)
+    const rateLimitedResult = batchResults.find((result) =>
+      result.status === 429 || result.error?.includes('(429)'),
+    )
+
+    if (rateLimitedResult) {
+      this.deps.rateLimiter.recordError(
+        settings.selectedProvider,
+        rateLimitedResult.retryAfterMs ?? 30_000,
+      )
+    } else {
+      this.deps.rateLimiter.reset(settings.selectedProvider)
     }
 
     for (const item of uncached) {
@@ -199,12 +201,12 @@ export class Translator {
     const errorMsg = batchResult.error ?? 'Unknown error'
 
     // Detect rate limit patterns in error string
-    if (/rate\s*limit|429|too many requests/i.test(errorMsg)) {
+    if (batchResult.status === 429 || /rate\s*limit|429|too many requests/i.test(errorMsg)) {
       return {
         messageId,
         error: {
           type: 'rate_limited',
-          retryAfterMs: (batchResult as { retryAfterMs?: number }).retryAfterMs ?? 1_000,
+          retryAfterMs: batchResult.retryAfterMs ?? 1_000,
           message: errorMsg,
         },
       }
