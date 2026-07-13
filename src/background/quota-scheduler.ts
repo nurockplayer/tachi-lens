@@ -52,6 +52,7 @@ interface QueuedBatch extends Omit<ScheduledBatch, 'profile' | 'quotaKey'> {
   geminiResults?: BatchItemResult[]
   settled: boolean
   quotaDenial?: GeminiQuotaDenial
+  waitingForQuota?: boolean
 }
 
 const allErrors = (
@@ -148,9 +149,11 @@ export class QuotaScheduler {
           }
 
           if (
-            preserveBacklogPriority &&
             batch.priority === 'backlog' &&
-            this.hasRunnable(this.live, deferred)
+            (
+              (preserveBacklogPriority && this.hasRunnable(this.live, deferred)) ||
+              this.hasLiveQuotaWaiter()
+            )
           ) {
             if (!this.startDeepSeek(batch, batch.requests)) {
               this.push(batch)
@@ -204,6 +207,7 @@ export class QuotaScheduler {
               this.now() < batch.deadline
 
             if (canWait) {
+              batch.waitingForQuota = true
               this.push(batch)
               deferred.add(batch)
               this.scheduleWake(Math.min(reservation.nextAvailableAt!, batch.deadline))
@@ -252,6 +256,7 @@ export class QuotaScheduler {
             }
           }
 
+          batch.waitingForQuota = false
           this.startGemini(batch)
         } catch (error) {
           this.settle(batch, {
@@ -405,11 +410,11 @@ export class QuotaScheduler {
 
         const fallback = replacements.get(request.id)
         const original = primary.get(request.id)
-        if (fallback?.errorType === 'auth' && original?.status === 429) {
-          return {
-            ...original,
-            error: `${original.error ?? 'Gemini is rate limited'} DeepSeek fallback unavailable: ${fallback.error}.`,
-          }
+        if (
+          original?.status === 429 &&
+          (fallback?.errorType === 'auth' || fallback?.errorType === 'bad_request')
+        ) {
+          return original
         }
         return fallback ?? { id: request.id, error: 'DeepSeek fallback failed', errorType: 'unknown' }
       }),
@@ -457,6 +462,10 @@ export class QuotaScheduler {
 
   private hasRunnable(queue: QueuedBatch[], deferred: Set<QueuedBatch>): boolean {
     return queue.some((batch) => !deferred.has(batch))
+  }
+
+  private hasLiveQuotaWaiter(): boolean {
+    return this.live.some((batch) => batch.waitingForQuota)
   }
 
   private shouldYieldBacklogToLive(

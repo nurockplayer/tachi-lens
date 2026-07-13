@@ -308,6 +308,84 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
 
+    it('overflows smaller backlog work while a live Gemini batch can still wait for quota', async () => {
+      let now = Date.UTC(2026, 6, 14, 12)
+      const session: Record<string, unknown> = {}
+      const local: Record<string, unknown> = {}
+      const storage: QuotaStorage = {
+        getSession: async () => session,
+        setSession: async (value) => { Object.assign(session, value) },
+        getLocal: async () => local,
+        setLocal: async (value) => { Object.assign(local, value) },
+      }
+      const quota = new GeminiQuotaStore(storage, () => now)
+      const liveProfile = {
+        ...DEFAULT_GEMINI_QUOTA,
+        requestsPerMinute: 1,
+        rpmSafetyPercent: 100,
+        inputTokensPerMinute: 1_000_000,
+        tpmSafetyPercent: 100,
+        requestsPerDay: 100,
+        rpdSafetyPercent: 100,
+        liveMaxWaitMs: 1_000,
+        maxConcurrency: 2,
+      }
+      const backlogProfile = {
+        ...liveProfile,
+        requestsPerMinute: 100,
+      }
+      await quota.reserve(liveProfile, 1, 'gemini-2.5-flash')
+      now += 59_500
+
+      let selectedModel = 'gemini-2.5-flash'
+      const gemini = createMockProvider('gemini')
+      const deepseek = createMockProvider('deepseek')
+      vi.mocked(gemini.translateBatch).mockImplementation(async (requests) =>
+        requests.map((request) => ({ id: request.id, translatedText: `g-${request.id}` })),
+      )
+      vi.mocked(deepseek.translateBatch).mockImplementation(async (requests) =>
+        requests.map((request) => ({ id: request.id, translatedText: `d-${request.id}` })),
+      )
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'gemini' as ProviderId,
+        selectedModel,
+        targetLanguage: 'zh-TW',
+        geminiQuotaProfiles: {
+          'gemini-2.5-flash': liveProfile,
+          'gemini-2.5-pro': backlogProfile,
+        },
+      }))
+      deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
+      deps.quotaScheduler = new QuotaScheduler(quota, { now: () => now })
+      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+
+      const live = Promise.all([
+        translator.translate({ messageId: 'live-1', text: 'live one', priority: 'live' }),
+        translator.translate({ messageId: 'live-2', text: 'live two', priority: 'live' }),
+      ])
+      await vi.waitFor(() => expect(deps.getSettings).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(0)
+
+      selectedModel = 'gemini-2.5-pro'
+      const backlog = translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })
+      await vi.advanceTimersByTimeAsync(150)
+
+      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(deepseek.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['backlog'])
+      expect(gemini.translateBatch).not.toHaveBeenCalled()
+
+      now += 500
+      await vi.advanceTimersByTimeAsync(500)
+
+      await expect(live).resolves.toEqual([
+        { messageId: 'live-1', translatedText: 'g-live-1' },
+        { messageId: 'live-2', translatedText: 'g-live-2' },
+      ])
+      await expect(backlog).resolves.toEqual({ messageId: 'backlog', translatedText: 'd-backlog' })
+      expect(vi.mocked(gemini.translateBatch).mock.calls[0]![0].map(({ id }) => id))
+        .toEqual(['live-1', 'live-2'])
+    })
+
     it('keeps Gemini quota and cooldown state independent for each selected model', async () => {
       let selectedModel = 'gemini-2.5-flash'
       const gemini = createMockProvider('gemini')
@@ -990,6 +1068,45 @@ describe('Translator', () => {
           type: 'rate_limited',
           retryAfterMs: 57_000,
           message: expect.stringContaining('Gemini quota exhausted'),
+        },
+      })
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      { fallbackFailure: 'auth' as const },
+      { fallbackFailure: 'bad_request' as const },
+    ])('preserves the original Gemini 429 when DeepSeek fallback returns $fallbackFailure', async ({ fallbackFailure }) => {
+      const gemini = createMockProvider('gemini')
+      const deepseek = createMockProvider('deepseek')
+      vi.mocked(gemini.translateBatch).mockResolvedValue([
+        { id: 'msg1', error: 'Gemini quota exhausted', status: 429, retryAfterMs: 57_000 },
+      ])
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'gemini' as ProviderId,
+        selectedModel: 'gemini-2.5-flash',
+        targetLanguage: 'zh-TW',
+      }))
+      deps.getApiKey = vi.fn(async (providerId) => {
+        if (providerId === 'gemini') return 'gemini-key'
+        return fallbackFailure === 'auth' ? undefined : 'deepseek-key'
+      })
+      deps.getProvider = vi.fn((providerId) => {
+        if (providerId === 'gemini') return gemini
+        return fallbackFailure === 'bad_request' ? undefined : deepseek
+      })
+      deps.quotaScheduler = createQuotaScheduler()
+      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+
+      const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      await vi.advanceTimersByTimeAsync(150)
+
+      await expect(result).resolves.toEqual({
+        messageId: 'msg1',
+        error: {
+          type: 'rate_limited',
+          retryAfterMs: 57_000,
+          message: 'Gemini quota exhausted',
         },
       })
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
