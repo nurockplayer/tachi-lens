@@ -99,10 +99,10 @@ describe('MessageRouter', () => {
       expect(sendResponse).not.toHaveBeenCalled()
     })
 
-    it('sends a structured response when translation rejects', async () => {
+    it('does not expose a rejected translation error to the content script', async () => {
       const translator = {
         translate: vi.fn(async () => {
-          throw new Error('settings unavailable')
+          throw new Error('settings unavailable for sk-secret-key')
         }),
       } as unknown as Translator
       const { router } = makeRouter({ translator })
@@ -123,7 +123,38 @@ describe('MessageRouter', () => {
       const response = sendResponse.mock.calls[0]![0]
       expect(response.type).toBe('translate_response')
       expect(response.payload.messageId).toBe('m1')
-      expect(response.payload.error.message).toBe('settings unavailable')
+      expect(response.payload.error.message).toBe('Translation request failed')
+      expect(JSON.stringify(response)).not.toContain('sk-secret-key')
+    })
+
+    it('does not expose provider error content to the content script', async () => {
+      const translator = {
+        translate: vi.fn(async () => ({
+          messageId: 'm1',
+          error: {
+            type: 'bad_request' as const,
+            status: 400,
+            message: 'Request contained Private chat text and key sk-secret-key',
+          },
+        })),
+      } as unknown as Translator
+      const { router } = makeRouter({ translator })
+      const sendResponse = vi.fn()
+
+      router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm1', text: 'Private chat text' } },
+        undefined,
+        sendResponse,
+      )
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledTimes(1)
+      })
+
+      const response = sendResponse.mock.calls[0]![0]
+      expect(response.payload.error.message).toBe('Translation request failed')
+      expect(JSON.stringify(response)).not.toContain('Private chat text')
+      expect(JSON.stringify(response)).not.toContain('sk-secret-key')
     })
   })
 

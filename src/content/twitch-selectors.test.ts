@@ -204,6 +204,13 @@ describe('matchesFirst', () => {
     expect(matchesFirst(div, CHAT_MESSAGE)).toBe(false)
   })
 
+  it('does not mistake a chat message body for the message root', () => {
+    const body = document.createElement('span')
+    body.className = 'chat-line__message-body'
+
+    expect(matchesFirst(body, CHAT_MESSAGE)).toBe(false)
+  })
+
   it('falls back to element.matches() when primary has no fallback entry', () => {
     document.body.innerHTML = ''
     const div = document.createElement('div')
@@ -283,7 +290,28 @@ describe('queryFirstAll', () => {
     expect(nodes.length).toBe(2)
   })
 
-  it('returns empty NodeList when nothing matches', () => {
+  it('merges primary and fallback matches without duplicates', () => {
+    document.body.innerHTML = ''
+    const primary = document.createElement('div')
+    primary.className = 'chat-line__message'
+
+    const fallback = document.createElement('div')
+    fallback.setAttribute('data-test-selector', 'chat-message')
+
+    const matchingBoth = document.createElement('div')
+    matchingBoth.className = 'chat-line__message'
+    matchingBoth.setAttribute('data-test-selector', 'chat-message')
+
+    document.body.append(primary, fallback, matchingBoth)
+
+    expect(queryFirstAll(document.body, CHAT_MESSAGE)).toEqual([
+      primary,
+      matchingBoth,
+      fallback,
+    ])
+  })
+
+  it('returns an empty collection when nothing matches', () => {
     document.body.innerHTML = ''
     const container = document.createElement('div')
     document.body.appendChild(container)

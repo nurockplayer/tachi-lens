@@ -18,7 +18,6 @@ const FALLBACKS: Record<string, string[]> = {
   [CHAT_MESSAGE]: [
     CHAT_MESSAGE,
     '[data-test-selector="chat-message"]',
-    '[class*="chat-line"]',
   ],
   [CHAT_MESSAGE_BODY]: [
     CHAT_MESSAGE_BODY,
@@ -36,6 +35,7 @@ const FALLBACKS: Record<string, string[]> = {
 // Chat message attributes
 export const ATTR_PROCESSED = 'data-tachi-lens-processed'
 export const ATTR_TRANSLATED = 'data-tachi-lens-translated'
+export const ATTR_ORIGINAL_HASH = 'data-tachi-lens-original-hash'
 
 export type PageType = 'channel' | 'popout' | 'vod' | 'clip' | 'unknown'
 
@@ -107,18 +107,22 @@ export const queryFirst = (scope: ParentNode, primary: string): Element | null =
 }
 
 /**
- * Try querySelectorAll with fallbacks.
- * Returns results from the highest-priority selector that returns anything.
+ * Query every selector fallback and return unique matches in selector priority order.
  */
-export const queryFirstAll = (scope: ParentNode, primary: string): NodeListOf<Element> => {
+export const queryFirstAll = (scope: ParentNode, primary: string): Element[] => {
   const fallbacks = FALLBACKS[primary]
-  if (!fallbacks) return scope.querySelectorAll(primary)
+  if (!fallbacks) return Array.from(scope.querySelectorAll(primary))
 
+  const seen = new Set<Element>()
+  const results: Element[] = []
   for (const sel of fallbacks) {
-    const nodes = scope.querySelectorAll(sel)
-    if (nodes.length > 0) return nodes
+    for (const node of scope.querySelectorAll(sel)) {
+      if (seen.has(node)) continue
+      seen.add(node)
+      results.push(node)
+    }
   }
-  return scope.querySelectorAll(primary)
+  return results
 }
 
 /**

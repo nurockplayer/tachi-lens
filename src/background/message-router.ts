@@ -4,6 +4,7 @@ import {
   isContentSettingsRequestMessage,
   isTranslationRequestMessage,
 } from '../shared/messages'
+import type { TranslationResult } from '../shared/messages'
 import type { RuntimeState } from '../storage/settings'
 import { Translator } from './translator'
 
@@ -20,6 +21,20 @@ export interface RouterDependencies {
 
 type SendResponse = (response: unknown) => void
 
+const CONTENT_SAFE_TRANSLATION_ERROR_MESSAGE = 'Translation request failed'
+
+const sanitizeTranslationResultForContent = (result: TranslationResult): TranslationResult => {
+  if (!result.error) return result
+
+  return {
+    ...result,
+    error: {
+      ...result.error,
+      message: CONTENT_SAFE_TRANSLATION_ERROR_MESSAGE,
+    },
+  }
+}
+
 export interface MessageRouter {
   handleMessage(
     message: unknown,
@@ -33,13 +48,16 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
     if (isTranslationRequestMessage(message)) {
       deps.translator
         .translate(message.payload)
-        .then((result) => sendResponse({ type: 'translate_response', payload: result }))
-        .catch((err: unknown) =>
+        .then((result) => sendResponse({
+          type: 'translate_response',
+          payload: sanitizeTranslationResultForContent(result),
+        }))
+        .catch(() =>
           sendResponse({
             type: 'translate_response',
             payload: {
               messageId: message.payload.messageId,
-              error: { type: 'unknown', message: getErrorMessage(err) },
+              error: { type: 'unknown', message: CONTENT_SAFE_TRANSLATION_ERROR_MESSAGE },
             },
           }),
         )

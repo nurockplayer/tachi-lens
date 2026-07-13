@@ -16,6 +16,9 @@ export type MessageType =
   | 'delete_api_key_result'
   | 'get_api_key_preview'
   | 'api_key_preview'
+  | 'diagnostic_event'
+  | 'get_diagnostics'
+  | 'diagnostics_snapshot'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -33,6 +36,9 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'delete_api_key_result',
   'get_api_key_preview',
   'api_key_preview',
+  'diagnostic_event',
+  'get_diagnostics',
+  'diagnostics_snapshot',
 ]
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
@@ -63,6 +69,41 @@ export interface TranslationResult {
   translatedText?: string
   error?: ProviderError
 }
+
+export type DiagnosticStage =
+  | 'chat_container_ready'
+  | 'chat_container_missing'
+  | 'message_detected'
+  | 'message_not_ready'
+  | 'message_skipped'
+  | 'translation_requested'
+  | 'translation_received'
+  | 'translation_failed'
+  | 'translation_injected'
+
+/** A privacy-safe lifecycle event. It never includes chat text, usernames, or API keys. */
+export interface DiagnosticEvent {
+  id: string
+  stage: DiagnosticStage
+  timestamp: number
+  detail?: string
+}
+
+export interface DiagnosticsSnapshot {
+  events: DiagnosticEvent[]
+}
+
+const DIAGNOSTIC_STAGES: readonly DiagnosticStage[] = [
+  'chat_container_ready',
+  'chat_container_missing',
+  'message_detected',
+  'message_not_ready',
+  'message_skipped',
+  'translation_requested',
+  'translation_received',
+  'translation_failed',
+  'translation_injected',
+]
 
 export interface ContentSettingsRequest {
   channelName?: string
@@ -124,6 +165,23 @@ export const isContentSettingsRequestMessage = (
   }
 
   return value.payload.channelName === undefined || typeof value.payload.channelName === 'string'
+}
+
+export const isDiagnosticEventMessage = (
+  value: unknown,
+): value is BaseMessage<'diagnostic_event', DiagnosticEvent> => {
+  if (!isBaseMessage(value) || value.type !== 'diagnostic_event' || !isRecord(value.payload)) {
+    return false
+  }
+
+  const payload = value.payload as Record<string, unknown>
+  return (
+    typeof payload.id === 'string' &&
+    typeof payload.stage === 'string' &&
+    DIAGNOSTIC_STAGES.includes(payload.stage as DiagnosticStage) &&
+    typeof payload.timestamp === 'number' &&
+    (payload.detail === undefined || typeof payload.detail === 'string')
+  )
 }
 
 export interface ErrorNotification {
