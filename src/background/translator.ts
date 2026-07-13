@@ -1,7 +1,10 @@
 import type { BatchItemResult, ProviderId, TranslationProvider } from '@/providers/types'
+import { buildTranslationPrompt } from '@/providers/prompt'
 import type { ProviderError, TranslationRequest, TranslationResult } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { type RateLimiter } from './rate-limiter'
+import type { GeminiQuotaSettings } from './gemini-quota'
+import { type QuotaScheduler } from './quota-scheduler'
 
 export interface TranslatorDependencies {
   cache: TranslationCache
@@ -10,9 +13,11 @@ export interface TranslatorDependencies {
     selectedProvider: ProviderId
     selectedModel: string
     targetLanguage: string
+    geminiQuota?: GeminiQuotaSettings
   }>
   getApiKey: (providerId: ProviderId) => Promise<string | undefined>
   getProvider: (providerId: ProviderId) => TranslationProvider | undefined
+  quotaScheduler?: QuotaScheduler
 }
 
 export interface TranslatorOptions {
@@ -68,7 +73,7 @@ export class Translator {
     const settings = await this.deps.getSettings()
     const apiKey = await this.deps.getApiKey(settings.selectedProvider)
 
-    if (!apiKey) {
+    if (!apiKey && !(settings.selectedProvider === 'gemini' && this.deps.quotaScheduler)) {
       this.resolveAll(items, {
         type: 'auth',
         status: 401,
@@ -80,7 +85,7 @@ export class Translator {
 
     const provider = this.deps.getProvider(settings.selectedProvider)
 
-    if (!provider) {
+    if (!provider && !(settings.selectedProvider === 'gemini' && this.deps.quotaScheduler)) {
       this.resolveAll(items, {
         type: 'bad_request',
         status: 400,
@@ -111,6 +116,52 @@ export class Translator {
     }
 
     if (uncached.length === 0) return
+
+    if (settings.selectedProvider === 'gemini' && this.deps.quotaScheduler) {
+      const scheduled = await this.deps.quotaScheduler.schedule({
+        id: uncached.map((item) => item.request.messageId).join(','),
+        priority: items.some((item) => item.request.priority === 'backlog') ? 'backlog' : 'live',
+        requests: uncached.map((item) => ({ id: item.request.messageId, text: item.request.text, sourceLang: item.request.sourceLang })),
+        estimatedInputTokens: (() => {
+          const prompt = buildTranslationPrompt(uncached.map((item) => ({
+            id: item.request.messageId,
+            text: item.request.text,
+            sourceLang: item.request.sourceLang,
+          })), targetLang)
+          return Math.ceil(Math.ceil((prompt.system.length + prompt.user.length) / 3) * 1.2)
+        })(),
+        profile: settings.geminiQuota,
+        geminiAvailable: Boolean(apiKey && provider) && !this.deps.rateLimiter.isLimited('gemini'),
+        runGemini: (requests) => provider
+          ? provider.translateBatch(requests, apiKey!, model, targetLang)
+          : Promise.resolve(requests.map((request) => ({ id: request.id, error: 'Gemini provider is unavailable' }))),
+        runDeepSeek: async (requests) => {
+          const fallbackKey = await this.deps.getApiKey(DEEPSEEK_FALLBACK_PROVIDER)
+          const fallbackProvider = this.deps.getProvider(DEEPSEEK_FALLBACK_PROVIDER)
+          if (!fallbackKey || !fallbackProvider) {
+            return requests.map((request) => ({ id: request.id, error: 'Gemini is unavailable and DeepSeek fallback has no configured API key', status: 429 }))
+          }
+          return fallbackProvider.translateBatch(requests, fallbackKey, DEEPSEEK_FALLBACK_MODEL, targetLang)
+        },
+      })
+
+      for (const item of uncached) {
+        const result = scheduled.results.find((entry) => entry.id === item.request.messageId)
+        const providerId = scheduled.providers.get(item.request.messageId) ?? 'gemini'
+        const resultModel = providerId === 'deepseek' ? DEEPSEEK_FALLBACK_MODEL : model
+        if (result?.translatedText !== undefined) {
+          this.deps.cache.set(this.deps.cache.buildKey(item.request.text, targetLang, providerId, resultModel), result)
+        }
+        item.resolve(result
+          ? this.toTranslationResult(item.request.messageId, result)
+          : { messageId: item.request.messageId, error: { type: 'invalid_response', message: 'No result for message in batch response' } })
+      }
+      return
+    }
+
+    // The scheduler branch above handles Gemini's missing primary credentials.
+    // Every remaining legacy path has already resolved those actionable errors.
+    if (!apiKey || !provider) return
 
     // A real Gemini 429 opens a provider-specific cooldown. Route new work to
     // DeepSeek during that window instead of repeatedly calling Gemini.

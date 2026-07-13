@@ -1,4 +1,5 @@
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
+import { parseRetryAfterMs } from './retry-after'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const GEMINI_MODELS: ProviderModel[] = [
@@ -118,7 +119,7 @@ const getRetryAfterMs = (
 ): number | undefined => {
   const headerDelay = response.headers.get('retry-after')
   if (headerDelay) {
-    const parsedHeader = parseSeconds(headerDelay)
+    const parsedHeader = parseRetryAfterMs(headerDelay) ?? parseSeconds(headerDelay)
     if (parsedHeader !== undefined) return parsedHeader
   }
 

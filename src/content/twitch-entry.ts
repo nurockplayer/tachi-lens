@@ -205,7 +205,7 @@ const flushPending = (): void => {
   for (const [, el] of pendingMessages) {
     queuedElements.delete(el)
     if (el.isConnected && !handler.isAlreadyProcessed(el)) {
-      enqueueTranslation(el)
+      enqueueTranslation(el, 'live')
     }
   }
   pendingMessages.clear()
@@ -317,16 +317,24 @@ const observeChat = (): void => {
 // --- Processing ---
 const inFlight = new WeakSet<HTMLElement>()
 const queuedForTranslation = new WeakSet<HTMLElement>()
-const translationQueue: HTMLElement[] = []
+type TranslationPriority = 'live' | 'backlog'
+interface QueuedTranslation {
+  element: HTMLElement
+  priority: TranslationPriority
+}
+const translationQueue: QueuedTranslation[] = []
 const MAX_CONCURRENT_TRANSLATIONS = 10
 let activeTranslations = 0
 let retryNotBefore = 0
 
-const enqueueTranslation = (element: HTMLElement): void => {
+const enqueueTranslation = (
+  element: HTMLElement,
+  priority: TranslationPriority = 'live',
+): void => {
   if (stopped || inFlight.has(element) || queuedForTranslation.has(element)) return
 
   queuedForTranslation.add(element)
-  translationQueue.push(element)
+  translationQueue.push({ element, priority })
   drainTranslationQueue()
 }
 
@@ -334,13 +342,13 @@ const drainTranslationQueue = (): void => {
   if (stopped || Date.now() < retryNotBefore) return
 
   while (activeTranslations < MAX_CONCURRENT_TRANSLATIONS && translationQueue.length > 0) {
-    const element = translationQueue.shift()!
+    const { element, priority } = translationQueue.shift()!
     queuedForTranslation.delete(element)
 
     if (!element.isConnected || handler.isAlreadyProcessed(element)) continue
 
     activeTranslations++
-    void processMessage(element)
+    void processMessage(element, priority)
       .then((result) => {
         if (result.retryAfterMs !== undefined) {
           retryNotBefore = Math.max(retryNotBefore, Date.now() + result.retryAfterMs)
@@ -353,7 +361,10 @@ const drainTranslationQueue = (): void => {
   }
 }
 
-const processMessage = async (element: HTMLElement): Promise<{ retryAfterMs?: number }> => {
+const processMessage = async (
+  element: HTMLElement,
+  priority: TranslationPriority = 'live',
+): Promise<{ retryAfterMs?: number }> => {
   if (stopped) return {}
 
   if (inFlight.has(element)) {
@@ -366,7 +377,7 @@ const processMessage = async (element: HTMLElement): Promise<{ retryAfterMs?: nu
     const settings = await getContentSettings()
     if (stopped) return {}
 
-    return await handler.translateAndInject(element, settings)
+    return await handler.translateAndInject(element, settings, priority)
   } catch {
     if (stopped) return {}
 
@@ -393,7 +404,7 @@ const retryUnprocessed = (): void => {
     if (node instanceof HTMLElement &&
       !handler.isAlreadyProcessed(node)) {
       retryCount++
-      enqueueTranslation(node)
+      enqueueTranslation(node, 'backlog')
     }
   }
 

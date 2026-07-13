@@ -4,6 +4,7 @@
 import type { FilterConfig } from '@/content/message-filter'
 import { DEFAULT_FILTER_CONFIG } from '@/content/message-filter'
 import type { ProviderId } from '@/providers/types'
+import type { GeminiQuotaSettings } from '@/background/gemini-quota'
 
 export interface StorageAreaLike {
   get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>
@@ -29,6 +30,7 @@ export interface UserSettings extends FilterConfig {
   minTextLength: number
   translationEnabled: boolean
   filterConfig: FilterConfig
+  geminiQuota?: GeminiQuotaSettings
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {

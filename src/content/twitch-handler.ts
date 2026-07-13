@@ -223,6 +223,7 @@ export class TwitchMessageHandler {
   async translateAndInject(
     element: HTMLElement,
     settings: ContentSettings,
+    priority: 'live' | 'backlog' = 'live',
   ): Promise<TranslationAttemptResult> {
     const text = this.getMessageText(element)
     if (!text) {
@@ -258,7 +259,7 @@ export class TwitchMessageHandler {
       this.diagnosticReporter?.('translation_requested')
       const runtimeResult = await this.runtimeMessageSender<{ type: string; payload: TranslationResult }>({
         type: 'translate_request' as MessageType,
-        payload: { messageId, text },
+        payload: { messageId, text, priority },
       })
 
       if (runtimeResult.kind === 'context_invalidated') {

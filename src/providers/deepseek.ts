@@ -1,4 +1,5 @@
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
+import { parseRetryAfterMs } from './retry-after'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const DEEPSEEK_MODELS: ProviderModel[] = [
@@ -112,11 +113,7 @@ const getErrorMessage = (body: Record<string, unknown> | undefined): string | un
 }
 
 const getRetryAfterMs = (response: Response): number | undefined => {
-  const value = response.headers.get('retry-after')?.trim()
-  if (!value || !/^\d+(?:\.\d+)?$/.test(value)) return undefined
-
-  const seconds = Number(value)
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
+  return parseRetryAfterMs(response.headers.get('retry-after'))
 }
 
 const allErrors = (
