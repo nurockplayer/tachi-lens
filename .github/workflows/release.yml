@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - 'release/v0.1.0-trigger'
 
 jobs:
   build-and-release:
@@ -30,9 +32,17 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TARGET="${GITHUB_SHA}"
+          else
+            TAG="v0.1.0"
+            TARGET="35ac34d8aa700c9303485c688ce9104768080d3b"
+          fi
+
           gh release create "$TAG" \
+            --target "$TARGET" \
             --title "tachi-lens $TAG" \
-            --notes "詳見 CHANGELOG 或 commits。" \
+            --generate-notes \
             tachi-lens.zip
