@@ -57,7 +57,7 @@ export const reportDiagnostic = (stage: DiagnosticStage, detail?: string): void 
     id: `diagnostic-${timestamp}-${diagnosticCounter++}`,
     stage,
     timestamp,
-    ...(detail ? { detail } : {}),
+    ...(stage !== 'translation_failed' && detail ? { detail } : {}),
   }
 
   void runtimeMessageSender<void>({ type: 'diagnostic_event', payload }).catch((error: unknown) => {

@@ -9,6 +9,22 @@ describe('content script entry', () => {
   })
 
   describe('reportDiagnostic', () => {
+    it('removes translation failure detail before it crosses the runtime boundary', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      vi.stubGlobal('chrome', {
+        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      })
+      const { reportDiagnostic } = await import('./twitch-entry')
+
+      reportDiagnostic('translation_failed', 'Private chat text and key sk-secret-key')
+
+      const message = sendMessage.mock.calls
+        .map(([value]) => value as { type?: string; payload?: Record<string, unknown> })
+        .find((value) => value.type === 'diagnostic_event' && value.payload?.stage === 'translation_failed')
+      expect(message).toBeDefined()
+      expect(message?.payload?.detail).toBeUndefined()
+    })
+
     it('deduplicates identical translation failures within one second', async () => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-07-13T00:00:00Z'))

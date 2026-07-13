@@ -225,13 +225,13 @@ describe('TwitchMessageHandler', () => {
       expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
     })
 
-    it('skips Traditional Chinese when the target language is Traditional Chinese', () => {
+    it('does not auto-skip kanji-only Japanese when the target language is Traditional Chinese', () => {
       const el = createMessageElement({
-        text: '我今天報名了學校的納涼船活動。好像是在船上看煙火大會。',
+        text: '開始',
         username: 'user',
       })
 
-      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
     })
 
     it('does not mistake Twitch’s reply action icon for a reply message', () => {
@@ -402,7 +402,7 @@ describe('TwitchMessageHandler', () => {
       expect(JSON.stringify(reporter.mock.calls)).not.toContain('Private chat text')
     })
 
-    it('reports the Gemini 429 reason and retry delay', async () => {
+    it('does not expose the provider 429 reason in diagnostics', async () => {
       const reporter = vi.fn<(stage: DiagnosticStage, detail?: string) => void>()
       const diagnosticHandler = new TwitchMessageHandler(undefined, reporter)
       const el = createMessageElement({ text: 'Hello' })
@@ -420,11 +420,28 @@ describe('TwitchMessageHandler', () => {
 
       const result = await diagnosticHandler.translateAndInject(el, DEFAULT_SETTINGS)
 
-      expect(reporter).toHaveBeenCalledWith(
-        'translation_failed',
-        'Quota exceeded for gemini-2.5-flash（44.5 秒後重試）',
-      )
+      expect(reporter).toHaveBeenCalledWith('translation_failed')
       expect(result).toEqual({ retryAfterMs: 44_500 })
+    })
+
+    it('does not expose provider error content in diagnostics', async () => {
+      const reporter = vi.fn<(stage: DiagnosticStage, detail?: string) => void>()
+      const diagnosticHandler = new TwitchMessageHandler(undefined, reporter)
+      const el = createMessageElement({ text: 'Private chat text' })
+      const sensitiveProviderError = 'Request contained Private chat text and key sk-secret-key'
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: {
+          messageId: 'any-id',
+          error: { type: 'bad_request', status: 400, message: sensitiveProviderError },
+        },
+      })
+
+      await diagnosticHandler.translateAndInject(el, DEFAULT_SETTINGS)
+
+      expect(reporter).toHaveBeenCalledWith('translation_failed')
+      expect(JSON.stringify(reporter.mock.calls)).not.toContain(sensitiveProviderError)
+      expect(JSON.stringify(reporter.mock.calls)).not.toContain('sk-secret-key')
     })
 
     it('leaves an empty message shell retryable until its text is rendered', async () => {

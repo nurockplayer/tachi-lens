@@ -60,6 +60,13 @@ const DIAGNOSTIC_STORAGE_KEY = 'translationDiagnostics'
 const MAX_DIAGNOSTICS = 20
 let diagnostics: DiagnosticEvent[] = []
 
+const sanitizeDiagnosticEvent = (event: DiagnosticEvent): DiagnosticEvent => {
+  if (event.stage !== 'translation_failed') return event
+
+  const { detail: _detail, ...safeEvent } = event
+  return safeEvent
+}
+
 const persistDiagnostics = (): void => {
   const sessionStorage = chrome.storage?.session
   if (sessionStorage) {
@@ -68,7 +75,8 @@ const persistDiagnostics = (): void => {
 }
 
 const recordDiagnostic = (event: DiagnosticEvent): void => {
-  diagnostics = [event, ...diagnostics.filter((entry) => entry.id !== event.id)].slice(0, MAX_DIAGNOSTICS)
+  const safeEvent = sanitizeDiagnosticEvent(event)
+  diagnostics = [safeEvent, ...diagnostics.filter((entry) => entry.id !== safeEvent.id)].slice(0, MAX_DIAGNOSTICS)
   persistDiagnostics()
 
   void chrome.runtime.sendMessage?.({

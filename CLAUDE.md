@@ -52,7 +52,7 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 
 ## Agent workflow
 
-- Issue tracker 操作見 `docs/agents/issue-tracker.md`。
-- 共用治理 pattern 的採用與拒絕紀錄見 `docs/agents/governance.md`。
-- Worker/外部模型只做 evidence gathering、摘要與 draft；Claude/controller 負責驗證、scope、風險判斷與最終結論。
-- Security、API key、production-risk 或架構決策不得只依 worker 結論。
+- Issue tracker 操作見 `docs/agents/issue-tracker.md`；治理 pattern 決策見 `docs/agents/governance.md`。
+- Broad scan、diff grouping、log summary 與 test draft 優先交給 DeepSeek worker；controller 必須重讀引用檔案並驗證重要 claim。
+- Controller 負責實際 edit、test、security/architecture judgment、commit/push/PR 與最終使用者結論。
+- Worker/外部模型不得負責 destructive command、public state change 或最終 approval。

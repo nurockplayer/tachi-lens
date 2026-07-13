@@ -1,5 +1,4 @@
 import type { DiagnosticStage, ErrorNotification, MessageType, TranslationResult } from '@/shared/messages'
-import { isLikelyTraditionalChinese, isTraditionalChineseTarget } from './language-detection'
 import { isSlashMe, isLinksOnly, isNumbersOnly, type FilterConfig } from './message-filter'
 import {
   safeRuntimeSendMessage,
@@ -145,11 +144,6 @@ export class TwitchMessageHandler {
       debugLog('shouldTranslate: too short', { text, len: text.length, min: settings.minTextLength })
       return false
     }
-    if (isTraditionalChineseTarget(settings.targetLanguage) && isLikelyTraditionalChinese(text)) {
-      debugLog('shouldTranslate: already Traditional Chinese')
-      return false
-    }
-
     // Text-based filters (no DOM access needed)
     if (fc.skipSlashMe && isSlashMe(text)) {
       debugLog('shouldTranslate: slashMe skip')
@@ -275,7 +269,7 @@ export class TwitchMessageHandler {
 
       if (!response?.payload) {
         debugLog('translateAndInject: no response payload, marking processed', { messageId })
-        this.diagnosticReporter?.('translation_failed', 'Service Worker 沒有回傳翻譯結果')
+        this.diagnosticReporter?.('translation_failed')
         this.setProcessed(element, text)
         return {}
       }
@@ -289,22 +283,17 @@ export class TwitchMessageHandler {
         this.diagnosticReporter?.('translation_injected')
       } else if (result.error?.type === 'rate_limited') {
         debugLog('translateAndInject: rate limited, leaving retryable', { messageId })
-        const retrySeconds = Math.max(0, result.error.retryAfterMs) / 1_000
-        const errorMessage = result.error.message.trim().slice(0, 500) || '翻譯服務暫時受到速率限制'
-        this.diagnosticReporter?.(
-          'translation_failed',
-          `${errorMessage}（${retrySeconds} 秒後重試）`,
-        )
+        this.diagnosticReporter?.('translation_failed')
         return { retryAfterMs: result.error.retryAfterMs }
       } else {
         debugLog('translateAndInject: error', { messageId, error: result.error })
-        this.diagnosticReporter?.('translation_failed', result.error?.message ?? '翻譯服務回傳未知錯誤')
+        this.diagnosticReporter?.('translation_failed')
         this.setProcessed(element, text)
         this.injectError(element, result.error)
       }
     } catch {
       debugLog('translateAndInject: runtime messaging failed, leaving retryable')
-      this.diagnosticReporter?.('translation_failed', '無法連線至 Service Worker')
+      this.diagnosticReporter?.('translation_failed')
     }
 
     return {}
