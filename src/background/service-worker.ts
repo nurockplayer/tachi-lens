@@ -12,8 +12,8 @@ import {
   saveApiKey,
   saveUserSettings,
 } from '@/storage/settings'
-import { isBaseMessage } from '@/shared/messages'
-import type { SettingsUpdatePayload } from '@/shared/messages'
+import { isBaseMessage, isDiagnosticEventMessage } from '@/shared/messages'
+import type { DiagnosticEvent, SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { createMessageRouter } from './message-router'
 import { RateLimiter } from './rate-limiter'
@@ -56,11 +56,56 @@ const router = createMessageRouter({
   getMaskedApiKeyForPopup: (providerId) => getMaskedApiKeyForPopup(providerId),
 })
 
+const DIAGNOSTIC_STORAGE_KEY = 'translationDiagnostics'
+const MAX_DIAGNOSTICS = 20
+let diagnostics: DiagnosticEvent[] = []
+
+const persistDiagnostics = (): void => {
+  const sessionStorage = chrome.storage?.session
+  if (sessionStorage) {
+    void sessionStorage.set({ [DIAGNOSTIC_STORAGE_KEY]: diagnostics }).catch(() => undefined)
+  }
+}
+
+const recordDiagnostic = (event: DiagnosticEvent): void => {
+  diagnostics = [event, ...diagnostics.filter((entry) => entry.id !== event.id)].slice(0, MAX_DIAGNOSTICS)
+  persistDiagnostics()
+
+  void chrome.runtime.sendMessage?.({
+    type: 'diagnostics_snapshot',
+    payload: { events: diagnostics },
+  }).catch(() => undefined)
+}
+
+const getDiagnostics = async (): Promise<DiagnosticEvent[]> => {
+  if (diagnostics.length > 0) return diagnostics
+
+  const sessionStorage = chrome.storage?.session
+  if (!sessionStorage) return diagnostics
+
+  const stored = await sessionStorage.get(DIAGNOSTIC_STORAGE_KEY)
+  const events = stored[DIAGNOSTIC_STORAGE_KEY]
+  diagnostics = Array.isArray(events) ? events as DiagnosticEvent[] : []
+  return diagnostics
+}
+
 const handleMessage = (
   message: unknown,
   sender: chrome.runtime.MessageSender,
   sendResponse: (response: unknown) => void,
 ): boolean => {
+  if (isDiagnosticEventMessage(message)) {
+    recordDiagnostic(message.payload)
+    return false
+  }
+
+  if (isBaseMessage(message) && message.type === 'get_diagnostics') {
+    void getDiagnostics().then((events) =>
+      sendResponse({ type: 'diagnostics_snapshot', payload: { events } }),
+    )
+    return true
+  }
+
   // settings_updated from Popup → broadcast to all content scripts
   if (isBaseMessage(message) && message.type === 'settings_updated') {
     void broadcastUpdate(message.payload as SettingsUpdatePayload)

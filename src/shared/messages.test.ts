@@ -22,6 +22,14 @@ describe('message protocol guards', () => {
     expect(isBaseMessage({ type: 'translate_request' })).toBe(false)
   })
 
+  it('accepts diagnostic events and snapshot requests', () => {
+    expect(isBaseMessage({
+      type: 'diagnostic_event',
+      payload: { id: 'd1', stage: 'message_detected', timestamp: 1000 },
+    })).toBe(true)
+    expect(isBaseMessage({ type: 'get_diagnostics', payload: {} })).toBe(true)
+  })
+
   it('narrows translate_request messages to serializable text payloads', () => {
     const message = {
       type: 'translate_request',

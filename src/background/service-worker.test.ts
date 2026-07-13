@@ -119,4 +119,32 @@ describe('service worker startup', () => {
 
     expect(result).toBe(false)
   })
+
+  it('records diagnostic events and returns them to the Popup as a snapshot', async () => {
+    const chromeRuntime = createChromeRuntime()
+    vi.stubGlobal('chrome', chromeRuntime)
+
+    await import('./service-worker')
+
+    const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+      | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+      | undefined
+
+    if (!handler) {
+      throw new Error('Expected a message handler to be registered')
+    }
+
+    const event = { id: 'd1', stage: 'message_detected', timestamp: 1000 }
+    handler({ type: 'diagnostic_event', payload: event }, undefined, vi.fn())
+
+    const sendResponse = vi.fn()
+    expect(handler({ type: 'get_diagnostics', payload: {} }, undefined, sendResponse)).toBe(true)
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({
+        type: 'diagnostics_snapshot',
+        payload: { events: [event] },
+      })
+    })
+  })
 })
