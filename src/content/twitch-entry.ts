@@ -278,17 +278,33 @@ const observeChat = (): void => {
 
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
-        for (const node of mutation.addedNodes) {
-          if (node instanceof HTMLElement) {
-            const message = matchesFirst(node, currentSelectors.CHAT_MESSAGE)
-              ? node
-              : node.closest(currentSelectors.CHAT_MESSAGE) ?? queryFirst(node, currentSelectors.CHAT_MESSAGE)
+          for (const node of mutation.addedNodes) {
+            if (node instanceof HTMLElement) {
+              const messages: Element[] = []
+              if (matchesFirst(node, currentSelectors.CHAT_MESSAGE)) {
+                messages.push(node)
+              } else {
+                let ancestor = node.parentElement
+                while (ancestor && ancestor !== container) {
+                  if (matchesFirst(ancestor, currentSelectors.CHAT_MESSAGE)) {
+                    messages.push(ancestor)
+                    break
+                  }
+                  ancestor = ancestor.parentElement
+                }
 
-            if (message instanceof HTMLElement && !handler.isAlreadyProcessed(message)) {
-              scheduleProcess(message)
+                if (messages.length === 0) {
+                  messages.push(...queryFirstAll(node, currentSelectors.CHAT_MESSAGE))
+                }
+              }
+
+              for (const message of messages) {
+                if (message instanceof HTMLElement && !handler.isAlreadyProcessed(message)) {
+                  scheduleProcess(message)
+                }
+              }
             }
           }
-        }
       }
     }
   })

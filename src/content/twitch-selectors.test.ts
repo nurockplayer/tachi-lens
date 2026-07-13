@@ -290,7 +290,28 @@ describe('queryFirstAll', () => {
     expect(nodes.length).toBe(2)
   })
 
-  it('returns empty NodeList when nothing matches', () => {
+  it('merges primary and fallback matches without duplicates', () => {
+    document.body.innerHTML = ''
+    const primary = document.createElement('div')
+    primary.className = 'chat-line__message'
+
+    const fallback = document.createElement('div')
+    fallback.setAttribute('data-test-selector', 'chat-message')
+
+    const matchingBoth = document.createElement('div')
+    matchingBoth.className = 'chat-line__message'
+    matchingBoth.setAttribute('data-test-selector', 'chat-message')
+
+    document.body.append(primary, fallback, matchingBoth)
+
+    expect(queryFirstAll(document.body, CHAT_MESSAGE)).toEqual([
+      primary,
+      matchingBoth,
+      fallback,
+    ])
+  })
+
+  it('returns an empty collection when nothing matches', () => {
     document.body.innerHTML = ''
     const container = document.createElement('div')
     document.body.appendChild(container)
