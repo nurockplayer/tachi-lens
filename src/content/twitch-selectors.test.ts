@@ -204,6 +204,13 @@ describe('matchesFirst', () => {
     expect(matchesFirst(div, CHAT_MESSAGE)).toBe(false)
   })
 
+  it('does not mistake a chat message body for the message root', () => {
+    const body = document.createElement('span')
+    body.className = 'chat-line__message-body'
+
+    expect(matchesFirst(body, CHAT_MESSAGE)).toBe(false)
+  })
+
   it('falls back to element.matches() when primary has no fallback entry', () => {
     document.body.innerHTML = ''
     const div = document.createElement('div')

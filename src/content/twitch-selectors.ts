@@ -18,7 +18,6 @@ const FALLBACKS: Record<string, string[]> = {
   [CHAT_MESSAGE]: [
     CHAT_MESSAGE,
     '[data-test-selector="chat-message"]',
-    '[class*="chat-line"]',
   ],
   [CHAT_MESSAGE_BODY]: [
     CHAT_MESSAGE_BODY,
@@ -36,6 +35,7 @@ const FALLBACKS: Record<string, string[]> = {
 // Chat message attributes
 export const ATTR_PROCESSED = 'data-tachi-lens-processed'
 export const ATTR_TRANSLATED = 'data-tachi-lens-translated'
+export const ATTR_ORIGINAL_HASH = 'data-tachi-lens-original-hash'
 
 export type PageType = 'channel' | 'popout' | 'vod' | 'clip' | 'unknown'
 

@@ -9,7 +9,8 @@ import {
 } from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
 import { t } from '@/shared/i18n'
-import type { ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
+import { isDiagnosticEventMessage } from '@/shared/messages'
+import type { DiagnosticEvent, DiagnosticStage, ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
 import type { FilterConfig } from '@/content/message-filter'
 
 const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
@@ -69,6 +70,24 @@ interface ErrorNotificationItem {
   timestamp: number
 }
 
+const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
+  chat_container_ready: '已連上 Twitch 聊天室',
+  chat_container_missing: '找不到 Twitch 聊天室容器',
+  message_detected: '偵測到聊天室訊息',
+  message_not_ready: '訊息尚未完成載入',
+  message_skipped: '訊息已略過',
+  translation_requested: '翻譯請求已送出',
+  translation_received: '收到翻譯結果',
+  translation_failed: '翻譯失敗',
+  translation_injected: '翻譯已顯示於聊天室',
+}
+
+const mergeDiagnostics = (current: DiagnosticEvent[], incoming: DiagnosticEvent[]): DiagnosticEvent[] => {
+  const byId = new Map(current.map((event) => [event.id, event]))
+  for (const event of incoming) byId.set(event.id, event)
+  return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 20)
+}
+
 export function App() {
   const [settings, setSettings] = useState<UserSettings | null>(null)
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({})
@@ -79,6 +98,7 @@ export function App() {
   const [channelName, setChannelName] = useState<string | undefined>(undefined)
   const [useChannelSettings, setUseChannelSettings] = useState(false)
   const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
+  const [diagnostics, setDiagnostics] = useState<DiagnosticEvent[]>([])
   const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
 
   const providers = listProviderMetadata()
@@ -93,6 +113,21 @@ export function App() {
       setBlacklistInput(s.botNameBlacklist.join(', '))
     }
     load()
+
+    const loadDiagnostics = async (): Promise<void> => {
+      try {
+        const response = (await chrome.runtime.sendMessage({
+          type: 'get_diagnostics',
+          payload: {},
+        })) as { type?: string; payload?: { events?: DiagnosticEvent[] } } | undefined
+        if (!cancelled && response?.type === 'diagnostics_snapshot' && Array.isArray(response.payload?.events)) {
+          setDiagnostics((prev) => mergeDiagnostics(prev, response.payload!.events!))
+        }
+      } catch {
+        // The service worker may be starting. The Popup still receives live events when available.
+      }
+    }
+    void loadDiagnostics()
 
     // Load API key previews for all providers
     for (const p of providers) {
@@ -136,6 +171,15 @@ export function App() {
           { id, type, message: errMsg, timestamp },
           ...prev.slice(0, 19), // keep max 20 notifications
         ])
+      }
+
+      if (isDiagnosticEventMessage(message)) {
+        setDiagnostics((prev) => mergeDiagnostics(prev, [message.payload]))
+      }
+      const diagnosticSnapshot = message as { type?: string; payload?: { events?: DiagnosticEvent[] } } | undefined
+      const diagnosticEvents = diagnosticSnapshot?.payload?.events
+      if (diagnosticSnapshot?.type === 'diagnostics_snapshot' && Array.isArray(diagnosticEvents)) {
+        setDiagnostics((prev) => mergeDiagnostics(prev, diagnosticEvents))
       }
     }
 
@@ -596,6 +640,22 @@ export function App() {
           ))}
         </div>
       )}
+
+      <section style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.75rem' }}>
+        <h2 style={{ fontSize: '0.9rem', margin: '0 0 0.3rem', color: '#333' }}>診斷</h2>
+        {diagnostics.length === 0 ? (
+          <p style={{ margin: 0, color: '#666', fontSize: '0.8rem' }}>尚未收到診斷事件。請在 Twitch 聊天室等待一則新訊息。</p>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            {diagnostics.slice(0, 5).map((event) => (
+              <div key={event.id} style={{ fontSize: '0.8rem', color: '#444', wordBreak: 'break-word' }}>
+                <strong>{DIAGNOSTIC_LABELS[event.stage]}</strong>
+                {event.detail && <span style={{ color: '#666' }}>：{event.detail}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* 快捷鍵資訊 */}
       <div

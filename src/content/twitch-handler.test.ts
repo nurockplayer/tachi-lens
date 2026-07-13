@@ -2,12 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TwitchMessageHandler, parseChannelFromPathname, type ContentSettings } from './twitch-handler'
 import type { PageSelectors } from './twitch-selectors'
+import type { DiagnosticStage } from '@/shared/messages'
 
-const DEFAULT_SETTINGS: ContentSettings = {
+const DEFAULT_SETTINGS: ContentSettings & { targetLanguage: string } = {
   botNameBlacklist: [],
   minTextLength: 2,
   displayMode: 'below',
   translationEnabled: true,
+  targetLanguage: 'zh-TW',
   filterConfig: {
     skipEmotesOnly: true,
     skipCheermotes: true,
@@ -222,9 +224,219 @@ describe('TwitchMessageHandler', () => {
       el.setAttribute('data-tachi-lens-processed', 'true')
       expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
     })
+
+    it('skips Traditional Chinese when the target language is Traditional Chinese', () => {
+      const el = createMessageElement({
+        text: '我今天報名了學校的納涼船活動。好像是在船上看煙火大會。',
+        username: 'user',
+      })
+
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
+    })
+
+    it('does not mistake Twitch’s reply action icon for a reply message', () => {
+      const el = createMessageElement({ text: 'これは通常のメッセージです', username: 'user' })
+      const replyActionIcon = document.createElement('div')
+      replyActionIcon.className = 'chat-line__reply-icon chat-line__icon'
+      el.appendChild(replyActionIcon)
+
+      expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+    })
+
+    describe('skipEmotesOnly with CJK text (issue #37)', () => {
+      const createElementWithBadge = (bodyText: string): HTMLElement => {
+        const el = document.createElement('div')
+        el.className = 'chat-line__message'
+
+        // Badge image OUTSIDE the message body (simulating Twitch badges)
+        const badge = document.createElement('img')
+        badge.alt = 'badge'
+        badge.src = 'https://static-cdn.jtvnw.net/badges/v1/badge.png'
+        el.appendChild(badge)
+
+        const body = document.createElement('span')
+        body.className = 'chat-line__message-body'
+        body.textContent = bodyText
+        el.appendChild(body)
+
+        const usernameEl = document.createElement('span')
+        usernameEl.className = 'chat-author__display-name'
+        usernameEl.textContent = 'testuser'
+        el.appendChild(usernameEl)
+
+        return el
+      }
+
+      it('badge image + こんばんは should translate (not emote-only)', () => {
+        const el = createElementWithBadge('こんばんは')
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('badge image + 草 should translate (not emote-only)', () => {
+        const el = createElementWithBadge('草')
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, minTextLength: 1 })).toBe(true)
+      })
+
+      it('badge image + long Japanese without spaces should translate', () => {
+        const el = createElementWithBadge('オニチャ懐かしい麦茶の味して美味しい')
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('Simplified Chinese with numbers (这女生不知道有没有100) should translate', () => {
+        const el = createElementWithBadge('这女生不知道有没有100')
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('emote images only in body with no visible text should skip', () => {
+        const el = document.createElement('div')
+        el.className = 'chat-line__message'
+
+        const body = document.createElement('span')
+        body.className = 'chat-line__message-body'
+        const emoteImg = document.createElement('img')
+        emoteImg.className = 'tw-image tw-emote'
+        emoteImg.alt = 'Kappa'
+        emoteImg.src = '//cdn.7tv.cdn/emote.png'
+        body.appendChild(emoteImg)
+        el.appendChild(body)
+
+        const usernameEl = document.createElement('span')
+        usernameEl.className = 'chat-author__display-name'
+        usernameEl.textContent = 'testuser'
+        el.appendChild(usernameEl)
+
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(false)
+      })
+
+      it('emote image + visible text in body should translate', () => {
+        const el = document.createElement('div')
+        el.className = 'chat-line__message'
+
+        const body = document.createElement('span')
+        body.className = 'chat-line__message-body'
+        body.appendChild(document.createTextNode('かわいい '))
+        const emoteImg = document.createElement('img')
+        emoteImg.className = 'tw-image tw-emote'
+        emoteImg.alt = 'Kappa'
+        emoteImg.src = '//cdn.7tv.cdn/emote.png'
+        body.appendChild(emoteImg)
+        el.appendChild(body)
+
+        const usernameEl = document.createElement('span')
+        usernameEl.className = 'chat-author__display-name'
+        usernameEl.textContent = 'testuser'
+        el.appendChild(usernameEl)
+
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('emote image + nested visible text in body should translate', () => {
+        const el = document.createElement('div')
+        el.className = 'chat-line__message'
+
+        const body = document.createElement('span')
+        body.className = 'chat-line__message-body'
+        const textFragment = document.createElement('span')
+        textFragment.className = 'text-fragment'
+        textFragment.textContent = 'かわいい '
+        body.appendChild(textFragment)
+
+        const emoteImg = document.createElement('img')
+        emoteImg.className = 'tw-image tw-emote'
+        emoteImg.alt = 'Kappa'
+        body.appendChild(emoteImg)
+        el.appendChild(body)
+
+        const usernameEl = document.createElement('span')
+        usernameEl.className = 'chat-author__display-name'
+        usernameEl.textContent = 'testuser'
+        el.appendChild(usernameEl)
+
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+    })
   })
 
   describe('translateAndInject', () => {
+    it('marks a hydrated emote-only message as processed instead of retryable', async () => {
+      const el = document.createElement('div')
+      el.className = 'chat-line__message'
+
+      const body = document.createElement('span')
+      body.className = 'chat-line__message-body'
+      const emoteImg = document.createElement('img')
+      emoteImg.className = 'tw-image tw-emote'
+      emoteImg.alt = 'Kappa'
+      body.appendChild(emoteImg)
+      el.appendChild(body)
+
+      const usernameEl = document.createElement('span')
+      usernameEl.className = 'chat-author__display-name'
+      usernameEl.textContent = 'testuser'
+      el.appendChild(usernameEl)
+
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
+
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      expect(sendMessageMock).not.toHaveBeenCalled()
+    })
+
+    it('reports the request, response, and injection stages without chat text', async () => {
+      const reporter = vi.fn<(stage: DiagnosticStage, detail?: string) => void>()
+      const HandlerWithDiagnostics = TwitchMessageHandler as unknown as new (
+        selectors?: PageSelectors,
+        diagnosticReporter?: (stage: DiagnosticStage, detail?: string) => void,
+      ) => TwitchMessageHandler
+      const diagnosticHandler = new HandlerWithDiagnostics(undefined, reporter)
+      const el = createMessageElement({ text: 'Private chat text' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+      })
+
+      await diagnosticHandler.translateAndInject(el, DEFAULT_SETTINGS)
+
+      expect(reporter).toHaveBeenCalledWith('translation_requested')
+      expect(reporter).toHaveBeenCalledWith('translation_received')
+      expect(reporter).toHaveBeenCalledWith('translation_injected')
+      expect(JSON.stringify(reporter.mock.calls)).not.toContain('Private chat text')
+    })
+
+    it('reports the Gemini 429 reason and retry delay', async () => {
+      const reporter = vi.fn<(stage: DiagnosticStage, detail?: string) => void>()
+      const diagnosticHandler = new TwitchMessageHandler(undefined, reporter)
+      const el = createMessageElement({ text: 'Hello' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: {
+          messageId: 'any-id',
+          error: {
+            type: 'rate_limited',
+            retryAfterMs: 44_500,
+            message: 'Quota exceeded for gemini-2.5-flash',
+          },
+        },
+      })
+
+      const result = await diagnosticHandler.translateAndInject(el, DEFAULT_SETTINGS)
+
+      expect(reporter).toHaveBeenCalledWith(
+        'translation_failed',
+        'Quota exceeded for gemini-2.5-flash（44.5 秒後重試）',
+      )
+      expect(result).toEqual({ retryAfterMs: 44_500 })
+    })
+
+    it('leaves an empty message shell retryable until its text is rendered', async () => {
+      const el = document.createElement('div')
+      el.className = 'chat-line__message'
+
+      await handler.translateAndInject(el, DEFAULT_SETTINGS)
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+    })
+
     it('sends a translation request to the service worker', async () => {
       const el = createMessageElement({ text: 'Hello' })
 
@@ -313,6 +525,33 @@ describe('TwitchMessageHandler', () => {
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
       // Should show error indicator
       expect(el.querySelector('[data-tachi-lens-translated]')).not.toBeNull()
+    })
+
+    it('uses the safe runtime sender for error notifications', async () => {
+      const runtimeMessageSender = vi.fn()
+        .mockResolvedValueOnce({
+          kind: 'ok',
+          value: {
+            type: 'translate_response',
+            payload: {
+              messageId: 'any-id',
+              error: { type: 'auth', status: 401, message: 'Unauthorized' },
+            },
+          },
+        })
+        .mockResolvedValueOnce({ kind: 'context_invalidated' })
+      const handlerWithSafeSender = new TwitchMessageHandler(
+        undefined,
+        undefined,
+        runtimeMessageSender,
+      )
+
+      await handlerWithSafeSender.translateAndInject(createMessageElement({ text: 'Hello' }), DEFAULT_SETTINGS)
+
+      expect(runtimeMessageSender).toHaveBeenCalledTimes(2)
+      expect(runtimeMessageSender.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+        type: 'error_notification',
+      }))
     })
 
     it('leaves messages retryable when runtime messaging fails', async () => {
