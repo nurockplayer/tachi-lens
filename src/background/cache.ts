@@ -13,8 +13,9 @@ export class TranslationCache {
     this.maxSize = maxSize
   }
 
-  buildKey(text: string, targetLang: string, provider: string, model: string): string {
-    return `${text}|${targetLang}|${provider}|${model}`
+  buildKey(text: string, targetLang: string, provider: string, model: string, sourceLang?: string): string {
+    const base = `${text}|${targetLang}|${provider}|${model}`
+    return sourceLang ? `${base}|${sourceLang}` : base
   }
 
   get(key: string): BatchItemResult | undefined {

@@ -51,6 +51,16 @@ export type MessageKey =
   | 'skipLinksOnly'
   | 'skipNumbersOnly'
   | 'skipSystemMessages'
+  | 'geminiQuotaSection'
+  | 'geminiQuotaHelp'
+  | 'geminiQuotaRpm'
+  | 'geminiQuotaTpm'
+  | 'geminiQuotaRpd'
+  | 'geminiQuotaRpmSafety'
+  | 'geminiQuotaTpmSafety'
+  | 'geminiQuotaRpdSafety'
+  | 'geminiQuotaLiveWait'
+  | 'geminiQuotaConcurrency'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -97,6 +107,16 @@ export const MESSAGE_KEYS: readonly string[] = [
   'skipLinksOnly',
   'skipNumbersOnly',
   'skipSystemMessages',
+  'geminiQuotaSection',
+  'geminiQuotaHelp',
+  'geminiQuotaRpm',
+  'geminiQuotaTpm',
+  'geminiQuotaRpd',
+  'geminiQuotaRpmSafety',
+  'geminiQuotaTpmSafety',
+  'geminiQuotaRpdSafety',
+  'geminiQuotaLiveWait',
+  'geminiQuotaConcurrency',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -144,6 +164,16 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   skipLinksOnly: '略過純連結',
   skipNumbersOnly: '略過純數字',
   skipSystemMessages: '略過系統訊息',
+  geminiQuotaSection: 'Gemini 模型配額',
+  geminiQuotaHelp: '請填入 Google AI Studio 顯示的目前模型限制；安全比例會保留使用緩衝。',
+  geminiQuotaRpm: '每分鐘請求上限 (RPM)',
+  geminiQuotaTpm: '每分鐘輸入 Token 上限 (TPM)',
+  geminiQuotaRpd: '每日請求上限 (RPD)',
+  geminiQuotaRpmSafety: 'RPM 安全比例 (%)',
+  geminiQuotaTpmSafety: 'TPM 安全比例 (%)',
+  geminiQuotaRpdSafety: 'RPD 安全比例 (%)',
+  geminiQuotaLiveWait: '即時訊息最長等待 (ms)',
+  geminiQuotaConcurrency: 'Gemini 同時請求上限',
 }
 
 /**

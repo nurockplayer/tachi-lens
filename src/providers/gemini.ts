@@ -19,7 +19,7 @@ export const createGeminiProvider = (
   models: GEMINI_MODELS,
   defaultModel: GEMINI_DEFAULT_MODEL,
 
-  async translateBatch(requests, apiKey, model, targetLang) {
+  async translateBatch(requests, apiKey, model, targetLang, signal) {
     const prompt = buildTranslationPrompt(requests, targetLang)
 
     try {
@@ -27,6 +27,7 @@ export const createGeminiProvider = (
         `${BASE_URL}/models/${model}:generateContent`,
         {
           method: 'POST',
+          signal,
           headers: {
             'Content-Type': 'application/json',
             'x-goog-api-key': apiKey,
@@ -45,6 +46,8 @@ export const createGeminiProvider = (
 
         return allErrors(requests, error, {
           status: response.status,
+          ...(response.status === 401 || response.status === 403 ? { errorType: 'auth' as const } : {}),
+          ...(response.status === 400 ? { errorType: 'bad_request' as const } : {}),
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         })
       }
@@ -58,7 +61,9 @@ export const createGeminiProvider = (
 
       return parseTranslationResponse(text, requests)
     } catch (err) {
-      return allErrors(requests, err instanceof Error ? err.message : 'Unknown Gemini error')
+      return allErrors(requests, err instanceof Error ? err.message : 'Unknown Gemini error', {
+        errorType: 'network',
+      })
     }
   },
 
@@ -141,5 +146,5 @@ const getRetryAfterMs = (
 const allErrors = (
   requests: { id: string }[],
   error: string,
-  metadata: Partial<Pick<BatchItemResult, 'status' | 'retryAfterMs'>> = {},
+  metadata: Partial<Pick<BatchItemResult, 'status' | 'retryAfterMs' | 'errorType'>> = {},
 ) => requests.map((r) => ({ id: r.id, error, ...metadata }))

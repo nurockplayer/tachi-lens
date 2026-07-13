@@ -57,6 +57,7 @@ describe('Gemini provider', () => {
         id: 'm1',
         error: 'API key not valid',
         status: 403,
+        errorType: 'auth',
       })
     })
 
@@ -156,6 +157,7 @@ describe('Gemini provider', () => {
       const results = await provider.translateBatch(REQS, 'fake-key', 'gemini-2.5-flash', 'zh-TW')
 
       expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.errorType).toBe('network')
     })
   })
 

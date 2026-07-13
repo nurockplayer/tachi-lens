@@ -1,9 +1,11 @@
 import { ExponentialBackoff, type BackoffStrategy } from './backoff-strategy'
+import { createSystemClock, type Clock } from './clock'
 
 export interface RateLimiterOptions {
   maxBackoffMs: number
   baseBackoffMs?: number
   strategy?: BackoffStrategy
+  clock?: Pick<Clock, 'monotonicNow'>
 }
 
 interface ProviderState {
@@ -17,10 +19,12 @@ export class RateLimiter {
   private state = new Map<string, ProviderState>()
   private maxBackoffMs: number
   private strategy: BackoffStrategy
+  private monotonicNow: () => number
 
   constructor(options: RateLimiterOptions) {
     this.maxBackoffMs = options.maxBackoffMs
     this.strategy = options.strategy ?? new ExponentialBackoff(options.baseBackoffMs ?? 1_000, options.maxBackoffMs)
+    this.monotonicNow = options.clock?.monotonicNow ?? createSystemClock().monotonicNow
   }
 
   recordError(providerId: string, retryAfterMs: number): void {
@@ -39,13 +43,14 @@ export class RateLimiter {
 
     const entry = this.state.get(providerId)!
     const backoffMs = this.strategy.nextDelay(entry.attemptCount)
+    const reportedWait = Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : 0
     const effectiveWait = Math.min(
-      Math.max(retryAfterMs, backoffMs),
+      Math.max(reportedWait, backoffMs),
       this.maxBackoffMs,
     )
 
     entry.retryAfterMs = effectiveWait
-    entry.limitedAt = Date.now()
+    entry.limitedAt = this.monotonicNow()
   }
 
   isLimited(providerId: string): boolean {
@@ -57,7 +62,7 @@ export class RateLimiter {
 
     if (!entry) return 0
 
-    const elapsed = Date.now() - entry.limitedAt
+    const elapsed = this.monotonicNow() - entry.limitedAt
 
     if (elapsed >= entry.retryAfterMs) {
       return 0

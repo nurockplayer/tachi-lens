@@ -21,6 +21,7 @@ export interface BatchItemResult {
   error?: string
   status?: number
   retryAfterMs?: number
+  errorType?: 'auth' | 'rate_limited' | 'bad_request' | 'network' | 'invalid_response' | 'timeout' | 'unknown'
 }
 
 export interface TranslationProvider {
@@ -35,6 +36,7 @@ export interface TranslationProvider {
     apiKey: string,
     model: string,
     targetLang: string,
+    signal?: AbortSignal,
   ): Promise<BatchItemResult[]>
 
   /** Verify the API key is valid by making a minimal API call. */

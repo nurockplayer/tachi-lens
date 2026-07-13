@@ -23,7 +23,7 @@ src/storage/     chrome.storage 封裝與設定 schema
 src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 ```
 
-資料流：Content Script 只傳 `{messageId, text}` 給 Service Worker；Service Worker 讀取設定與完整 API key、執行翻譯，再回傳結果；Popup 透過 runtime messages 管理設定、key preview 與 diagnostics。
+資料流：Content Script 只傳 `{messageId, text, priority?}` 給 Service Worker；Service Worker 讀取設定與完整 API key、執行翻譯，再回傳結果；Popup 透過 trusted storage wrapper 管理非敏感設定，並透過 runtime messages 管理 API key、key preview 與 diagnostics。
 
 ## Runtime and security invariants
 

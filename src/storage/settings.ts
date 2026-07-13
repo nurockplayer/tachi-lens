@@ -4,7 +4,12 @@
 import type { FilterConfig } from '@/content/message-filter'
 import { DEFAULT_FILTER_CONFIG } from '@/content/message-filter'
 import type { ProviderId } from '@/providers/types'
-import type { GeminiQuotaSettings } from '@/background/gemini-quota'
+import { GEMINI_MODELS } from '@/providers/gemini'
+import {
+  DEFAULT_GEMINI_QUOTA,
+  normalizeGeminiQuotaSettings,
+  type GeminiQuotaSettings,
+} from '@/background/gemini-quota'
 
 export interface StorageAreaLike {
   get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>
@@ -30,8 +35,12 @@ export interface UserSettings extends FilterConfig {
   minTextLength: number
   translationEnabled: boolean
   filterConfig: FilterConfig
-  geminiQuota?: GeminiQuotaSettings
+  geminiQuota: GeminiQuotaSettings
+  geminiQuotaProfiles: Record<string, GeminiQuotaSettings>
 }
+
+export const DEFAULT_GEMINI_QUOTA_PROFILES: Record<string, GeminiQuotaSettings> =
+  Object.fromEntries(GEMINI_MODELS.map(({ id }) => [id, { ...DEFAULT_GEMINI_QUOTA }]))
 
 export const DEFAULT_SETTINGS: UserSettings = {
   ...DEFAULT_FILTER_CONFIG,
@@ -43,6 +52,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   minTextLength: 2,
   translationEnabled: true,
   filterConfig: DEFAULT_FILTER_CONFIG,
+  geminiQuota: DEFAULT_GEMINI_QUOTA,
+  geminiQuotaProfiles: DEFAULT_GEMINI_QUOTA_PROFILES,
 }
 
 export interface RuntimeState {
@@ -66,6 +77,25 @@ const getDefaultStorage = (): ChromeStorageLike => chrome.storage
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+export const normalizeGeminiQuotaProfiles = (
+  value: unknown,
+  legacyProfile: GeminiQuotaSettings = DEFAULT_GEMINI_QUOTA,
+): Record<string, GeminiQuotaSettings> => {
+  const storedProfiles = isRecord(value) ? value : {}
+  const modelIds = new Set([
+    ...GEMINI_MODELS.map(({ id }) => id),
+    ...Object.keys(storedProfiles),
+  ])
+
+  return Object.fromEntries(Array.from(modelIds, (modelId) => {
+    const candidate = storedProfiles[modelId]
+    const merged = isRecord(candidate)
+      ? { ...legacyProfile, ...candidate }
+      : legacyProfile
+    return [modelId, normalizeGeminiQuotaSettings(merged)]
+  }))
+}
 
 const readRecord = async (area: StorageAreaLike, key: string): Promise<Record<string, unknown>> => {
   const items = await area.get(key)
@@ -91,10 +121,13 @@ export const initializeStorageAccess = async (storage = getDefaultStorage()): Pr
 
 export const getUserSettings = async (storage = getDefaultStorage()): Promise<UserSettings> => {
   const storedSettings = await readRecord(storage.local, USER_SETTINGS_STORAGE_KEY)
+  const geminiQuota = normalizeGeminiQuotaSettings(storedSettings.geminiQuota)
 
   return {
     ...DEFAULT_SETTINGS,
     ...storedSettings,
+    geminiQuota,
+    geminiQuotaProfiles: normalizeGeminiQuotaProfiles(storedSettings.geminiQuotaProfiles, geminiQuota),
   }
 }
 
@@ -102,9 +135,17 @@ export const saveUserSettings = async (
   updates: Partial<UserSettings>,
   storage = getDefaultStorage(),
 ): Promise<UserSettings> => {
-  const nextSettings = {
+  const mergedSettings = {
     ...(await getUserSettings(storage)),
     ...updates,
+  }
+  const geminiQuota = normalizeGeminiQuotaSettings(mergedSettings.geminiQuota)
+  const profilesSource = updates.geminiQuotaProfiles ??
+    (updates.geminiQuota === undefined ? mergedSettings.geminiQuotaProfiles : undefined)
+  const nextSettings = {
+    ...mergedSettings,
+    geminiQuota,
+    geminiQuotaProfiles: normalizeGeminiQuotaProfiles(profilesSource, geminiQuota),
   }
 
   await storage.local.set({ [USER_SETTINGS_STORAGE_KEY]: nextSettings })
@@ -216,11 +257,16 @@ export const saveChannelSettings = async (
   storage = getDefaultStorage(),
 ): Promise<void> => {
   const all = await getPerChannelSettings(storage)
+  const {
+    geminiQuota: _ignoredLegacyQuota,
+    geminiQuotaProfiles: _ignoredQuotaProfiles,
+    ...channelSettings
+  } = settings
 
   await storage.local.set({
     [PER_CHANNEL_SETTINGS_STORAGE_KEY]: {
       ...all,
-      [channelName]: settings,
+      [channelName]: channelSettings,
     },
   })
 }
@@ -239,7 +285,17 @@ export const deleteChannelSettings = async (
 export const mergeSettings = (
   global: UserSettings,
   channel?: Partial<UserSettings>,
-): UserSettings => ({
-  ...global,
-  ...channel,
-})
+): UserSettings => {
+  const {
+    geminiQuota: _ignoredLegacyQuota,
+    geminiQuotaProfiles: _ignoredQuotaProfiles,
+    ...channelSettings
+  } = channel ?? {}
+  const merged = { ...global, ...channelSettings }
+  const geminiQuota = normalizeGeminiQuotaSettings(global.geminiQuota)
+  return {
+    ...merged,
+    geminiQuota,
+    geminiQuotaProfiles: normalizeGeminiQuotaProfiles(global.geminiQuotaProfiles, geminiQuota),
+  }
+}

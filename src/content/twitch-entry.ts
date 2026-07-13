@@ -334,7 +334,12 @@ const enqueueTranslation = (
   if (stopped || inFlight.has(element) || queuedForTranslation.has(element)) return
 
   queuedForTranslation.add(element)
-  translationQueue.push({ element, priority })
+  const queued = { element, priority }
+  const firstBacklogIndex = priority === 'live'
+    ? translationQueue.findIndex((entry) => entry.priority === 'backlog')
+    : -1
+  if (firstBacklogIndex >= 0) translationQueue.splice(firstBacklogIndex, 0, queued)
+  else translationQueue.push(queued)
   drainTranslationQueue()
 }
 

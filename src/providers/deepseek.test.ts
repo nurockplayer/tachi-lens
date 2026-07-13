@@ -54,6 +54,7 @@ describe('DeepSeek provider', () => {
         id: 'm1',
         error: 'Invalid API Key',
         status: 401,
+        errorType: 'auth',
       })
     })
 
@@ -92,6 +93,7 @@ describe('DeepSeek provider', () => {
       const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
 
       expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.errorType).toBe('network')
     })
   })
 

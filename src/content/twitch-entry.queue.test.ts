@@ -72,6 +72,58 @@ describe('content script translation queue', () => {
     }
   })
 
+  it('starts newly arrived live work before queued backlog when capacity frees', async () => {
+    const translationResolvers: Array<(value: unknown) => void> = []
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return new Promise((resolve) => translationResolvers.push(resolve))
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    for (let index = 0; index < 11; index++) {
+      appendMessage(container, `backlog ${index}`)
+    }
+
+    await import('./twitch-entry')
+    await vi.advanceTimersByTimeAsync(0)
+
+    const translationCalls = () => sendMessage.mock.calls.filter(([message]) =>
+      (message as { type: string }).type === 'translate_request',
+    )
+    expect(translationCalls()).toHaveLength(10)
+
+    appendMessage(container, 'new live message')
+    await vi.advanceTimersByTimeAsync(300)
+
+    translationResolvers[0]!({
+      type: 'translate_response',
+      payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(translationCalls()).toHaveLength(11)
+    expect(translationCalls()[10]![0]).toMatchObject({
+      payload: { text: 'new live message', priority: 'live' },
+    })
+
+    for (const resolve of translationResolvers.slice(1)) {
+      resolve({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+      })
+    }
+  })
+
   it('does not retry during a provider-supplied rate-limit cooldown', async () => {
     sendMessage.mockImplementation((message: { type: string }) => {
       if (message.type === 'get_content_settings') {

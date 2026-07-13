@@ -42,5 +42,15 @@
   "skipReplies": { "message": "略過回覆訊息" },
   "skipLinksOnly": { "message": "略過純連結" },
   "skipNumbersOnly": { "message": "略過純數字" },
-  "skipSystemMessages": { "message": "略過系統訊息" }
+  "skipSystemMessages": { "message": "略過系統訊息" },
+  "geminiQuotaSection": { "message": "Gemini 模型配額" },
+  "geminiQuotaHelp": { "message": "請填入 Google AI Studio 顯示的目前模型限制；安全比例會保留使用緩衝。" },
+  "geminiQuotaRpm": { "message": "每分鐘請求上限 (RPM)" },
+  "geminiQuotaTpm": { "message": "每分鐘輸入 Token 上限 (TPM)" },
+  "geminiQuotaRpd": { "message": "每日請求上限 (RPD)" },
+  "geminiQuotaRpmSafety": { "message": "RPM 安全比例 (%)" },
+  "geminiQuotaTpmSafety": { "message": "TPM 安全比例 (%)" },
+  "geminiQuotaRpdSafety": { "message": "RPD 安全比例 (%)" },
+  "geminiQuotaLiveWait": { "message": "即時訊息最長等待 (ms)" },
+  "geminiQuotaConcurrency": { "message": "Gemini 同時請求上限" }
 }

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
 import {
-  DEFAULT_SETTINGS,
   getChannelSettings,
+  getUserSettings,
   mergeSettings,
   saveChannelSettings,
+  saveUserSettings,
 } from '@/storage/settings'
 import type { UserSettings } from '@/storage/settings'
+import type { GeminiQuotaSettings } from '@/background/gemini-quota'
 import { t } from '@/shared/i18n'
 import { isDiagnosticEventMessage } from '@/shared/messages'
 import type { DiagnosticEvent, DiagnosticStage, ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
@@ -22,6 +24,22 @@ const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[
   { key: 'skipLinksOnly', labelKey: 'skipLinksOnly' },
   { key: 'skipNumbersOnly', labelKey: 'skipNumbersOnly' },
   { key: 'skipSystemMessages', labelKey: 'skipSystemMessages' },
+]
+
+const GEMINI_QUOTA_FIELDS: Array<{
+  key: keyof GeminiQuotaSettings
+  labelKey: Parameters<typeof t>[0]
+  min: number
+  max?: number
+}> = [
+  { key: 'requestsPerMinute', labelKey: 'geminiQuotaRpm', min: 1 },
+  { key: 'inputTokensPerMinute', labelKey: 'geminiQuotaTpm', min: 1 },
+  { key: 'requestsPerDay', labelKey: 'geminiQuotaRpd', min: 1 },
+  { key: 'rpmSafetyPercent', labelKey: 'geminiQuotaRpmSafety', min: 1, max: 100 },
+  { key: 'tpmSafetyPercent', labelKey: 'geminiQuotaTpmSafety', min: 1, max: 100 },
+  { key: 'rpdSafetyPercent', labelKey: 'geminiQuotaRpdSafety', min: 1, max: 100 },
+  { key: 'liveMaxWaitMs', labelKey: 'geminiQuotaLiveWait', min: 1, max: 60_000 },
+  { key: 'maxConcurrency', labelKey: 'geminiQuotaConcurrency', min: 1, max: 10 },
 ]
 
 export const extractChannelFromUrl = (url: string): string | undefined => {
@@ -41,13 +59,8 @@ export const extractChannelFromUrl = (url: string): string | undefined => {
 
 type ValidationStatus = 'valid' | 'invalid' | 'checking' | null
 
-const STORAGE_KEY = 'userSettings'
-
 const loadSettings = async (): Promise<UserSettings> => {
-  const items = await chrome.storage.local.get(STORAGE_KEY)
-  const stored = items[STORAGE_KEY] as Partial<UserSettings> | undefined
-
-  return { ...DEFAULT_SETTINGS, ...stored }
+  return getUserSettings()
 }
 
 const loadApiKeyPreview = async (providerId: string): Promise<string> => {
@@ -205,6 +218,25 @@ export function App() {
     [],
   )
 
+  const updateGeminiQuota = useCallback(
+    (key: keyof GeminiQuotaSettings, value: number) => {
+      setSettings((previous) => {
+        if (!previous) return previous
+        const current = previous.geminiQuotaProfiles[previous.selectedModel] ?? previous.geminiQuota
+        const nextProfile = { ...current, [key]: value }
+        return {
+          ...previous,
+          geminiQuota: nextProfile,
+          geminiQuotaProfiles: {
+            ...previous.geminiQuotaProfiles,
+            [previous.selectedModel]: nextProfile,
+          },
+        }
+      })
+    },
+    [],
+  )
+
   const handleProviderChange = useCallback(
     (providerId: string) => {
       const meta = providers.find((p) => p.id === providerId)
@@ -231,12 +263,23 @@ export function App() {
       .map((s) => s.trim())
       .filter(Boolean)
 
-    const updatedSettings = { ...settings, botNameBlacklist: parsedBlacklist }
+    const selectedGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
+    const updatedSettings = {
+      ...settings,
+      botNameBlacklist: parsedBlacklist,
+      geminiQuota: selectedGeminiQuota,
+    }
 
     if (useChannelSettings && channelName) {
-      await saveChannelSettings(channelName, updatedSettings)
+      const {
+        geminiQuota,
+        geminiQuotaProfiles,
+        ...channelSettings
+      } = updatedSettings
+      await saveUserSettings({ geminiQuota, geminiQuotaProfiles })
+      await saveChannelSettings(channelName, channelSettings)
     } else {
-      await chrome.storage.local.set({ [STORAGE_KEY]: updatedSettings })
+      await saveUserSettings(updatedSettings)
     }
     setSettings(updatedSettings)
     setSaveMessage(t('settingsSaved'))
@@ -327,6 +370,8 @@ export function App() {
   }
 
   const currentModels = getModelsForProvider(settings.selectedProvider)
+  const currentModel = currentModels.find((model) => model.id === settings.selectedModel)
+  const currentGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
 
   return (
     <div style={{ width: '320px', padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
@@ -423,6 +468,51 @@ export function App() {
           ))}
         </select>
       </div>
+
+      {settings.selectedProvider === 'gemini' && (
+        <fieldset
+          style={{
+            margin: '0 0 0.75rem',
+            padding: '0.65rem',
+            border: '1px solid #d8d8d8',
+            borderRadius: '4px',
+          }}
+        >
+          <legend style={{ padding: '0 0.25rem', fontSize: '0.85rem', fontWeight: 600 }}>
+            {t('geminiQuotaSection')}: {currentModel?.displayName ?? settings.selectedModel}
+          </legend>
+          <p style={{ margin: '0 0 0.55rem', color: '#555', fontSize: '0.75rem', lineHeight: 1.4 }}>
+            {t('geminiQuotaHelp')}
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            {GEMINI_QUOTA_FIELDS.map(({ key, labelKey, min, max }) => {
+              const inputId = `gemini-quota-${key}`
+              return (
+                <label key={key} htmlFor={inputId} style={{ display: 'block', minWidth: 0 }}>
+                  <span style={{ display: 'block', marginBottom: '0.2rem', color: '#333', fontSize: '0.75rem' }}>
+                    {t(labelKey)}
+                  </span>
+                  <input
+                    id={inputId}
+                    type='number'
+                    min={min}
+                    {...(max === undefined ? {} : { max })}
+                    value={currentGeminiQuota[key]}
+                    onChange={(event) => {
+                      const parsed = Math.floor(Number(event.target.value))
+                      const bounded = Number.isFinite(parsed)
+                        ? Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, parsed))
+                        : min
+                      updateGeminiQuota(key, bounded)
+                    }}
+                    style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
+                  />
+                </label>
+              )
+            })}
+          </div>
+        </fieldset>
+      )}
 
       {/* API Key */}
       <div style={{ marginBottom: '0.75rem' }}>

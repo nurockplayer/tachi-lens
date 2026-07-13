@@ -42,5 +42,15 @@
   "skipReplies": { "message": "Skip Replies" },
   "skipLinksOnly": { "message": "Skip Links-only" },
   "skipNumbersOnly": { "message": "Skip Numbers-only" },
-  "skipSystemMessages": { "message": "Skip System Messages" }
+  "skipSystemMessages": { "message": "Skip System Messages" },
+  "geminiQuotaSection": { "message": "Gemini Model Quota" },
+  "geminiQuotaHelp": { "message": "Enter the active model limits shown in Google AI Studio. Safety percentages reserve headroom." },
+  "geminiQuotaRpm": { "message": "Requests per minute (RPM)" },
+  "geminiQuotaTpm": { "message": "Input tokens per minute (TPM)" },
+  "geminiQuotaRpd": { "message": "Requests per day (RPD)" },
+  "geminiQuotaRpmSafety": { "message": "RPM safety (%)" },
+  "geminiQuotaTpmSafety": { "message": "TPM safety (%)" },
+  "geminiQuotaRpdSafety": { "message": "RPD safety (%)" },
+  "geminiQuotaLiveWait": { "message": "Live maximum wait (ms)" },
+  "geminiQuotaConcurrency": { "message": "Gemini concurrency" }
 }
