@@ -326,6 +326,7 @@ const translationQueue: QueuedTranslation[] = []
 const MAX_CONCURRENT_TRANSLATIONS = 10
 let activeTranslations = 0
 let retryNotBefore = 0
+let consecutiveLiveDequeues = 0
 
 const enqueueTranslation = (
   element: HTMLElement,
@@ -347,12 +348,31 @@ const drainTranslationQueue = (): void => {
   if (stopped || Date.now() < retryNotBefore) return
 
   while (activeTranslations < MAX_CONCURRENT_TRANSLATIONS && translationQueue.length > 0) {
-    const { element, priority } = translationQueue.shift()!
+    const hasBacklog = translationQueue.some((entry) => entry.priority === 'backlog')
+
+    let element: HTMLElement
+    let priority: TranslationPriority
+
+    // After MAX_CONCURRENT_TRANSLATIONS consecutive live dequeues while
+    // backlog is queued, force-dispatch the earliest backlog.
+    if (consecutiveLiveDequeues >= MAX_CONCURRENT_TRANSLATIONS && hasBacklog) {
+      const index = translationQueue.findIndex((entry) => entry.priority === 'backlog')
+      const spliced = translationQueue.splice(index, 1)[0]!
+      element = spliced.element
+      priority = spliced.priority
+    } else {
+      const spliced = translationQueue.shift()!
+      element = spliced.element
+      priority = spliced.priority
+    }
+
     queuedForTranslation.delete(element)
 
     if (!element.isConnected || handler.isAlreadyProcessed(element)) continue
 
     activeTranslations++
+    if (hasBacklog && priority === 'live') consecutiveLiveDequeues++
+    else consecutiveLiveDequeues = 0
     void processMessage(element, priority)
       .then((result) => {
         if (result.retryAfterMs !== undefined) {
@@ -471,6 +491,16 @@ export const stopContentScript = (): void => {
 }
 
 // --- Exports (for testing) ---
+export const _test = {
+  enqueueTranslation,
+  drainTranslationQueue,
+  get translationQueueLength(): number { return translationQueue.length },
+  get consecutiveLiveDequeues(): number { return consecutiveLiveDequeues },
+  set consecutiveLiveDequeues(value: number) { consecutiveLiveDequeues = value },
+  get activeTranslations(): number { return activeTranslations },
+  set activeTranslations(value: number) { activeTranslations = value },
+  get MAX_CONCURRENT(): number { return MAX_CONCURRENT_TRANSLATIONS },
+}
 export const getSettings = async (channelName?: string): Promise<RemoteContentSettings> => {
   if (stopped) {
     throw new Error('Content script has stopped')

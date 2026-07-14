@@ -124,6 +124,53 @@ describe('content script translation queue', () => {
     }
   })
 
+  it('dispatches backlog after MAX_CONCURRENT_TRANSLATIONS consecutive live dequeues', async () => {
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+
+    // Block the drain during enqueue so items queue up without being consumed.
+    mod._test.activeTranslations = 10
+
+    // Populate queue: 10 lives ahead of 1 backlog.
+    const lives: HTMLElement[] = []
+    for (let index = 0; index < 10; index++) {
+      const el = document.createElement('div')
+      container.appendChild(el)
+      lives.push(el)
+      mod._test.enqueueTranslation(el, 'live')
+    }
+    const backlogEl = document.createElement('div')
+    container.appendChild(backlogEl)
+    mod._test.enqueueTranslation(backlogEl, 'backlog')
+
+    expect(mod._test.translationQueueLength).toBe(11)
+
+    // Drain 10 lives. Each call: free a slot → one dequeue.
+    for (let index = 0; index < 10; index++) {
+      mod._test.activeTranslations = 9
+      mod._test.drainTranslationQueue()
+    }
+
+    expect(mod._test.consecutiveLiveDequeues).toBe(10)
+    expect(mod._test.translationQueueLength).toBe(1)
+
+    // Next drain: forced backlog dispatch (cap hit).
+    mod._test.activeTranslations = 9
+    mod._test.drainTranslationQueue()
+    expect(mod._test.translationQueueLength).toBe(0)
+    expect(mod._test.consecutiveLiveDequeues).toBe(0)
+
+    // After backlog dispatch, live works immediately.
+    const afterEl = document.createElement('div')
+    container.appendChild(afterEl)
+    mod._test.enqueueTranslation(afterEl, 'live')
+    mod._test.activeTranslations = 9
+    mod._test.drainTranslationQueue()
+    expect(mod._test.translationQueueLength).toBe(0)
+  })
+
   it('does not retry during a provider-supplied rate-limit cooldown', async () => {
     sendMessage.mockImplementation((message: { type: string }) => {
       if (message.type === 'get_content_settings') {
