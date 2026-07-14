@@ -349,7 +349,7 @@ export class QuotaScheduler {
         (minimum, limit) => Math.min(minimum, limit),
         batch.profile.maxConcurrency,
       )
-    return sameKeyInFlight.length < providerLimit
+    return sameKeyInFlight.length + sameKeyDeferred.length < providerLimit
   }
 
   private startDeepSeek(batch: QueuedBatch, requests: SchedulerRequest[]): boolean {
@@ -365,6 +365,7 @@ export class QuotaScheduler {
     if (uncachedRequests.length === 0) {
       this.recordService(batch.priority)
       this.finishDeepSeek(batch, requests, cachedResults)
+      this.requestDrain()
       return true
     }
 

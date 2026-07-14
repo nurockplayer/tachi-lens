@@ -184,7 +184,7 @@ const setupPage = (): void => {
 // --- CS debounce — fixed-window coalescing ---
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const pendingMessages = new Map<string, HTMLElement>()
-const queuedElements = new WeakSet<HTMLElement>()
+let queuedElements = new WeakSet<HTMLElement>()
 let pendingIdCounter = 0
 const DEBOUNCE_MS = 300
 const MAX_PENDING = 50
@@ -460,6 +460,7 @@ const cleanup = (): void => {
   stopRetryTimer()
   invalidateSettingsCache()
   pendingMessages.clear()
+  queuedElements = new WeakSet()
   translationQueue.length = 0
 }
 
