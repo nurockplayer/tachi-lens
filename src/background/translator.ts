@@ -110,7 +110,7 @@ export class Translator {
     const schedulerManaged = Boolean(this.deps.quotaScheduler) &&
       (settings.selectedProvider === 'gemini' || settings.selectedProvider === 'deepseek')
 
-    if (!apiKey && !schedulerManaged) {
+    if (!apiKey && !(schedulerManaged && settings.selectedProvider === 'deepseek')) {
       this.resolveAll(items, {
         type: 'auth',
         status: 401,

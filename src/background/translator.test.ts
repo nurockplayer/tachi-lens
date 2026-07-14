@@ -1419,13 +1419,16 @@ describe('Translator', () => {
 
     it('reuses a cached DeepSeek result on scheduler overflow', async () => {
       const gemini = createMockProvider('gemini')
+      vi.mocked(gemini.translateBatch).mockResolvedValue([
+        { id: 'msg1', error: 'quota', status: 429, retryAfterMs: 30_000 },
+      ])
       const deepseek = createMockProvider('deepseek')
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'gemini' as ProviderId,
         selectedModel: 'gemini-2.5-flash',
         targetLanguage: 'zh-TW',
       }))
-      deps.getApiKey = vi.fn(async (providerId) => providerId === 'deepseek' ? 'deepseek-key' : undefined)
+      deps.getApiKey = vi.fn(async (providerId) => providerId === 'gemini' ? 'gemini-key' : 'deepseek-key')
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.cache.set('Hello|zh-TW|deepseek|deepseek-v4-flash', {
         id: 'cached-id',
@@ -1497,13 +1500,16 @@ describe('Translator', () => {
 
     it('honors DeepSeek cooldown on scheduler overflow without probing again', async () => {
       const gemini = createMockProvider('gemini')
+      vi.mocked(gemini.translateBatch).mockResolvedValue([
+        { id: 'msg1', error: 'quota', status: 429, retryAfterMs: 30_000 },
+      ])
       const deepseek = createMockProvider('deepseek')
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'gemini' as ProviderId,
         selectedModel: 'gemini-2.5-flash',
         targetLanguage: 'zh-TW',
       }))
-      deps.getApiKey = vi.fn(async (providerId) => providerId === 'deepseek' ? 'deepseek-key' : undefined)
+      deps.getApiKey = vi.fn(async (providerId) => providerId === 'gemini' ? 'gemini-key' : 'deepseek-key')
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.rateLimiter.recordError('deepseek', 10_000)
       deps.quotaScheduler = createQuotaScheduler()
@@ -1518,6 +1524,9 @@ describe('Translator', () => {
 
     it('records a scheduler-overflow DeepSeek 429 and prevents the next probe', async () => {
       const gemini = createMockProvider('gemini')
+      vi.mocked(gemini.translateBatch).mockResolvedValue([
+        { id: 'first', error: 'quota', status: 429, retryAfterMs: 30_000 },
+      ])
       const deepseek = createMockProvider('deepseek')
       vi.mocked(deepseek.translateBatch).mockResolvedValue([
         { id: 'first', error: 'DeepSeek quota exhausted', status: 429, retryAfterMs: 10_000 },
@@ -1527,10 +1536,9 @@ describe('Translator', () => {
         selectedModel: 'gemini-2.5-flash',
         targetLanguage: 'zh-TW',
       }))
-      deps.getApiKey = vi.fn(async (providerId) => providerId === 'deepseek' ? 'deepseek-key' : undefined)
+      deps.getApiKey = vi.fn(async (providerId) => providerId === 'gemini' ? 'gemini-key' : 'deepseek-key')
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
 
       const first = translator.translate({ messageId: 'first', text: 'one' })
       await vi.advanceTimersByTimeAsync(150)
