@@ -152,7 +152,7 @@ export class QuotaScheduler {
             batch.priority === 'backlog' &&
             (
               (preserveBacklogPriority && this.hasRunnable(this.live, deferred)) ||
-              this.hasLiveQuotaWaiter()
+              this.hasLiveQuotaWaiter(batch.quotaKey)
             )
           ) {
             if (!this.startDeepSeek(batch, batch.requests)) {
@@ -499,8 +499,8 @@ export class QuotaScheduler {
     return queue.some((batch) => !deferred.has(batch))
   }
 
-  private hasLiveQuotaWaiter(): boolean {
-    return this.live.some((batch) => batch.waitingForQuota)
+  private hasLiveQuotaWaiter(quotaKey: string): boolean {
+    return this.live.some((batch) => batch.waitingForQuota && batch.quotaKey === quotaKey)
   }
 
   private shouldYieldBacklogToLive(

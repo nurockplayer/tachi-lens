@@ -474,9 +474,11 @@ describe('Translator', () => {
       const backlog = translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })
       await vi.advanceTimersByTimeAsync(150)
 
-      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
-      expect(vi.mocked(deepseek.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['backlog'])
-      expect(gemini.translateBatch).not.toHaveBeenCalled()
+      // The backlog runs Gemini because its quotaKey (gemini-2.5-pro) is distinct
+      // from the live waiter's (gemini-2.5-flash), so it is not blocked.
+      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(gemini.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['backlog'])
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
 
       now += 500
       await vi.advanceTimersByTimeAsync(500)
@@ -485,9 +487,9 @@ describe('Translator', () => {
         { messageId: 'live-1', translatedText: 'g-live-1' },
         { messageId: 'live-2', translatedText: 'g-live-2' },
       ])
-      await expect(backlog).resolves.toEqual({ messageId: 'backlog', translatedText: 'd-backlog' })
+      await expect(backlog).resolves.toEqual({ messageId: 'backlog', translatedText: 'g-backlog' })
       expect(vi.mocked(gemini.translateBatch).mock.calls[0]![0].map(({ id }) => id))
-        .toEqual(['live-1', 'live-2'])
+        .toEqual(['backlog'])
     })
 
     it('keeps Gemini quota and cooldown state independent for each selected model', async () => {
