@@ -34,6 +34,17 @@ pnpm dev        # 開發模式
 pnpm build      # 正式建置
 ```
 
+## E2E 測試
+
+使用 Playwright 搭配 Chromium 實際載入 build 後的 Chrome Extension，驗證 MV3 Service Worker 能正常啟動。
+
+```bash
+pnpm exec playwright install chromium  # 首次執行需安裝瀏覽器
+pnpm test:e2e                           # 建置 Extension 並執行 E2E
+```
+
+測試會使用 headed Chromium（MV3 extension 在 headless 模式下無法載入）。測試過程會建立暫存使用者資料目錄，結束後自動清除。
+
 ## 架構
 
 ```
