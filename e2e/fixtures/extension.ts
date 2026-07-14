@@ -34,6 +34,7 @@ export const test = base.extend<{
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tachi-lens-e2e-'))
     let context: BrowserContext | undefined
+    let primaryError: unknown
 
     try {
       context = await chromium.launchPersistentContext(userDataDir, {
@@ -73,17 +74,45 @@ export const test = base.extend<{
       })
 
       await use(context)
-    } finally {
-      if (context) {
-        contextErrors.delete(context)
-        await context.close()
-      }
+    } catch (e) {
+      primaryError = e
+    }
+
+    // Teardown: always runs after try/catch, independent of primary outcome.
+    // Each cleanup step is individually caught so one failure never blocks another.
+    const cleanupErrors: string[] = []
+    if (context) {
+      contextErrors.delete(context)
       try {
-        fs.rmSync(userDataDir, { recursive: true, force: true })
-      } catch {
-        // Temp directory cleanup is best-effort
+        await context.close()
+      } catch (e) {
+        cleanupErrors.push(
+          `context.close failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        )
       }
     }
+    try {
+      fs.rmSync(userDataDir, { recursive: true, force: true })
+    } catch (e) {
+      cleanupErrors.push(
+        `temp directory removal failed: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      )
+    }
+
+    // Surface cleanup failures only when the test and fixture setup succeeded.
+    // When a primary error exists it is the single truth — cleanup errors must
+    // not replace it. Both cleanup failures are preserved in the same message.
+    if (cleanupErrors.length > 0 && !primaryError) {
+      throw new Error(
+        'Extension fixture cleanup failed:\n' +
+          cleanupErrors.map((s) => `  ${s}`).join('\n'),
+      )
+    }
+    if (primaryError) throw primaryError
   },
 
   serviceWorker: async ({ context }, use) => {
