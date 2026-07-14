@@ -24,6 +24,7 @@ export interface ScheduledBatch {
   profile?: GeminiQuotaSettings
   quotaKey?: string
   geminiAvailable: boolean
+  primaryProvider: 'gemini' | 'deepseek'
   runGemini: (requests: SchedulerRequest[], signal?: AbortSignal) => Promise<BatchItemResult[]>
   getDeepSeekCachedResults?: (requests: SchedulerRequest[]) => BatchItemResult[]
   runDeepSeek: (requests: SchedulerRequest[], signal?: AbortSignal) => Promise<BatchItemResult[]>
@@ -142,7 +143,7 @@ export class QuotaScheduler {
           const expired = batch.priority === 'live' && now >= batch.deadline
 
           if (expired || batch.fallbackRequests || !batch.geminiAvailable) {
-            if (!batch.fallbackRequests && batch.geminiRetryAfterMs === undefined) {
+            if (!batch.fallbackRequests && batch.geminiRetryAfterMs === undefined && batch.primaryProvider === 'gemini') {
               batch.geminiRetryAfterMs = 30_000
             }
             if (!this.startDeepSeek(batch, batch.fallbackRequests ?? batch.requests)) {
@@ -218,7 +219,7 @@ export class QuotaScheduler {
               continue
             }
 
-            if (batch.geminiRetryAfterMs === undefined) {
+            if (batch.geminiRetryAfterMs === undefined && batch.primaryProvider === 'gemini') {
               batch.geminiRetryAfterMs = reservation.nextAvailableAt !== undefined
                 ? Math.max(0, reservation.nextAvailableAt - this.now())
                 : 30_000
@@ -404,7 +405,7 @@ export class QuotaScheduler {
     const fallbackResults = completeResults(requests, rawResults, 'No DeepSeek result for message')
 
     if (!batch.geminiResults) {
-      const retryable = batch.geminiRetryAfterMs !== undefined
+      const retryable = batch.geminiRetryAfterMs !== undefined && batch.primaryProvider === 'gemini'
       this.settle(batch, {
         results: batch.requests.map((request) => {
           const fallback = fallbackResults.find((entry) => entry.id === request.id)

@@ -190,6 +190,7 @@ export class Translator {
         profile: settings.geminiQuotaProfiles?.[model] ?? settings.geminiQuota,
         quotaKey: model,
         geminiAvailable: selectedGemini && Boolean(apiKey && provider) && !this.deps.rateLimiter.isLimited('gemini'),
+        primaryProvider: selectedGemini ? 'gemini' : 'deepseek',
         runGemini: (requests, signal) => provider
           ? provider.translateBatch(requests, apiKey!, model, targetLang, signal)
           : Promise.resolve(requests.map((request) => ({ id: request.id, error: 'Gemini provider is unavailable' }))),

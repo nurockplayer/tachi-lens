@@ -32,6 +32,7 @@ const batch = (id: string, priority: 'live' | 'backlog', overrides: Partial<Sche
   estimatedInputTokens: 1,
   profile,
   geminiAvailable: true,
+  primaryProvider: 'gemini',
   runGemini: vi.fn(async (requests: SchedulerRequest[]) => requests.map((request) => ({ id: request.id, translatedText: `g-${request.id}` }))),
   runDeepSeek: vi.fn(async (requests: SchedulerRequest[]) => requests.map((request) => ({ id: request.id, translatedText: `d-${request.id}` }))),
   ...overrides,
@@ -799,5 +800,109 @@ describe('QuotaScheduler', () => {
     await expect(result).resolves.toMatchObject({ results: [{ error: 'Gemini request timed out' }] })
     expect(settlements).toBe(1)
     expect(receivedSignal?.aborted).toBe(true)
+  })
+
+  // ── DeepSeek primary provider: errors must pass through, not become Gemini 429 ──
+
+  it('passes through DeepSeek auth error when DeepSeek is primary and no API key is configured (Test A)', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('msg', 'live', {
+      primaryProvider: 'deepseek',
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'msg', error: 'No DeepSeek API key is configured', status: 401, errorType: 'auth' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.errorType).toBe('auth')
+    expect(result.results[0]!.status).toBe(401)
+    expect(result.results[0]!.error).toBe('No DeepSeek API key is configured')
+    expect(result.providers.get('msg')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('passes through DeepSeek auth error for provider 401/403 when DeepSeek is primary (Test B)', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('msg', 'live', {
+      primaryProvider: 'deepseek',
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'msg', error: 'Forbidden', status: 403, errorType: 'auth' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.errorType).toBe('auth')
+    expect(result.results[0]!.status).toBe(403)
+    expect(result.providers.get('msg')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('passes through DeepSeek bad_request error when DeepSeek is primary (Test C)', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('msg', 'live', {
+      primaryProvider: 'deepseek',
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'msg', error: 'DeepSeek bad request', status: 400, errorType: 'bad_request' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.errorType).toBe('bad_request')
+    expect(result.results[0]!.status).toBe(400)
+    expect(result.providers.get('msg')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('uses cached result when DeepSeek is primary and no API key but cache hit exists (Test D)', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('msg', 'live', {
+      primaryProvider: 'deepseek',
+      geminiAvailable: false,
+      getDeepSeekCachedResults: vi.fn(() => [{ id: 'msg', translatedText: 'cached translation' }]),
+      runDeepSeek: vi.fn(),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.translatedText).toBe('cached translation')
+    expect(result.providers.get('msg')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+    expect(request.runDeepSeek).not.toHaveBeenCalled()
+  })
+
+  it('preserves DeepSeek rate_limited error when DeepSeek is primary (Test E)', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('msg', 'live', {
+      primaryProvider: 'deepseek',
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'msg', error: 'DeepSeek rate limited', status: 429, retryAfterMs: 15_000, errorType: 'rate_limited' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.results[0]!.retryAfterMs).toBe(15_000)
+    expect(result.providers.get('msg')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('still synthesizes retryable Gemini rate-limit for Gemini-primary quota denial (Test F)', async () => {
+    const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100 }
+    const store = new GeminiQuotaStore(storage(), () => 1_000)
+    await store.reserve(quotaProfile, 1, 'default')
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const request = batch('gemini-quota-denied', 'backlog', {
+      profile: quotaProfile,
+      primaryProvider: 'gemini',
+      geminiAvailable: true,
+      runDeepSeek: vi.fn(async () => [{ id: 'gemini-quota-denied', error: 'DeepSeek auth error', errorType: 'auth' as const }]),
+    })
+    const result = await scheduler.schedule(request)
+
+    expect(result.quotaDenial).toBe('rpm')
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.providers.get('gemini-quota-denied')).toBe('gemini')
+    expect(request.runGemini).not.toHaveBeenCalled()
   })
 })

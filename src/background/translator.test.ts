@@ -1891,5 +1891,80 @@ describe('Translator', () => {
       })
       expect(provider.translateBatch).not.toHaveBeenCalled()
     })
+
+    it('preserves genuine DeepSeek 429 as retryable rate_limited when DeepSeek is primary (Test E)', async () => {
+      const deepseek = createMockProvider('deepseek')
+      vi.mocked(deepseek.translateBatch).mockResolvedValue([
+        { id: 'msg1', error: 'DeepSeek quota exhausted', status: 429, retryAfterMs: 12_000, errorType: 'rate_limited' as const },
+      ])
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'deepseek' as ProviderId,
+        selectedModel: 'deepseek-v4-flash',
+        targetLanguage: 'zh-TW',
+      }))
+      deps.getProvider = vi.fn((providerId) => providerId === 'deepseek' ? deepseek : undefined)
+      deps.quotaScheduler = createQuotaScheduler()
+      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+
+      const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      await vi.advanceTimersByTimeAsync(150)
+
+      await expect(result).resolves.toMatchObject({
+        messageId: 'msg1',
+        error: { type: 'rate_limited', retryAfterMs: 12_000 },
+      })
+    })
+
+    it('still returns retryable Gemini rate_limited on Gemini quota denial with unavailable DeepSeek fallback (Test F)', async () => {
+      let now = Date.UTC(2026, 6, 14, 12)
+      const session: Record<string, unknown> = {}
+      const local: Record<string, unknown> = {}
+      const storage: QuotaStorage = {
+        getSession: async () => session,
+        setSession: async (value) => { Object.assign(session, value) },
+        getLocal: async () => local,
+        setLocal: async (value) => { Object.assign(local, value) },
+      }
+      const quota = new GeminiQuotaStore(storage, () => now)
+      const rpmProfile = {
+        ...DEFAULT_GEMINI_QUOTA,
+        requestsPerMinute: 1,
+        rpmSafetyPercent: 100,
+        inputTokensPerMinute: 1_000_000,
+        tpmSafetyPercent: 100,
+        requestsPerDay: 100,
+        rpdSafetyPercent: 100,
+        liveMaxWaitMs: 1_000,
+        maxConcurrency: 10,
+      }
+      await quota.reserve(rpmProfile, 1, 'gemini-2.5-pro')
+
+      const gemini = createMockProvider('gemini')
+      const deepseek = createMockProvider('deepseek')
+      vi.mocked(deepseek.translateBatch).mockImplementation(async () =>
+        [{ id: 'quota-denied', error: 'DeepSeek auth error', errorType: 'auth' as const }],
+      )
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'gemini' as ProviderId,
+        selectedModel: 'gemini-2.5-pro',
+        targetLanguage: 'zh-TW',
+        geminiQuotaProfiles: {
+          'gemini-2.5-pro': rpmProfile,
+        },
+      }))
+      deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
+      deps.quotaScheduler = new QuotaScheduler(quota, { now: () => now })
+      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+
+      const translatePromise = translator.translate({ messageId: 'quota-denied', text: 'hello', priority: 'backlog' })
+      await vi.advanceTimersByTimeAsync(150)
+      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
+
+      const result = await translatePromise
+      expect(result.error?.type).toBe('rate_limited')
+      expect(result.messageId).toBe('quota-denied')
+      expect(gemini.translateBatch).not.toHaveBeenCalled()
+      expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
+    })
   })
 })
