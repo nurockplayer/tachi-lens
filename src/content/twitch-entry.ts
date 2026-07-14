@@ -324,6 +324,7 @@ interface QueuedTranslation {
 }
 const translationQueue: QueuedTranslation[] = []
 const MAX_CONCURRENT_TRANSLATIONS = 10
+const MAX_CONSECUTIVE_LIVE = 3
 let activeTranslations = 0
 let retryNotBefore = 0
 let consecutiveLiveDequeues = 0
@@ -355,9 +356,9 @@ const drainTranslationQueue = (): void => {
     let element: HTMLElement
     let priority: TranslationPriority
 
-    // After MAX_CONCURRENT_TRANSLATIONS consecutive live dequeues while
+    // After MAX_CONSECUTIVE_LIVE consecutive live dequeues while
     // backlog is queued, force-dispatch the earliest backlog.
-    if (consecutiveLiveDequeues >= MAX_CONCURRENT_TRANSLATIONS && hasBacklog) {
+    if (consecutiveLiveDequeues >= MAX_CONSECUTIVE_LIVE && hasBacklog) {
       const index = translationQueue.findIndex((entry) => entry.priority === 'backlog')
       const spliced = translationQueue.splice(index, 1)[0]!
       element = spliced.element

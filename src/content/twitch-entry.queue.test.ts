@@ -124,7 +124,7 @@ describe('content script translation queue', () => {
     }
   })
 
-  it('dispatches backlog after MAX_CONCURRENT_TRANSLATIONS consecutive live dequeues even under sustained live arrivals', async () => {
+  it('dispatches backlog within at most 3 consecutive live dequeues under sustained live arrivals', async () => {
     const mod = await import('./twitch-entry')
 
     // Resolve sendMessage so processMessage completes and .finally() cascades.
@@ -168,7 +168,8 @@ describe('content script translation queue', () => {
     // Queue: [prefill-0..prefill-9, backlog-target]
     textOrder.length = 0
 
-    // Sustain 12 fresh-live arrivals plus one slot release per cycle.
+    // Sustain fresh-live arrivals plus one slot release per cycle.
+    // With bound=3, backlog is forced after 3 consecutive live dequeues.
     for (let r = 1; r <= 12; r++) {
       const el = document.createElement('div')
       el.textContent = `live-${r}`
@@ -181,28 +182,21 @@ describe('content script translation queue', () => {
       mod._test.activeTranslations = 10
     }
 
-    // With the fairness cap, backlog is forced at index 10 (after 10 prefills).
+    // Fairness forces backlog after 3 consecutive lives (prefill-0..prefill-2).
     expect(textOrder[0]).toBe('prefill-0')
     expect(textOrder[1]).toBe('prefill-1')
     expect(textOrder[2]).toBe('prefill-2')
-    expect(textOrder[3]).toBe('prefill-3')
-    expect(textOrder[4]).toBe('prefill-4')
-    expect(textOrder[5]).toBe('prefill-5')
-    expect(textOrder[6]).toBe('prefill-6')
-    expect(textOrder[7]).toBe('prefill-7')
-    expect(textOrder[8]).toBe('prefill-8')
-    expect(textOrder[9]).toBe('prefill-9')
-    expect(textOrder[10]).toBe('backlog-target')
-    expect(textOrder[11]).toBe('live-1')
+    expect(textOrder[3]).toBe('backlog-target')
 
-    // Remaining lives (live-2..live-12) after backlog preserve FIFO order.
-    const remaining = textOrder.slice(12, 12 + 12)
-    const expected = Array.from({ length: 12 }, (_, i) => `live-${i + 2}`)
-    // Not all may be present if the loop exhausted early, but each one that
-    // appears must be in FIFO order.
-    for (let i = 0; i < remaining.length; i++) {
-      expect(remaining[i]).toBe(expected[i])
-    }
+    // Remaining prefills (3-9) dispatch after backlog since no backlog remains.
+    expect(textOrder[4]).toBe('prefill-3')
+    expect(textOrder[5]).toBe('prefill-4')
+    expect(textOrder[6]).toBe('prefill-5')
+    expect(textOrder[7]).toBe('prefill-6')
+    expect(textOrder[8]).toBe('prefill-7')
+    expect(textOrder[9]).toBe('prefill-8')
+    expect(textOrder[10]).toBe('prefill-9')
+    expect(textOrder[11]).toBe('live-1')
 
     // backlog dispatched exactly once.
     expect(textOrder.filter((t) => t === 'backlog-target')).toHaveLength(1)
