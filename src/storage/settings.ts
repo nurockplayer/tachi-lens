@@ -140,8 +140,7 @@ export const saveUserSettings = async (
     ...updates,
   }
   const geminiQuota = normalizeGeminiQuotaSettings(mergedSettings.geminiQuota)
-  const profilesSource = updates.geminiQuotaProfiles ??
-    (updates.geminiQuota === undefined ? mergedSettings.geminiQuotaProfiles : undefined)
+  const profilesSource = updates.geminiQuotaProfiles ?? mergedSettings.geminiQuotaProfiles
   const nextSettings = {
     ...mergedSettings,
     geminiQuota,

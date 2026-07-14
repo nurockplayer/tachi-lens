@@ -176,6 +176,28 @@ describe('settings storage', () => {
       .toEqual(DEFAULT_SETTINGS.geminiQuota)
   })
 
+  it('preserves existing per-model quota profiles when saveUserSettings receives only geminiQuota', async () => {
+    const storage = createChromeStorage()
+    const distinctProfiles: Record<string, typeof DEFAULT_SETTINGS.geminiQuota> = {
+      'gemini-2.5-flash': { ...DEFAULT_SETTINGS.geminiQuota, requestsPerMinute: 10, requestsPerDay: 50 },
+      'gemini-2.5-pro': { ...DEFAULT_SETTINGS.geminiQuota, requestsPerMinute: 3, requestsPerDay: 20 },
+    }
+    storage.local.data.userSettings = { geminiQuotaProfiles: distinctProfiles }
+
+    // Act: save only geminiQuota, no geminiQuotaProfiles
+    await saveUserSettings({
+      geminiQuota: { ...DEFAULT_SETTINGS.geminiQuota, requestsPerMinute: 99 },
+    }, storage)
+
+    const saved = storage.local.data.userSettings as UserSettings & {
+      geminiQuotaProfiles: Record<string, typeof DEFAULT_SETTINGS.geminiQuota>
+    }
+    expect(saved.geminiQuotaProfiles['gemini-2.5-flash']!.requestsPerMinute).toBe(10)
+    expect(saved.geminiQuotaProfiles['gemini-2.5-flash']!.requestsPerDay).toBe(50)
+    expect(saved.geminiQuotaProfiles['gemini-2.5-pro']!.requestsPerMinute).toBe(3)
+    expect(saved.geminiQuotaProfiles['gemini-2.5-pro']!.requestsPerDay).toBe(20)
+  })
+
   it('merges stored partial settings over defaults', async () => {
     const storage = createChromeStorage()
     storage.local.data.userSettings = { targetLanguage: 'ja', translationEnabled: false }
