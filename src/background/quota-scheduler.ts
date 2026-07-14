@@ -394,9 +394,34 @@ export class QuotaScheduler {
     const fallbackResults = completeResults(requests, rawResults, 'No DeepSeek result for message')
 
     if (!batch.geminiResults) {
+      const protectedDenial = batch.quotaDenial ? 'gemini' : undefined
       this.settle(batch, {
-        results: fallbackResults,
-        providers: new Map(batch.requests.map((request) => [request.id, 'deepseek'] as const)),
+        results: batch.requests.map((request) => {
+          const fallback = fallbackResults.find((entry) => entry.id === request.id)
+          if (
+            protectedDenial &&
+            (fallback?.errorType === 'auth' || fallback?.errorType === 'bad_request')
+          ) {
+            return {
+              id: request.id,
+              error: 'Gemini is rate limited',
+              status: 429,
+              retryAfterMs: 30_000,
+              errorType: 'rate_limited' as const,
+            }
+          }
+          return fallback ?? { id: request.id, error: 'DeepSeek fallback failed', errorType: 'unknown' as const }
+        }),
+        providers: new Map(batch.requests.map((request) => {
+          const fallback = fallbackResults.find((entry) => entry.id === request.id)
+          if (
+            protectedDenial &&
+            (fallback?.errorType === 'auth' || fallback?.errorType === 'bad_request')
+          ) {
+            return [request.id, 'gemini'] as const
+          }
+          return [request.id, 'deepseek'] as const
+        })),
         ...(batch.quotaDenial ? { quotaDenial: batch.quotaDenial } : {}),
       })
       return

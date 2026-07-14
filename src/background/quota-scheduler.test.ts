@@ -502,6 +502,105 @@ describe('QuotaScheduler', () => {
     expect(liveR.results).toHaveLength(1)
   })
 
+  it('synthesizes retryable Gemini rate-limit result when quota denial and DeepSeek fallback returns auth', async () => {
+    const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100 }
+    const store = new GeminiQuotaStore(storage(), () => 1_000)
+    await store.reserve(quotaProfile, 1, 'default')
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const request = batch('quota-denied', 'backlog', {
+      profile: quotaProfile,
+      geminiAvailable: true,
+      runDeepSeek: vi.fn(async () => [{ id: 'quota-denied', error: 'DeepSeek auth error', errorType: 'auth' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.quotaDenial).toBe('rpm')
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.providers.get('quota-denied')).toBe('gemini')
+    expect(request.runGemini).not.toHaveBeenCalled()
+    expect(request.runDeepSeek).toHaveBeenCalledTimes(1)
+  })
+
+  it('synthesizes retryable Gemini rate-limit result when quota denial and DeepSeek fallback returns bad_request', async () => {
+    const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100 }
+    const store = new GeminiQuotaStore(storage(), () => 1_000)
+    await store.reserve(quotaProfile, 1, 'default')
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const request = batch('quota-denied', 'backlog', {
+      profile: quotaProfile,
+      geminiAvailable: true,
+      runDeepSeek: vi.fn(async () => [{ id: 'quota-denied', error: 'DeepSeek bad request', errorType: 'bad_request' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.quotaDenial).toBe('rpm')
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.providers.get('quota-denied')).toBe('gemini')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('preserves DeepSeek fallback success when quota denial is set', async () => {
+    const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100 }
+    const store = new GeminiQuotaStore(storage(), () => 1_000)
+    await store.reserve(quotaProfile, 1, 'default')
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const request = batch('quota-fallback-ok', 'backlog', {
+      profile: quotaProfile,
+      geminiAvailable: true,
+      runDeepSeek: vi.fn(async () => [{ id: 'quota-fallback-ok', translatedText: 'd-fallback' }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.translatedText).toBe('d-fallback')
+    expect(result.providers.get('quota-fallback-ok')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('synthesizes retryable Gemini rate-limit with live batch when quota denial and DeepSeek fallback returns auth', async () => {
+    const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100, liveMaxWaitMs: 5_000 }
+    const store = new GeminiQuotaStore(storage(), () => 1_000)
+    await store.reserve(quotaProfile, 1, 'default')
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const request = batch('live-quota-denied', 'live', {
+      profile: quotaProfile,
+      geminiAvailable: true,
+      runDeepSeek: vi.fn(async () => [{ id: 'live-quota-denied', error: 'DeepSeek auth error', errorType: 'auth' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.providers.get('live-quota-denied')).toBe('gemini')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('synthesizes retryable Gemini rate-limit result with retry timing from quota denial', async () => {
+    const now = 1_000
+    const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100 }
+    const store = new GeminiQuotaStore(storage(), () => now)
+    await store.reserve(quotaProfile, 1, 'default')
+    const scheduler = new QuotaScheduler(store, { now: () => now })
+    const request = batch('get-retry-timing', 'backlog', {
+      profile: quotaProfile,
+      geminiAvailable: true,
+      runDeepSeek: vi.fn(async () => [{ id: 'get-retry-timing', error: 'DeepSeek auth error', errorType: 'auth' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.quotaDenial).toBe('rpm')
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.results[0]!.retryAfterMs).toBe(30_000)
+    expect(result.providers.get('get-retry-timing')).toBe('gemini')
+  })
+
   it('times out a hung provider and settles the batch exactly once', async () => {
     vi.useFakeTimers()
     const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage()), { providerTimeoutMs: 1_000 })
