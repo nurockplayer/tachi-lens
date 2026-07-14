@@ -33,47 +33,51 @@ export const test = base.extend<{
     }
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tachi-lens-e2e-'))
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      channel: 'chromium',
-      args: [
-        `--disable-extensions-except=${DIST_DIR}`,
-        `--load-extension=${DIST_DIR}`,
-      ],
-    })
-
-    const errors: ExtensionError[] = []
-    contextErrors.set(context, errors)
-
-    const attachSwConsole = (worker: Worker): void => {
-      worker.on('console', (msg) => {
-        if (msg.type() === 'error') {
-          errors.push({ source: 'service-worker', type: msg.type(), text: msg.text })
-        }
-      })
-    }
-    for (const sw of context.serviceWorkers()) {
-      attachSwConsole(sw)
-    }
-    context.on('serviceworker', (sw) => {
-      attachSwConsole(sw)
-    })
-
-    context.on('page', (page) => {
-      page.on('pageerror', (err) => {
-        errors.push({ source: 'page', type: 'pageerror', text: err.message })
-      })
-      page.on('console', (msg) => {
-        if (msg.type() === 'error') {
-          errors.push({ source: 'page', type: msg.type(), text: msg.text })
-        }
-      })
-    })
+    let context: BrowserContext | undefined
 
     try {
+      context = await chromium.launchPersistentContext(userDataDir, {
+        channel: 'chromium',
+        args: [
+          `--disable-extensions-except=${DIST_DIR}`,
+          `--load-extension=${DIST_DIR}`,
+        ],
+      })
+
+      const errors: ExtensionError[] = []
+      contextErrors.set(context, errors)
+
+      const attachSwConsole = (worker: Worker): void => {
+        worker.on('console', (msg) => {
+          if (msg.type() === 'error') {
+            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text })
+          }
+        })
+      }
+      for (const sw of context.serviceWorkers()) {
+        attachSwConsole(sw)
+      }
+      context.on('serviceworker', (sw) => {
+        attachSwConsole(sw)
+      })
+
+      context.on('page', (page) => {
+        page.on('pageerror', (err) => {
+          errors.push({ source: 'page', type: 'pageerror', text: err.message })
+        })
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') {
+            errors.push({ source: 'page', type: msg.type(), text: msg.text })
+          }
+        })
+      })
+
       await use(context)
     } finally {
-      contextErrors.delete(context)
-      await context.close()
+      if (context) {
+        contextErrors.delete(context)
+        await context.close()
+      }
       try {
         fs.rmSync(userDataDir, { recursive: true, force: true })
       } catch {
@@ -85,18 +89,23 @@ export const test = base.extend<{
   serviceWorker: async ({ context }, use) => {
     let sw: Worker | undefined = context.serviceWorkers()[0]
     if (!sw) {
-      sw = await context.waitForEvent('serviceworker', { timeout: 15_000 })
-    }
-
-    if (!sw) {
-      const collected = (contextErrors.get(context) ?? [])
-        .map((e) => `  [${e.source}] ${e.type}: ${e.text}`)
-        .join('\n')
-      throw new Error(
-        `Extension MV3 Service Worker did not start.\n` +
-        `  Extension path: ${DIST_DIR}\n` +
-        (collected ? `  Collected errors:\n${collected}` : '  No errors collected before timeout.'),
-      )
+      try {
+        sw = await context.waitForEvent('serviceworker', { timeout: 15_000 })
+      } catch (waitError) {
+        const collected = (contextErrors.get(context) ?? [])
+          .map((e) => `  [${e.source}] ${e.type}: ${e.text}`)
+          .join('\n')
+        const originalMsg =
+          waitError instanceof Error ? waitError.message : String(waitError)
+        throw new Error(
+          `Extension MV3 Service Worker did not start.\n` +
+          `  Extension path: ${DIST_DIR}\n` +
+          `  waitForEvent failed: ${originalMsg}\n` +
+          (collected
+            ? `  Collected startup errors:\n${collected}`
+            : '  No startup errors were collected.'),
+        )
+      }
     }
 
     await use(sw)
