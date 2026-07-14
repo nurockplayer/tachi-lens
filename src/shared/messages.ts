@@ -112,7 +112,7 @@ export interface ContentSettingsRequest {
 
 /** Error types covering both API failures and user-actionable states. */
 export type ProviderError =
-  | { type: 'auth'; status: 401; message: string }
+  | { type: 'auth'; status: number; message: string }
   | { type: 'rate_limited'; retryAfterMs: number; message: string }
   | { type: 'quota_exceeded'; message: string }
   | { type: 'bad_request'; status: number; message: string }

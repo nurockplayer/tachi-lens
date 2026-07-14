@@ -1619,6 +1619,38 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
+    it('preserves auth error status from batchResult', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        { id: 'msg1', error: 'Forbidden', status: 403, errorType: 'auth' },
+      ])
+      deps.getProvider = vi.fn(() => provider)
+
+      const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+
+      await expect(result).resolves.toMatchObject({
+        messageId: 'msg1',
+        error: { type: 'auth', status: 403 },
+      })
+    })
+
+    it('maps explicit errorType rate_limited without relying on string heuristic', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        { id: 'msg1', error: 'Some other error', errorType: 'rate_limited', retryAfterMs: 12_500 },
+      ])
+      deps.getProvider = vi.fn(() => provider)
+
+      const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
+      vi.advanceTimersByTime(150)
+
+      await expect(result).resolves.toEqual({
+        messageId: 'msg1',
+        error: { type: 'rate_limited', retryAfterMs: 12_500, message: 'Some other error' },
+      })
+    })
+
     it('uses structured Gemini 429 metadata and provider retry delay', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([

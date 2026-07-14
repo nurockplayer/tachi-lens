@@ -577,7 +577,7 @@ export class Translator {
     if (batchResult.errorType === 'auth') {
       return {
         messageId,
-        error: { type: 'auth', status: 401, message: errorMsg },
+        error: { type: 'auth', status: batchResult.status ?? 401, message: errorMsg },
       }
     }
 
@@ -592,6 +592,17 @@ export class Translator {
       return {
         messageId,
         error: { type: batchResult.errorType, message: errorMsg },
+      }
+    }
+
+    if (batchResult.errorType === 'rate_limited') {
+      return {
+        messageId,
+        error: {
+          type: 'rate_limited',
+          retryAfterMs: batchResult.retryAfterMs ?? 1_000,
+          message: errorMsg,
+        },
       }
     }
 
