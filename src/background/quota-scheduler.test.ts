@@ -686,6 +686,98 @@ describe('QuotaScheduler', () => {
     expect(request.runGemini).not.toHaveBeenCalled()
   })
 
+  it('deferred capacity waiter reserves the same-key slot so backlog cannot overtake', async () => {
+    let releaseHolder!: () => void
+    const holderPending = new Promise<void>((resolve) => { releaseHolder = resolve })
+    let unblockPersist!: () => void
+    const persistGate = new Promise<void>((resolve) => { unblockPersist = resolve })
+    let setLocalCalls = 0
+    const session: Record<string, unknown> = {}
+    const local: Record<string, unknown> = {}
+    const gatedStorage: QuotaStorage = {
+      getSession: async () => session,
+      setSession: async (v) => { Object.assign(session, v) },
+      getLocal: async () => local,
+      setLocal: async (v) => {
+        setLocalCalls++
+        // H's reserve ⇒ setLocal #1. Bridge's reserve ⇒ setLocal #2 ⇒ gate.
+        if (setLocalCalls === 2) await persistGate
+        Object.assign(local, v)
+      },
+    }
+    const store = new GeminiQuotaStore(gatedStorage, () => 1_000)
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const limited = { ...profile, maxConcurrency: 1 }
+    const H = batch('holder', 'live', {
+      profile: limited,
+      runGemini: vi.fn(async () => {
+        await holderPending
+        return [{ id: 'holder', translatedText: 'g-holder' }]
+      }),
+    })
+    const L1 = batch('deferred-waiter', 'live', { profile: limited })
+    const Bridge = batch('bridge', 'live', { profile: limited, quotaKey: 'other-model' })
+    const B = batch('backlog', 'backlog', { profile: limited })
+
+    // Step 1: H starts Gemini and stays in-flight.
+    scheduler.schedule(H)
+    await vi.waitFor(() => expect(H.runGemini).toHaveBeenCalledTimes(1))
+
+    // Step 2: Schedule L1, Bridge, B. Drain evaluates:
+    //   L1 → hasGeminiCapacity false (H same-key in-flight) → capacityDeferred
+    //   Bridge → hasGeminiCapacity true (different key) → reserve → persist gated
+    scheduler.schedule(L1)
+    scheduler.schedule(Bridge)
+    scheduler.schedule(B)
+
+    // Step 3: Wait until Bridge hits the persist gate.
+    await vi.waitFor(() => expect(setLocalCalls).toBe(2))
+
+    // Step 4: Release H while Bridge's persist is gated.
+    // H's runGemini resolves → .then settles H → .finally removes from inFlight.
+    releaseHolder()
+
+    // Step 5: Unblock Bridge's persist → Bridge starts Gemini → drain continues to B.
+    // hasGeminiCapacity(B): inFlight=[Bridge] (different key), capacityDeferred=[L1] (same key)
+    // OLD (sameKeyInFlight.length < providerLimit): 0 < 1 → true → B takes Gemini (BUG)
+    // NEW (sameKeyInFlight.length + sameKeyDeferred.length < providerLimit): 0+1 < 1 → false → B→DeepSeek
+    unblockPersist()
+
+    await vi.waitFor(() => {
+      expect(B.runGemini).not.toHaveBeenCalled()
+      expect(B.runDeepSeek).toHaveBeenCalledTimes(1)
+    })
+    // L1 gets Gemini in the subsequent drain.
+    await vi.waitFor(() => expect(L1.runGemini).toHaveBeenCalledTimes(1))
+  })
+
+  it('isolates live quota waiter check by quotaKey so an unrelated backlog uses Gemini', async () => {
+    const flashProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100, maxConcurrency: 1, liveMaxWaitMs: 5_000 }
+    const proSettings = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100, maxConcurrency: 1, liveMaxWaitMs: 120_000 }
+    const store = new GeminiQuotaStore(storage(), () => 1_000)
+    // Pre-reserve the Pro RPM slot so the live Pro batch gets a quota denial.
+    await store.reserve(proSettings, 1, 'gemini-2.5-pro')
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const proLive = batch('pro-live', 'live', { profile: proSettings, quotaKey: 'gemini-2.5-pro' })
+    const flashBacklog = batch('flash-backlog', 'backlog', { profile: flashProfile, quotaKey: 'gemini-2.5-flash' })
+
+    void scheduler.schedule(proLive)
+    void scheduler.schedule(flashBacklog)
+
+    // With current scoped hasLiveQuotaWaiter, the Flash backlog is NOT blocked
+    // by the unrelated Pro quota waiter, so Flash runs Gemini.
+    // With old unscoped hasLiveQuotaWaiter(), Flash IS blocked → goes to DeepSeek.
+    //
+    // Assert: Flash calls runGemini and does NOT call runDeepSeek.
+    await vi.waitFor(() => {
+      expect(flashBacklog.runGemini).toHaveBeenCalledTimes(1)
+    })
+    expect(flashBacklog.runDeepSeek).not.toHaveBeenCalled()
+
+    // Pro live waiter remains waiting for quota — it did NOT run Gemini.
+    expect(proLive.runGemini).not.toHaveBeenCalled()
+  })
+
   it('times out a hung provider and settles the batch exactly once', async () => {
     vi.useFakeTimers()
     const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage()), { providerTimeoutMs: 1_000 })
