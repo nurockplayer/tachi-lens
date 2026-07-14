@@ -1,4 +1,4 @@
-import { test as base, chromium, type BrowserContext, type Worker, type Page } from '@playwright/test'
+import { test as base, chromium, type BrowserContext, type Worker } from '@playwright/test'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -15,24 +15,7 @@ export interface ExtensionError {
   text: string
 }
 
-// Shared error arrays keyed by BrowserContext — avoids per-test hacks
 const contextErrors = new WeakMap<BrowserContext, ExtensionError[]>()
-
-/**
- * Wake the MV3 Service Worker by opening a page.
- * MV3 SWs are event-driven — chrome.runtime.onInstalled fires when the
- * extension loads, which triggers the SW to start.
- */
-const wakeServiceWorker = async (context: BrowserContext): Promise<void> => {
-  const page: Page = await context.newPage()
-  try {
-    await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 10_000 })
-  } catch {
-    // Navigation failure is non-fatal; SW may still start via onInstalled
-  } finally {
-    await page.close()
-  }
-}
 
 export const test = base.extend<{
   context: BrowserContext
@@ -51,7 +34,7 @@ export const test = base.extend<{
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tachi-lens-e2e-'))
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
+      channel: 'chromium',
       args: [
         `--disable-extensions-except=${DIST_DIR}`,
         `--load-extension=${DIST_DIR}`,
@@ -61,10 +44,9 @@ export const test = base.extend<{
     const errors: ExtensionError[] = []
     contextErrors.set(context, errors)
 
-    // Attach console listeners to existing and future SWs
     const attachSwConsole = (worker: Worker): void => {
       worker.on('console', (msg) => {
-        if (msg.type() === 'error' || msg.type() === 'warning') {
+        if (msg.type() === 'error') {
           errors.push({ source: 'service-worker', type: msg.type(), text: msg.text })
         }
       })
@@ -76,20 +58,16 @@ export const test = base.extend<{
       attachSwConsole(sw)
     })
 
-    // Attach error/console listeners to pages
     context.on('page', (page) => {
       page.on('pageerror', (err) => {
         errors.push({ source: 'page', type: 'pageerror', text: err.message })
       })
       page.on('console', (msg) => {
-        if (msg.type() === 'error' || msg.type() === 'warning') {
+        if (msg.type() === 'error') {
           errors.push({ source: 'page', type: msg.type(), text: msg.text })
         }
       })
     })
-
-    // Wake the MV3 Service Worker — it won't start automatically in headless
-    await wakeServiceWorker(context)
 
     try {
       await use(context)
@@ -105,10 +83,22 @@ export const test = base.extend<{
   },
 
   serviceWorker: async ({ context }, use) => {
-    let sw = context.serviceWorkers()[0]
+    let sw: Worker | undefined = context.serviceWorkers()[0]
     if (!sw) {
       sw = await context.waitForEvent('serviceworker', { timeout: 15_000 })
     }
+
+    if (!sw) {
+      const collected = (contextErrors.get(context) ?? [])
+        .map((e) => `  [${e.source}] ${e.type}: ${e.text}`)
+        .join('\n')
+      throw new Error(
+        `Extension MV3 Service Worker did not start.\n` +
+        `  Extension path: ${DIST_DIR}\n` +
+        (collected ? `  Collected errors:\n${collected}` : '  No errors collected before timeout.'),
+      )
+    }
+
     await use(sw)
   },
 

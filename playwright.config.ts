@@ -5,11 +5,17 @@ export default defineConfig({
   workers: 1,
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
-  use: {
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
-  },
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        channel: 'chromium',
+        trace: 'retain-on-failure',
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure',
+      },
+    },
+  ],
   reporter: [
     ['html', { open: 'never' }],
     ['list'],
