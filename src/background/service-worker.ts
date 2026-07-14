@@ -15,8 +15,11 @@ import {
 import { isBaseMessage, isDiagnosticEventMessage } from '@/shared/messages'
 import type { DiagnosticEvent, SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
+import { createSystemClock } from './clock'
 import { createMessageRouter } from './message-router'
 import { RateLimiter } from './rate-limiter'
+import { createRestartSafeReservationId, GeminiQuotaStore } from './gemini-quota'
+import { QuotaScheduler } from './quota-scheduler'
 import { Translator } from './translator'
 
 const ignoreStorageInitializationError = (): void => {}
@@ -28,7 +31,20 @@ const initializeTrustedStorageAccess = (): void => {
 initializeTrustedStorageAccess()
 
 const cache = new TranslationCache()
-const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000 })
+const clock = createSystemClock()
+const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
+const quotaScheduler = new QuotaScheduler(new GeminiQuotaStore({
+  getSession: async () => {
+    const items = await chrome.storage.session.get('geminiQuotaSession')
+    return (items.geminiQuotaSession as Record<string, unknown> | undefined) ?? {}
+  },
+  setSession: async (value) => chrome.storage.session.set({ geminiQuotaSession: value }),
+  getLocal: async () => {
+    const items = await chrome.storage.local.get('geminiQuotaUsage')
+    return (items.geminiQuotaUsage as Record<string, unknown> | undefined) ?? {}
+  },
+  setLocal: async (value) => chrome.storage.local.set({ geminiQuotaUsage: value }),
+}, clock, createRestartSafeReservationId), { clock })
 const translator = new Translator(
   {
     cache,
@@ -36,6 +52,7 @@ const translator = new Translator(
     getSettings: () => getUserSettings(),
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
     getProvider: (providerId) => getProvider(providerId),
+    quotaScheduler,
   },
   { debounceMs: 150, maxBatchSize: 10 },
 )

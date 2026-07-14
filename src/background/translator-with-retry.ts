@@ -98,7 +98,13 @@ export class TranslatorWithRetry {
       }
     }
 
-    const cacheKey = this.deps.cache.buildKey(request.text, targetLang, settings.selectedProvider, model)
+    const cacheKey = this.deps.cache.buildKey(
+      request.text,
+      targetLang,
+      settings.selectedProvider,
+      model,
+      request.sourceLang,
+    )
     const cached = this.deps.cache.get(cacheKey)
 
     if (cached) {
@@ -159,7 +165,13 @@ export class TranslatorWithRetry {
       const result = batchResults.find((r) => r.id === request.messageId)
 
       if (result) {
-        const cacheKey = this.deps.cache.buildKey(request.text, targetLang, providerId, model)
+        const cacheKey = this.deps.cache.buildKey(
+          request.text,
+          targetLang,
+          providerId,
+          model,
+          request.sourceLang,
+        )
 
         if (result.translatedText !== undefined) {
           this.deps.cache.set(cacheKey, result)

@@ -62,6 +62,7 @@ export interface TranslationRequest {
   messageId: string
   text: string
   sourceLang?: string
+  priority?: 'live' | 'backlog'
 }
 
 export interface TranslationResult {
@@ -111,7 +112,7 @@ export interface ContentSettingsRequest {
 
 /** Error types covering both API failures and user-actionable states. */
 export type ProviderError =
-  | { type: 'auth'; status: 401; message: string }
+  | { type: 'auth'; status: number; message: string }
   | { type: 'rate_limited'; retryAfterMs: number; message: string }
   | { type: 'quota_exceeded'; message: string }
   | { type: 'bad_request'; status: number; message: string }
@@ -145,7 +146,8 @@ export const isTranslationRequestMessage = (
   return (
     typeof value.payload.messageId === 'string' &&
     typeof value.payload.text === 'string' &&
-    (value.payload.sourceLang === undefined || typeof value.payload.sourceLang === 'string')
+    (value.payload.sourceLang === undefined || typeof value.payload.sourceLang === 'string') &&
+    (value.payload.priority === undefined || value.payload.priority === 'live' || value.payload.priority === 'backlog')
   )
 }
 

@@ -15,6 +15,18 @@ const CHAT_BODY = (text: string) => ({
 
 describe('DeepSeek provider', () => {
   describe('translateBatch', () => {
+    it('parses a future HTTP-date Retry-After header', async () => {
+      const future = new Date(Date.now() + 60_000).toUTCString()
+      const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        error: { message: 'DeepSeek rate limit reached' },
+      }), { status: 429, headers: { 'Retry-After': future } }))
+      const provider = createDeepSeekProvider(fetchFn)
+
+      const [result] = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+
+      expect(result?.retryAfterMs).toBeGreaterThan(0)
+      expect(result?.retryAfterMs).toBeLessThanOrEqual(60_000)
+    })
     it('translates a batch of messages', async () => {
       const fetchFn = mockFetch(200, CHAT_BODY('[{"id":"m1","translated_text":"你好"},{"id":"m2","translated_text":"世界"}]'))
       const provider = createDeepSeekProvider(fetchFn)
@@ -42,6 +54,7 @@ describe('DeepSeek provider', () => {
         id: 'm1',
         error: 'Invalid API Key',
         status: 401,
+        errorType: 'auth',
       })
     })
 
@@ -80,6 +93,7 @@ describe('DeepSeek provider', () => {
       const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
 
       expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.errorType).toBe('network')
     })
   })
 

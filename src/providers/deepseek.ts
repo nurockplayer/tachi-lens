@@ -1,4 +1,5 @@
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
+import { parseRetryAfterMs } from './retry-after'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const DEEPSEEK_MODELS: ProviderModel[] = [
@@ -18,12 +19,13 @@ export const createDeepSeekProvider = (
   models: DEEPSEEK_MODELS,
   defaultModel: DEEPSEEK_DEFAULT_MODEL,
 
-  async translateBatch(requests, apiKey, model, targetLang) {
+  async translateBatch(requests, apiKey, model, targetLang, signal) {
     const prompt = buildTranslationPrompt(requests, targetLang)
 
     try {
       const response = await fetchFn(`${BASE_URL}/chat/completions`, {
         method: 'POST',
+        signal,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
@@ -45,6 +47,8 @@ export const createDeepSeekProvider = (
 
         return allErrors(requests, error, {
           status: response.status,
+          ...(response.status === 401 || response.status === 403 ? { errorType: 'auth' as const } : {}),
+          ...(response.status === 400 ? { errorType: 'bad_request' as const } : {}),
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         })
       }
@@ -58,7 +62,9 @@ export const createDeepSeekProvider = (
 
       return parseTranslationResponse(text, requests)
     } catch (err) {
-      return allErrors(requests, err instanceof Error ? err.message : 'Unknown DeepSeek error')
+      return allErrors(requests, err instanceof Error ? err.message : 'Unknown DeepSeek error', {
+        errorType: 'network',
+      })
     }
   },
 
@@ -112,15 +118,11 @@ const getErrorMessage = (body: Record<string, unknown> | undefined): string | un
 }
 
 const getRetryAfterMs = (response: Response): number | undefined => {
-  const value = response.headers.get('retry-after')?.trim()
-  if (!value || !/^\d+(?:\.\d+)?$/.test(value)) return undefined
-
-  const seconds = Number(value)
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
+  return parseRetryAfterMs(response.headers.get('retry-after'))
 }
 
 const allErrors = (
   requests: { id: string }[],
   error: string,
-  metadata: Partial<Pick<BatchItemResult, 'status' | 'retryAfterMs'>> = {},
+  metadata: Partial<Pick<BatchItemResult, 'status' | 'retryAfterMs' | 'errorType'>> = {},
 ) => requests.map((r) => ({ id: r.id, error, ...metadata }))

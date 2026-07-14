@@ -39,6 +39,22 @@ describe('RateLimiter', () => {
     expect(limiter.getRemainingCooldown('deepseek')).toBe(0)
   })
 
+  it('uses injected monotonic elapsed time instead of wall-clock jumps', () => {
+    let monotonicNow = 1_000
+    vi.setSystemTime(10_000)
+    limiter = new RateLimiter({
+      maxBackoffMs: 60_000,
+      clock: { monotonicNow: () => monotonicNow },
+    })
+    limiter.recordError('deepseek', 5_000)
+
+    vi.setSystemTime(86_410_000)
+    expect(limiter.isLimited('deepseek')).toBe(true)
+
+    monotonicNow += 5_001
+    expect(limiter.isLimited('deepseek')).toBe(false)
+  })
+
   it('applies exponential backoff for consecutive rate limit errors', () => {
     limiter.recordError('deepseek', 1_000)
     expect(limiter.getRemainingCooldown('deepseek')).toBeGreaterThanOrEqual(900)

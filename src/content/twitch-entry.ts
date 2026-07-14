@@ -184,7 +184,7 @@ const setupPage = (): void => {
 // --- CS debounce — fixed-window coalescing ---
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const pendingMessages = new Map<string, HTMLElement>()
-const queuedElements = new WeakSet<HTMLElement>()
+let queuedElements = new WeakSet<HTMLElement>()
 let pendingIdCounter = 0
 const DEBOUNCE_MS = 300
 const MAX_PENDING = 50
@@ -205,7 +205,7 @@ const flushPending = (): void => {
   for (const [, el] of pendingMessages) {
     queuedElements.delete(el)
     if (el.isConnected && !handler.isAlreadyProcessed(el)) {
-      enqueueTranslation(el)
+      enqueueTranslation(el, 'live')
     }
   }
   pendingMessages.clear()
@@ -317,16 +317,33 @@ const observeChat = (): void => {
 // --- Processing ---
 const inFlight = new WeakSet<HTMLElement>()
 const queuedForTranslation = new WeakSet<HTMLElement>()
-const translationQueue: HTMLElement[] = []
+type TranslationPriority = 'live' | 'backlog'
+interface QueuedTranslation {
+  element: HTMLElement
+  priority: TranslationPriority
+}
+const translationQueue: QueuedTranslation[] = []
 const MAX_CONCURRENT_TRANSLATIONS = 10
+const MAX_CONSECUTIVE_LIVE = 3
 let activeTranslations = 0
 let retryNotBefore = 0
+let consecutiveLiveDequeues = 0
+// _test hook: record dispatched items. Set before drainTranslationQueue.
+let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
 
-const enqueueTranslation = (element: HTMLElement): void => {
+const enqueueTranslation = (
+  element: HTMLElement,
+  priority: TranslationPriority = 'live',
+): void => {
   if (stopped || inFlight.has(element) || queuedForTranslation.has(element)) return
 
   queuedForTranslation.add(element)
-  translationQueue.push(element)
+  const queued = { element, priority }
+  const firstBacklogIndex = priority === 'live'
+    ? translationQueue.findIndex((entry) => entry.priority === 'backlog')
+    : -1
+  if (firstBacklogIndex >= 0) translationQueue.splice(firstBacklogIndex, 0, queued)
+  else translationQueue.push(queued)
   drainTranslationQueue()
 }
 
@@ -334,13 +351,33 @@ const drainTranslationQueue = (): void => {
   if (stopped || Date.now() < retryNotBefore) return
 
   while (activeTranslations < MAX_CONCURRENT_TRANSLATIONS && translationQueue.length > 0) {
-    const element = translationQueue.shift()!
+    const hasBacklog = translationQueue.some((entry) => entry.priority === 'backlog')
+
+    let element: HTMLElement
+    let priority: TranslationPriority
+
+    // After MAX_CONSECUTIVE_LIVE consecutive live dequeues while
+    // backlog is queued, force-dispatch the earliest backlog.
+    if (consecutiveLiveDequeues >= MAX_CONSECUTIVE_LIVE && hasBacklog) {
+      const index = translationQueue.findIndex((entry) => entry.priority === 'backlog')
+      const spliced = translationQueue.splice(index, 1)[0]!
+      element = spliced.element
+      priority = spliced.priority
+    } else {
+      const spliced = translationQueue.shift()!
+      element = spliced.element
+      priority = spliced.priority
+    }
+
     queuedForTranslation.delete(element)
 
     if (!element.isConnected || handler.isAlreadyProcessed(element)) continue
 
+    _dispatchRecorder?.(element, priority)
     activeTranslations++
-    void processMessage(element)
+    if (hasBacklog && priority === 'live') consecutiveLiveDequeues++
+    else consecutiveLiveDequeues = 0
+    void processMessage(element, priority)
       .then((result) => {
         if (result.retryAfterMs !== undefined) {
           retryNotBefore = Math.max(retryNotBefore, Date.now() + result.retryAfterMs)
@@ -353,7 +390,10 @@ const drainTranslationQueue = (): void => {
   }
 }
 
-const processMessage = async (element: HTMLElement): Promise<{ retryAfterMs?: number }> => {
+const processMessage = async (
+  element: HTMLElement,
+  priority: TranslationPriority = 'live',
+): Promise<{ retryAfterMs?: number }> => {
   if (stopped) return {}
 
   if (inFlight.has(element)) {
@@ -366,7 +406,7 @@ const processMessage = async (element: HTMLElement): Promise<{ retryAfterMs?: nu
     const settings = await getContentSettings()
     if (stopped) return {}
 
-    return await handler.translateAndInject(element, settings)
+    return await handler.translateAndInject(element, settings, priority)
   } catch {
     if (stopped) return {}
 
@@ -391,9 +431,10 @@ const retryUnprocessed = (): void => {
 
   for (const node of messages) {
     if (node instanceof HTMLElement &&
-      !handler.isAlreadyProcessed(node)) {
+      !handler.isAlreadyProcessed(node) &&
+      !queuedElements.has(node)) {
       retryCount++
-      enqueueTranslation(node)
+      enqueueTranslation(node, 'backlog')
     }
   }
 
@@ -419,6 +460,7 @@ const cleanup = (): void => {
   stopRetryTimer()
   invalidateSettingsCache()
   pendingMessages.clear()
+  queuedElements = new WeakSet()
   translationQueue.length = 0
 }
 
@@ -454,6 +496,17 @@ export const stopContentScript = (): void => {
 }
 
 // --- Exports (for testing) ---
+export const _test = {
+  enqueueTranslation,
+  drainTranslationQueue,
+  get translationQueueLength(): number { return translationQueue.length },
+  get consecutiveLiveDequeues(): number { return consecutiveLiveDequeues },
+  set consecutiveLiveDequeues(value: number) { consecutiveLiveDequeues = value },
+  get activeTranslations(): number { return activeTranslations },
+  set activeTranslations(value: number) { activeTranslations = value },
+  get MAX_CONCURRENT(): number { return MAX_CONCURRENT_TRANSLATIONS },
+  set onDispatch(fn: ((el: HTMLElement, priority: TranslationPriority) => void) | undefined) { _dispatchRecorder = fn },
+}
 export const getSettings = async (channelName?: string): Promise<RemoteContentSettings> => {
   if (stopped) {
     throw new Error('Content script has stopped')
