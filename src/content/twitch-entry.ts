@@ -407,7 +407,8 @@ const retryUnprocessed = (): void => {
 
   for (const node of messages) {
     if (node instanceof HTMLElement &&
-      !handler.isAlreadyProcessed(node)) {
+      !handler.isAlreadyProcessed(node) &&
+      !queuedElements.has(node)) {
       retryCount++
       enqueueTranslation(node, 'backlog')
     }
