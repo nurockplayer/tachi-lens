@@ -1,14 +1,23 @@
 # tachi-lens
 
-Twitch 聊天室沉浸式翻譯 Chrome Extension，支援 Gemini、DeepSeek、OpenAI、Claude API。
+Twitch 聊天室沉浸式翻譯 Chrome Extension，支援 Google Gemini、DeepSeek、OpenAI GPT 與 Anthropic Claude API。
 
 ## 功能
 
 - 在 Twitch 聊天室即時翻譯訊息
 - 三種顯示模式（皆保留原文）：原文下方附加 / Hover 顯示 / 折疊原文
-- 支援多家 LLM API，可在 Popup 自由切換 Provider 與模型
+- 支援四家 LLM Provider，可在 Popup 自由切換 Provider 與模型
 - 自備 API Key（BYOK），金鑰僅存於本機
 - 批次翻譯 + 快取，避免頻繁 API 呼叫
+
+## 支援的 Provider 與模型
+
+| Provider | 支援模型 | 預設模型 |
+| --- | --- | --- |
+| Google Gemini | Gemini 2.5 Flash、Gemini 2.5 Pro | Gemini 2.5 Flash |
+| DeepSeek | DeepSeek V4 Flash、DeepSeek V4 Pro | DeepSeek V4 Flash |
+| OpenAI GPT | GPT-4o mini、GPT-4o | GPT-4o mini |
+| Anthropic Claude | Claude 3.5 Haiku、Claude 3.5 Sonnet | Claude 3.5 Haiku |
 
 ## 技術棧
 
