@@ -327,6 +327,8 @@ const MAX_CONCURRENT_TRANSLATIONS = 10
 let activeTranslations = 0
 let retryNotBefore = 0
 let consecutiveLiveDequeues = 0
+// _test hook: record dispatched items. Set before drainTranslationQueue.
+let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
 
 const enqueueTranslation = (
   element: HTMLElement,
@@ -370,6 +372,7 @@ const drainTranslationQueue = (): void => {
 
     if (!element.isConnected || handler.isAlreadyProcessed(element)) continue
 
+    _dispatchRecorder?.(element, priority)
     activeTranslations++
     if (hasBacklog && priority === 'live') consecutiveLiveDequeues++
     else consecutiveLiveDequeues = 0
@@ -500,6 +503,7 @@ export const _test = {
   get activeTranslations(): number { return activeTranslations },
   set activeTranslations(value: number) { activeTranslations = value },
   get MAX_CONCURRENT(): number { return MAX_CONCURRENT_TRANSLATIONS },
+  set onDispatch(fn: ((el: HTMLElement, priority: TranslationPriority) => void) | undefined) { _dispatchRecorder = fn },
 }
 export const getSettings = async (channelName?: string): Promise<RemoteContentSettings> => {
   if (stopped) {
