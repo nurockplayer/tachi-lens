@@ -52,6 +52,7 @@ interface QueuedBatch extends Omit<ScheduledBatch, 'profile' | 'quotaKey'> {
   geminiResults?: BatchItemResult[]
   settled: boolean
   quotaDenial?: GeminiQuotaDenial
+  geminiRetryAfterMs?: number
   waitingForQuota?: boolean
 }
 
@@ -141,6 +142,9 @@ export class QuotaScheduler {
           const expired = batch.priority === 'live' && now >= batch.deadline
 
           if (expired || batch.fallbackRequests || !batch.geminiAvailable) {
+            if (!batch.fallbackRequests && batch.geminiRetryAfterMs === undefined) {
+              batch.geminiRetryAfterMs = 30_000
+            }
             if (!this.startDeepSeek(batch, batch.fallbackRequests ?? batch.requests)) {
               this.push(batch)
               deferred.add(batch)
@@ -214,6 +218,11 @@ export class QuotaScheduler {
               continue
             }
 
+            if (batch.geminiRetryAfterMs === undefined) {
+              batch.geminiRetryAfterMs = reservation.nextAvailableAt !== undefined
+                ? Math.max(0, reservation.nextAvailableAt - this.now())
+                : 30_000
+            }
             if (!this.startDeepSeek(batch, batch.requests)) {
               this.push(batch)
               deferred.add(batch)
@@ -394,19 +403,19 @@ export class QuotaScheduler {
     const fallbackResults = completeResults(requests, rawResults, 'No DeepSeek result for message')
 
     if (!batch.geminiResults) {
-      const protectedDenial = batch.quotaDenial ? 'gemini' : undefined
+      const retryable = batch.geminiRetryAfterMs !== undefined
       this.settle(batch, {
         results: batch.requests.map((request) => {
           const fallback = fallbackResults.find((entry) => entry.id === request.id)
           if (
-            protectedDenial &&
+            retryable &&
             (fallback?.errorType === 'auth' || fallback?.errorType === 'bad_request')
           ) {
             return {
               id: request.id,
               error: 'Gemini is rate limited',
               status: 429,
-              retryAfterMs: 30_000,
+              retryAfterMs: Math.max(0, batch.geminiRetryAfterMs!),
               errorType: 'rate_limited' as const,
             }
           }
@@ -415,7 +424,7 @@ export class QuotaScheduler {
         providers: new Map(batch.requests.map((request) => {
           const fallback = fallbackResults.find((entry) => entry.id === request.id)
           if (
-            protectedDenial &&
+            retryable &&
             (fallback?.errorType === 'auth' || fallback?.errorType === 'bad_request')
           ) {
             return [request.id, 'gemini'] as const

@@ -580,10 +580,11 @@ describe('QuotaScheduler', () => {
     expect(request.runGemini).not.toHaveBeenCalled()
   })
 
-  it('synthesizes retryable Gemini rate-limit result with retry timing from quota denial', async () => {
+  it('synthesizes retryable Gemini rate-limit result with retry timing from quota denial nextAvailableAt', async () => {
     const now = 1_000
     const quotaProfile = { ...profile, requestsPerMinute: 1, rpmSafetyPercent: 100 }
     const store = new GeminiQuotaStore(storage(), () => now)
+    // Consume the single RPM slot -> oldest reservation expires at now + ROLLING_WINDOW_MS = 61_000
     await store.reserve(quotaProfile, 1, 'default')
     const scheduler = new QuotaScheduler(store, { now: () => now })
     const request = batch('get-retry-timing', 'backlog', {
@@ -594,11 +595,95 @@ describe('QuotaScheduler', () => {
 
     const result = await scheduler.schedule(request)
 
+    // nextAvailableAt from RPM denial = 61_000. Now = 1_000. Timing = 60_000.
     expect(result.quotaDenial).toBe('rpm')
     expect(result.results[0]!.status).toBe(429)
     expect(result.results[0]!.errorType).toBe('rate_limited')
-    expect(result.results[0]!.retryAfterMs).toBe(30_000)
+    expect(result.results[0]!.retryAfterMs).toBe(60_000)
     expect(result.providers.get('get-retry-timing')).toBe('gemini')
+  })
+
+  it('synthesizes retryable Gemini rate-limit on deadline expiry when DeepSeek fallback returns auth', async () => {
+    vi.useFakeTimers()
+    let now = 1_000
+    const never = new Promise<BatchItemResult[]>(() => undefined)
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => now), { now: () => now })
+    const holder = batch('holder', 'live', { runGemini: vi.fn(() => never) })
+    void scheduler.schedule(holder)
+    await vi.advanceTimersByTimeAsync(0)
+
+    const expired = batch('expired', 'live', {
+      runDeepSeek: vi.fn(async () => [{ id: 'expired', error: 'DeepSeek auth error', errorType: 'auth' as const }]),
+    })
+    const result = scheduler.schedule(expired)
+    now += profile.liveMaxWaitMs + 1
+    await vi.advanceTimersByTimeAsync(profile.liveMaxWaitMs + 1)
+
+    const settled = await result
+    expect(settled.results[0]!.status).toBe(429)
+    expect(settled.results[0]!.errorType).toBe('rate_limited')
+    expect(settled.results[0]!.retryAfterMs).toBe(30_000)
+    expect(settled.providers.get('expired')).toBe('gemini')
+    expect(expired.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('synthesizes retryable Gemini rate-limit when Gemini unavailable and DeepSeek fallback returns auth', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('ds-auth', 'backlog', {
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'ds-auth', error: 'DeepSeek auth error', errorType: 'auth' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.results[0]!.retryAfterMs).toBe(30_000)
+    expect(result.providers.get('ds-auth')).toBe('gemini')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('synthesizes retryable Gemini rate-limit when Gemini unavailable and DeepSeek fallback returns bad_request', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('ds-bad', 'backlog', {
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'ds-bad', error: 'DeepSeek bad request', errorType: 'bad_request' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.status).toBe(429)
+    expect(result.results[0]!.errorType).toBe('rate_limited')
+    expect(result.providers.get('ds-bad')).toBe('gemini')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('preserves DeepSeek fallback success when Gemini is unavailable', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('ds-ok', 'backlog', {
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'ds-ok', translatedText: 'd-ok' }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.translatedText).toBe('d-ok')
+    expect(result.providers.get('ds-ok')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
+  })
+
+  it('preserves DeepSeek fallback network error when Gemini is unavailable', async () => {
+    const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage(), () => 1_000), { now: () => 1_000 })
+    const request = batch('ds-net', 'backlog', {
+      geminiAvailable: false,
+      runDeepSeek: vi.fn(async () => [{ id: 'ds-net', error: 'DeepSeek network error', errorType: 'network' as const }]),
+    })
+
+    const result = await scheduler.schedule(request)
+
+    expect(result.results[0]!.errorType).toBe('network')
+    expect(result.providers.get('ds-net')).toBe('deepseek')
+    expect(request.runGemini).not.toHaveBeenCalled()
   })
 
   it('times out a hung provider and settles the batch exactly once', async () => {
