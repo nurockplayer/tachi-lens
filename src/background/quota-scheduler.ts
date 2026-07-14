@@ -247,9 +247,9 @@ export class QuotaScheduler {
               deferred.add(batch)
               continue
             } catch {
-              // The persisted reservation remains consumed conservatively.
-              // Let runnable live work go first, then retry this batch through
-              // the ordinary denial/fallback path.
+              // The persisted reservation remains consumed. Route this batch
+              // conservatively to DeepSeek — never re-reserve consumed quota.
+              batch.fallbackRequests = batch.requests
               this.push(batch, true)
               deferred.add(batch)
               continue

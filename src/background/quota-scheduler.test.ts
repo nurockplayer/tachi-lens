@@ -452,6 +452,56 @@ describe('QuotaScheduler', () => {
     await expect(store.getUsage()).resolves.toMatchObject({ rollingRequests: 0, requestsToday: 0 })
   })
 
+  it('routes backlog to DeepSeek without re-reserving Gemini when quota.release fails after a successful reservation', async () => {
+    let releaseLoad!: () => void
+    const loadHeld = new Promise<void>((resolve) => { releaseLoad = resolve })
+    let setCount = 0
+    const session: Record<string, unknown> = {}
+    const local: Record<string, unknown> = {}
+    const store = new GeminiQuotaStore({
+      getSession: async () => { await loadHeld; return session },
+      setSession: async () => {},
+      getLocal: async () => local,
+      setLocal: async (value) => {
+        setCount++
+        // 1st setLocal = reserve persist (succeeds).
+        // 2nd setLocal = release persist (fails).
+        if (setCount === 2) throw new Error('release persist failed')
+        Object.assign(local, value)
+      },
+    }, () => 1_000)
+    const reserveSpy = vi.spyOn(store, 'reserve')
+    // Ample RPM + concurrency: a later reserve WOULD succeed if called.
+    const ample = { ...profile, requestsPerMinute: 2, maxConcurrency: 2 }
+    const scheduler = new QuotaScheduler(store, { now: () => 1_000 })
+    const backlog = batch('backlog', 'backlog', { profile: ample })
+    const live = batch('live', 'live', { profile: ample })
+
+    const backlogResult = scheduler.schedule(backlog)
+    await Promise.resolve()
+    const liveResult = scheduler.schedule(live)
+    releaseLoad()
+    const [backlogR, liveR] = await Promise.all([backlogResult, liveResult])
+
+    // Backlog must route to DeepSeek — don't re-reserve after failed release.
+    expect(backlogR.results).toMatchObject([{ translatedText: 'd-backlog' }])
+    expect(backlogR.providers.get('backlog')).toBe('deepseek')
+    expect(backlog.runGemini).not.toHaveBeenCalled()
+    expect(backlog.runDeepSeek).toHaveBeenCalledTimes(1)
+
+    // Live batch uses Gemini normally.
+    expect(liveR.results).toMatchObject([{ translatedText: 'g-live' }])
+    expect(live.runGemini).toHaveBeenCalledTimes(1)
+    expect(live.runDeepSeek).not.toHaveBeenCalled()
+
+    // Reserve called exactly twice: backlog + live. No third call for backlog.
+    expect(reserveSpy).toHaveBeenCalledTimes(2)
+
+    // Exactly-once settlement.
+    expect(backlogR.results).toHaveLength(1)
+    expect(liveR.results).toHaveLength(1)
+  })
+
   it('times out a hung provider and settles the batch exactly once', async () => {
     vi.useFakeTimers()
     const scheduler = new QuotaScheduler(new GeminiQuotaStore(storage()), { providerTimeoutMs: 1_000 })
