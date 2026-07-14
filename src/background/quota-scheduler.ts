@@ -330,14 +330,17 @@ export class QuotaScheduler {
     batch: QueuedBatch,
     capacityDeferred: Set<QueuedBatch>,
   ): boolean {
-    const providerLimit = Array.from(
-      [...this.geminiInFlight, ...capacityDeferred],
-      (contender) => contender.profile.maxConcurrency,
-    ).reduce(
-      (minimum, limit) => Math.min(minimum, limit),
-      batch.profile.maxConcurrency,
-    )
-    return this.geminiInFlight.size < providerLimit
+    const sameKey = (contender: QueuedBatch) => contender.quotaKey === batch.quotaKey
+    const sameKeyInFlight = [...this.geminiInFlight].filter(sameKey)
+    const sameKeyDeferred = [...capacityDeferred].filter(sameKey)
+
+    const providerLimit = [...sameKeyInFlight, ...sameKeyDeferred]
+      .map((contender) => contender.profile.maxConcurrency)
+      .reduce(
+        (minimum, limit) => Math.min(minimum, limit),
+        batch.profile.maxConcurrency,
+      )
+    return sameKeyInFlight.length < providerLimit
   }
 
   private startDeepSeek(batch: QueuedBatch, requests: SchedulerRequest[]): boolean {
@@ -418,10 +421,17 @@ export class QuotaScheduler {
         }
         return fallback ?? { id: request.id, error: 'DeepSeek fallback failed', errorType: 'unknown' }
       }),
-      providers: new Map(batch.requests.map((request) => [
-        request.id,
-        fallbackIds.has(request.id) ? 'deepseek' : 'gemini',
-      ] as const)),
+      providers: new Map(batch.requests.map((request) => {
+        const sentToDeepSeek = fallbackIds.has(request.id)
+        if (sentToDeepSeek) {
+          const original = primary.get(request.id)
+          const replacement = replacements.get(request.id)
+          const keptGemini = original?.status === 429 &&
+            (replacement?.errorType === 'auth' || replacement?.errorType === 'bad_request')
+          return [request.id, keptGemini ? 'gemini' : 'deepseek'] as const
+        }
+        return [request.id, 'gemini'] as const
+      })),
       ...(batch.quotaDenial ? { quotaDenial: batch.quotaDenial } : {}),
     })
   }

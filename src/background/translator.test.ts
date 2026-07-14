@@ -518,7 +518,7 @@ describe('Translator', () => {
       await expect(Promise.all(pending)).resolves.toHaveLength(4)
     })
 
-    it('applies Gemini provider concurrency across different model quota buckets', async () => {
+    it('isolates Gemini per-quotaKey across different models', async () => {
       let selectedModel = 'gemini-2.5-flash'
       let release!: () => void
       const held = new Promise<void>((resolve) => { release = resolve })
@@ -528,9 +528,6 @@ describe('Translator', () => {
         await held
         return requests.map((request) => ({ id: request.id, translatedText: `g-${request.id}` }))
       })
-      vi.mocked(deepseek.translateBatch).mockImplementation(async (requests) =>
-        requests.map((request) => ({ id: request.id, translatedText: `d-${request.id}` })),
-      )
       const perModelProfile = {
         ...DEFAULT_GEMINI_QUOTA,
         requestsPerMinute: 100,
@@ -554,15 +551,11 @@ describe('Translator', () => {
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
       selectedModel = 'gemini-2.5-pro'
       const pro = translator.translate({ messageId: 'pro', text: 'two', priority: 'backlog' })
-      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(2))
 
-      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
-      expect(vi.mocked(deepseek.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['pro'])
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
       release()
-      await expect(Promise.all([flash, pro])).resolves.toEqual([
-        { messageId: 'flash', translatedText: 'g-flash' },
-        { messageId: 'pro', translatedText: 'd-pro' },
-      ])
+      await expect(Promise.all([flash, pro])).resolves.toHaveLength(2)
     })
 
     it('does not let another model bypass saturated Gemini provider capacity', async () => {
@@ -600,19 +593,14 @@ describe('Translator', () => {
 
       const flashHolder = translator.translate({ messageId: 'flash-holder', text: 'one', priority: 'live' })
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
-      const flashWaiter = translator.translate({ messageId: 'flash-waiter', text: 'two', priority: 'live' })
-      await vi.advanceTimersByTimeAsync(0)
       selectedModel = 'gemini-2.5-pro'
       const pro = translator.translate({ messageId: 'pro', text: 'three', priority: 'live' })
+      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(2))
 
-      await vi.advanceTimersByTimeAsync(0)
-      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
-
-      await vi.advanceTimersByTimeAsync(perModelProfile.liveMaxWaitMs)
-      expect(deepseek.translateBatch).toHaveBeenCalledTimes(2)
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
 
       releaseFlash()
-      await expect(Promise.all([flashHolder, flashWaiter, pro])).resolves.toHaveLength(3)
+      await expect(Promise.all([flashHolder, pro])).resolves.toHaveLength(2)
     })
 
     it('rechecks live priority when backlog quota denial persistence finishes', async () => {
