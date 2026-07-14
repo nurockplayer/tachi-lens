@@ -369,6 +369,23 @@ describe('GeminiQuotaStore', () => {
     expect(reservations.filter((reservation) => reservation.reason === 'rpm')).toHaveLength(2)
   })
 
+  it('reserves at least one RPD request when requestsPerDay=1 and rpdSafetyPercent=95', async () => {
+    const store = new GeminiQuotaStore(createStorage(), () => 1_000)
+    const smallProfile = {
+      ...profile,
+      requestsPerMinute: 100,
+      inputTokensPerMinute: 10_000,
+      requestsPerDay: 1,
+      rpdSafetyPercent: 95,
+    }
+
+    await expect(store.reserve(smallProfile, 1)).resolves.toMatchObject({ accepted: true })
+    await expect(store.reserve(smallProfile, 1)).resolves.toMatchObject({
+      accepted: false,
+      reason: 'rpd',
+    })
+  })
+
   it('atomically reserves TPM and RPD capacity under concurrent calls', async () => {
     const tokenStore = new GeminiQuotaStore(createStorage(), () => 1_000)
     const tokenReservations = await Promise.all([

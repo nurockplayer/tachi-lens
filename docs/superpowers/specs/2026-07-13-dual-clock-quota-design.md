@@ -21,6 +21,8 @@ On restoration, the store converts each persisted reservation and cooldown into 
 
 Version-2 migration derives a conservative high-water mark only when every bucket is structurally complete and at least one valid persisted reservation timestamp supplies a trusted observation. If the snapshot is incomplete or has no safe observation, `clockTrusted` remains false across the v3 rewrite and the state stays fail closed until it is explicitly repaired instead of silently becoming permissive after a timer or day transition.
 
+When `clockTrusted` is false (e.g. incomplete v2 migration, unknown future version), wall time catching up to or exceeding the high-water mark does NOT clear the rollback latch. The store requires an explicit repair step — typically a new persisted snapshot from a future store instance that successfully loads with a valid high-water mark and sets `clockTrusted=true`. Without this, the snapshot remains fail-closed across restarts even if wall time appears healthy.
+
 ## Runtime behavior
 
 Within a worker, wall adjustments never alter monotonic reservation expiries, scheduler deadlines, or cooldown deadlines. Trusted wall time can advance no faster than monotonic elapsed time, so a forward wall jump cannot reset RPD before elapsed time proves the Pacific-day boundary was crossed. A backward wall observation activates fail-closed routing without pruning reservations, changing provider day, reducing RPD, or shortening cooldowns. DeepSeek remains available because the scheduler treats `clock_rollback` as a bounded quota denial with no future Gemini wake time.

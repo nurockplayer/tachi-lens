@@ -289,7 +289,7 @@ export class GeminiQuotaStore {
 
       const rpm = safeLimit(normalizedProfile.requestsPerMinute, normalizedProfile.rpmSafetyPercent, true)
       const tpm = safeLimit(normalizedProfile.inputTokensPerMinute, normalizedProfile.tpmSafetyPercent)
-      const rpd = safeLimit(normalizedProfile.requestsPerDay, normalizedProfile.rpdSafetyPercent)
+      const rpd = safeLimit(normalizedProfile.requestsPerDay, normalizedProfile.rpdSafetyPercent, true)
       const tokenCost = toNonNegativeInteger(inputTokens)
       const rollingTokens = bucket.reservations.reduce((sum, reservation) => sum + reservation.inputTokens, 0)
 
