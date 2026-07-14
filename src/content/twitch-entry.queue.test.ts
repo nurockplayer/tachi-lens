@@ -181,13 +181,28 @@ describe('content script translation queue', () => {
       mod._test.activeTranslations = 10
     }
 
-    // backlog must appear after at least 10 lives (the fairness cap forced
-    // it past prefill-0..9), proving the cap works.
-    const idx = textOrder.indexOf('backlog-target')
-    expect(idx).toBeGreaterThanOrEqual(10)
+    // With the fairness cap, backlog is forced at index 10 (after 10 prefills).
+    expect(textOrder[0]).toBe('prefill-0')
+    expect(textOrder[1]).toBe('prefill-1')
+    expect(textOrder[2]).toBe('prefill-2')
+    expect(textOrder[3]).toBe('prefill-3')
+    expect(textOrder[4]).toBe('prefill-4')
+    expect(textOrder[5]).toBe('prefill-5')
+    expect(textOrder[6]).toBe('prefill-6')
+    expect(textOrder[7]).toBe('prefill-7')
+    expect(textOrder[8]).toBe('prefill-8')
+    expect(textOrder[9]).toBe('prefill-9')
+    expect(textOrder[10]).toBe('backlog-target')
+    expect(textOrder[11]).toBe('live-1')
 
-    // Items before backlog are all live.
-    for (let i = 0; i < idx; i++) expect(textOrder[i]).toMatch(/^(live|prefill)/)
+    // Remaining lives (live-2..live-12) after backlog preserve FIFO order.
+    const remaining = textOrder.slice(12, 12 + 12)
+    const expected = Array.from({ length: 12 }, (_, i) => `live-${i + 2}`)
+    // Not all may be present if the loop exhausted early, but each one that
+    // appears must be in FIFO order.
+    for (let i = 0; i < remaining.length; i++) {
+      expect(remaining[i]).toBe(expected[i])
+    }
 
     // backlog dispatched exactly once.
     expect(textOrder.filter((t) => t === 'backlog-target')).toHaveLength(1)
