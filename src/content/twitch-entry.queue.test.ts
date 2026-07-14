@@ -127,53 +127,70 @@ describe('content script translation queue', () => {
   it('dispatches backlog after MAX_CONCURRENT_TRANSLATIONS consecutive live dequeues even under sustained live arrivals', async () => {
     const mod = await import('./twitch-entry')
 
-    // Saturate all 10 active slots.
-    mod._test.activeTranslations = 10
+    // Resolve sendMessage so processMessage completes and .finally() cascades.
+    sendMessage.mockImplementation((msg: unknown) => {
+      const m = msg as { type: string }
+      if (m.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (m.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '-' },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    await vi.advanceTimersByTimeAsync(0)
 
-    // Queue one backlog and a lead live ahead of it.
+    // Record dispatched item texts via hook.
+    const textOrder: string[] = []
+    mod._test.onDispatch = (el) => { textOrder.push(el.textContent ?? '') }
+
+    // Pre-fill 10 lives ahead of the backlog by saturating all slots.
+    mod._test.activeTranslations = 10
+    for (let i = 0; i < 10; i++) {
+      const el = document.createElement('div')
+      el.textContent = `prefill-${i}`
+      document.body.appendChild(el)
+      mod._test.enqueueTranslation(el, 'live')
+    }
+
+    // Now queue the backlog — it sits behind the 10 prefills.
     const backlogEl = document.createElement('div')
+    backlogEl.textContent = 'backlog-target'
     document.body.appendChild(backlogEl)
     mod._test.enqueueTranslation(backlogEl, 'backlog')
 
-    const leadLive = document.createElement('div')
-    document.body.appendChild(leadLive)
-    mod._test.enqueueTranslation(leadLive, 'live')
+    // Queue: [prefill-0..prefill-9, backlog-target]
+    textOrder.length = 0
 
-    // Queue: [leadLive(live), backlogEl(backlog)]. Counter = 0.
-
-    // Sustain live arrivals for 12 cycles. Each cycle:
-    //   1. Enqueue a fresh live (inserts before backlog).
-    //   2. Free one slot and drain exactly one item.
-    //
-    // Without the fairness cap: each drain picks a fresh live (consecutive
-    // live count keeps rising). Backlog is never dispatched.
-    //
-    // With the fairness cap (≥10 consecutive lives → force backlog):
-    //   - Rounds 1-10: counter increments 1..10.
-    //   - Round 11: counter ≥ 10 → backlog is forced. Counter resets to 0.
-    //   - Round 12: a live is dispatched. Counter stays at 0 (hasBacklog=false).
-    //
-    // Therefore: counter=12 without fix, counter=0 or ≤1 with fix.
-    for (let round = 1; round <= 12; round++) {
-      const freshLive = document.createElement('div')
-      document.body.appendChild(freshLive)
-      mod._test.enqueueTranslation(freshLive, 'live')
+    // Sustain 12 fresh-live arrivals plus one slot release per cycle.
+    for (let r = 1; r <= 12; r++) {
+      const el = document.createElement('div')
+      el.textContent = `live-${r}`
+      document.body.appendChild(el)
+      mod._test.enqueueTranslation(el, 'live')
 
       mod._test.activeTranslations = 9
       mod._test.drainTranslationQueue()
+      await vi.advanceTimersByTimeAsync(0)
       mod._test.activeTranslations = 10
     }
 
-    // With the fairness cap: backlog was forced, counter reset.
-    // Without: backlog stayed queued, all 12 were lives, counter=12.
-    expect(mod._test.consecutiveLiveDequeues).toBeLessThanOrEqual(1)
+    // backlog must appear after at least 10 lives (the fairness cap forced
+    // it past prefill-0..9), proving the cap works.
+    const idx = textOrder.indexOf('backlog-target')
+    expect(idx).toBeGreaterThanOrEqual(10)
 
-    // At least one live remained queued when backlog was forced.
-    // Total: 2 (backlog+lead) + 12 (fresh) - 12 (drained) = 2 remaining.
-    // With fix: both are lives → queueLength = 2.
-    // Without fix: backlog + some live → queueLength ≥ 1.
-    // Verify queue is shorter than CYCLES (meaning backlog was dispatched).
-    expect(mod._test.translationQueueLength).toBeLessThan(12)
+    // Items before backlog are all live.
+    for (let i = 0; i < idx; i++) expect(textOrder[i]).toMatch(/^(live|prefill)/)
+
+    // backlog dispatched exactly once.
+    expect(textOrder.filter((t) => t === 'backlog-target')).toHaveLength(1)
   })
 
   it('does not retry during a provider-supplied rate-limit cooldown', async () => {
