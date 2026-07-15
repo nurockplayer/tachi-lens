@@ -46,6 +46,27 @@ export const seedTestSettings = async (serviceWorker: Worker): Promise<void> => 
   }, DEFAULT_FILTER_CONFIG)
 }
 
+export const seedE2ETranslationSettings = async (serviceWorker: Worker): Promise<void> => {
+  await serviceWorker.evaluate((config) => {
+    return chrome.storage.local.set({
+      userSettings: {
+        ...config,
+        selectedProvider: 'deepseek',
+        selectedModel: 'deepseek-v4-flash',
+        targetLanguage: 'zh-TW',
+        displayMode: 'below',
+        botNameBlacklist: [],
+        minTextLength: 1,
+        translationEnabled: true,
+        filterConfig: config,
+      },
+      providerApiKeys: {
+        deepseek: 'e2e-deepseek-key',
+      },
+    })
+  }, DEFAULT_FILTER_CONFIG)
+}
+
 export interface DiagnosticEvent {
   id: string
   stage: string
