@@ -89,8 +89,8 @@ export const attachDebugArtifacts = async (
     testInfo.attach('diagnostics', { body: JSON.stringify(diagnostics, null, 2), contentType: 'application/json' }).catch(() => undefined),
   ])
 
-  const consoleErrors = collectedErrors.filter((e) => e.type === 'error')
-  if (consoleErrors.length > 0) {
-    await testInfo.attach('console-errors', { body: JSON.stringify(consoleErrors, null, 2), contentType: 'application/json' }).catch(() => undefined)
+  // Attach all collected runtime errors (console.error + pageerror + SW errors)
+  if (collectedErrors.length > 0) {
+    await testInfo.attach('runtime-errors', { body: JSON.stringify(collectedErrors, null, 2), contentType: 'application/json' }).catch(() => undefined)
   }
 }
