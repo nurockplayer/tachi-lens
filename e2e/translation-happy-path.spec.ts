@@ -37,6 +37,11 @@ test.describe('DeepSeek translation happy path', () => {
     let page: Page | undefined
 
     try {
+      // Bump per-test timeout beyond the global 30 s to accommodate
+      // cumulative bounded waits (fixture SW 15 s + chat readiness 15 s +
+      // first provider call 10 s + retry-cycle wait 6 s + overhead).
+      testInfo.setTimeout(60_000)
+
       // --- Extension readiness ---
       expect(serviceWorker).toBeDefined()
       expect(extensionId).toMatch(/^[a-z]{32}$/)
