@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - release/publish-v0.2.0-beta.1
+    paths:
+      - .release-trigger-v0.2.0-beta.1
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   publish:
@@ -61,19 +64,31 @@ jobs:
           cd dist
           zip -r ../tachi-lens.zip .
 
-      - name: Publish GitHub prerelease
+      - name: Publish and verify GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TAG='v0.2.0-beta.1'
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists; no action needed."
-            exit 0
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target main \
+              --title "tachi-lens $TAG" \
+              --prerelease \
+              --notes-file "docs/releases/$TAG.md" \
+              tachi-lens.zip
           fi
 
-          gh release create "$TAG" \
-            --target main \
-            --title "tachi-lens $TAG" \
-            --prerelease \
-            --notes-file "docs/releases/$TAG.md" \
-            tachi-lens.zip
+          RELEASE_JSON="$(gh release view "$TAG" --json tagName,name,isPrerelease,url,assets)"
+          echo "$RELEASE_JSON" | jq -e '
+            .tagName == "v0.2.0-beta.1" and
+            .isPrerelease == true and
+            ([.assets[].name] | index("tachi-lens.zip") != null)
+          '
+
+          RELEASE_URL="$(echo "$RELEASE_JSON" | jq -r '.url')"
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          gh issue comment 76 --body "✅ Published and verified **$TAG** as a GitHub prerelease.\n\n- Release: $RELEASE_URL\n- Asset verified: \`tachi-lens.zip\`\n- Source commit: \`7c115a04e5ff89a71d3382e6adca48b757f3e7dd\`\n- Verification workflow: $RUN_URL\n- Automated checks: install, lint/typecheck, full test suite, production build"
+          gh issue close 76 --reason completed
