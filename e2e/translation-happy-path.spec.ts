@@ -104,10 +104,12 @@ test.describe('DeepSeek translation happy path', () => {
       await expect(message).toHaveAttribute('data-tachi-lens-processed', 'true')
 
       // --- Assert no second provider call occurs for the same untouched DOM node ---
-      // Wait through a full retry-timer cycle (5 s) using auto-waiting.
-      await expect(async () => {
-        expect(calls).toHaveLength(1)
-      }).toPass({ timeout: 7_000 })
+      // Wait through a full retry-timer cycle (5 s) using a bounded real wait,
+      // then assert. This must NOT use toPass(), which would return immediately
+      // since calls.length is already 1 and wouldn't actually observe beyond the
+      // retry interval.
+      await page.waitForTimeout(6_000)
+      expect(calls).toHaveLength(1)
 
       // --- Fail on any collected errors ---
       expect(collectedErrors).toEqual([])
