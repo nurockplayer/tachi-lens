@@ -57,8 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
-          NOTES_FILE="docs/releases/${VERSION}.md"
+          NOTES_FILE="docs/releases/${TAG}.md"
           RELEASE_ARGS=(--verify-tag)
 
           if [[ "$TAG" == *-* ]]; then
