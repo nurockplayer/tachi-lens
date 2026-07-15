@@ -6,6 +6,7 @@
 
 import type { Worker, TestInfo, Page } from '@playwright/test'
 import type { ExtensionError } from './extension'
+import { DEEPSEEK_MOCK_KEY } from './deepseek-mock'
 
 export const TWITCH_URL = 'https://www.twitch.tv/tachi-lens-e2e'
 
@@ -44,6 +45,35 @@ export const seedTestSettings = async (serviceWorker: Worker): Promise<void> => 
       },
     })
   }, DEFAULT_FILTER_CONFIG)
+}
+
+/**
+ * Seed chrome.storage.local with settings and API key for the DeepSeek
+ * translation happy-path E2E test.
+ *
+ * - Enables translation
+ * - Seeds a fake DeepSeek API key (never a real credential)
+ * - Sets minTextLength to 1 so any non-empty text is processed
+ */
+export const seedDeepSeekTestSettings = async (serviceWorker: Worker): Promise<void> => {
+  await serviceWorker.evaluate(({ config, key }) => {
+    return chrome.storage.local.set({
+      userSettings: {
+        ...config,
+        selectedProvider: 'deepseek',
+        selectedModel: 'deepseek-v4-flash',
+        targetLanguage: 'zh-TW',
+        displayMode: 'below',
+        botNameBlacklist: [],
+        minTextLength: 1,
+        translationEnabled: true,
+        filterConfig: config,
+      },
+      providerApiKeys: {
+        deepseek: key,
+      },
+    })
+  }, { config: DEFAULT_FILTER_CONFIG, key: DEEPSEEK_MOCK_KEY })
 }
 
 export interface DiagnosticEvent {
