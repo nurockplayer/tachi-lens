@@ -37,6 +37,11 @@ test.describe('DeepSeek translation happy path', () => {
     let page: Page | undefined
 
     try {
+      // Bump per-test timeout beyond the global 30 s to accommodate
+      // cumulative bounded waits (fixture SW 15 s + chat readiness 15 s +
+      // first provider call 10 s + retry-cycle wait 6 s + overhead).
+      testInfo.setTimeout(60_000)
+
       // --- Extension readiness ---
       expect(serviceWorker).toBeDefined()
       expect(extensionId).toMatch(/^[a-z]{32}$/)
@@ -104,10 +109,12 @@ test.describe('DeepSeek translation happy path', () => {
       await expect(message).toHaveAttribute('data-tachi-lens-processed', 'true')
 
       // --- Assert no second provider call occurs for the same untouched DOM node ---
-      // Wait through a full retry-timer cycle (5 s) using auto-waiting.
-      await expect(async () => {
-        expect(calls).toHaveLength(1)
-      }).toPass({ timeout: 7_000 })
+      // Wait through a full retry-timer cycle (5 s) using a bounded real wait,
+      // then assert. This must NOT use toPass(), which would return immediately
+      // since calls.length is already 1 and wouldn't actually observe beyond the
+      // retry interval.
+      await page.waitForTimeout(6_000)
+      expect(calls).toHaveLength(1)
 
       // --- Fail on any collected errors ---
       expect(collectedErrors).toEqual([])
