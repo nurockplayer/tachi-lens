@@ -51,7 +51,7 @@ export const test = base.extend<{
       const attachSwConsole = (worker: Worker): void => {
         worker.on('console', (msg) => {
           if (msg.type() === 'error') {
-            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text })
+            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text() })
           }
         })
       }
@@ -68,7 +68,7 @@ export const test = base.extend<{
         })
         page.on('console', (msg) => {
           if (msg.type() === 'error') {
-            errors.push({ source: 'page', type: msg.type(), text: msg.text })
+            errors.push({ source: 'page', type: msg.type(), text: msg.text() })
           }
         })
       })
