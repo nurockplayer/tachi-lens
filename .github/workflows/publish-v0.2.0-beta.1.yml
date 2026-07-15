@@ -1,0 +1,79 @@
+name: Publish v0.2.0-beta.1
+
+on:
+  push:
+    branches:
+      - release/publish-v0.2.0-beta.1
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release metadata
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const expected = '0.2.0-beta.1'
+          const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'))
+          const displayVersion = manifest.version_name ?? manifest.version
+
+          if (packageJson.version !== expected) {
+            throw new Error(`package.json version ${packageJson.version} does not match ${expected}`)
+          }
+          if (displayVersion !== expected) {
+            throw new Error(`manifest display version ${displayVersion} does not match ${expected}`)
+          }
+          if (!fs.existsSync('docs/releases/v0.2.0-beta.1.md')) {
+            throw new Error('release notes are missing')
+          }
+          NODE
+
+      - name: Run checks
+        run: |
+          pnpm lint
+          pnpm test
+          pnpm build
+
+      - name: Package extension
+        run: |
+          cd dist
+          zip -r ../tachi-lens.zip .
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='v0.2.0-beta.1'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; no action needed."
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --target main \
+            --title "tachi-lens $TAG" \
+            --prerelease \
+            --notes-file "docs/releases/$TAG.md" \
+            tachi-lens.zip
