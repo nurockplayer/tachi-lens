@@ -54,16 +54,21 @@ export const seedTestSettings = async (serviceWorker: Worker): Promise<void> => 
  * - Enables translation
  * - Seeds a fake DeepSeek API key (never a real credential)
  * - Sets minTextLength to 1 so any non-empty text is processed
+ *
+ * @param displayMode Optional display mode override (default 'below')
  */
-export const seedDeepSeekTestSettings = async (serviceWorker: Worker): Promise<void> => {
-  await serviceWorker.evaluate(({ config, key }) => {
+export const seedDeepSeekTestSettings = async (
+  serviceWorker: Worker,
+  displayMode: string = 'below',
+): Promise<void> => {
+  await serviceWorker.evaluate(({ config, key, displayMode: mode }) => {
     return chrome.storage.local.set({
       userSettings: {
         ...config,
         selectedProvider: 'deepseek',
         selectedModel: 'deepseek-v4-flash',
         targetLanguage: 'zh-TW',
-        displayMode: 'below',
+        displayMode: mode,
         botNameBlacklist: [],
         minTextLength: 1,
         translationEnabled: true,
@@ -73,7 +78,7 @@ export const seedDeepSeekTestSettings = async (serviceWorker: Worker): Promise<v
         deepseek: key,
       },
     })
-  }, { config: DEFAULT_FILTER_CONFIG, key: DEEPSEEK_MOCK_KEY })
+  }, { config: DEFAULT_FILTER_CONFIG, key: DEEPSEEK_MOCK_KEY, displayMode })
 }
 
 export interface DiagnosticEvent {
