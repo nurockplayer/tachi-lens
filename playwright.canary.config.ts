@@ -11,10 +11,18 @@ export default defineConfig({
       name: 'chromium',
       use: {
         channel: 'chromium',
+        trace: {
+          mode: 'retain-on-failure' as const,
+          snapshots: true,
+          screenshots: true,
+          sources: true,
+        },
+        screenshot: 'only-on-failure',
       },
     },
   ],
   reporter: [
+    ['html', { open: 'never' }],
     ['list'],
   ],
 })
