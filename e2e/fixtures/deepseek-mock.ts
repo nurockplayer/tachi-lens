@@ -7,6 +7,7 @@
  * requests for network isolation.
  */
 import type { BrowserContext } from '@playwright/test'
+import { resolveMockTranslation } from '../../src/test-utils/deepseek-mock-text'
 
 export const DEEPSEEK_MOCK_KEY = 'e2e-deepseek-key'
 
@@ -14,6 +15,17 @@ export interface DeepSeekMockCall {
   requestId: string
   messageText: string
   serviceWorkerOwned: boolean
+}
+
+export interface DeepSeekMockOptions {
+  /**
+   * Map from source message text to translated text.
+   * When provided, the mock accepts ONLY source texts present in the map
+   * and returns the corresponding translation. Unmapped texts are rejected.
+   * When omitted, the mock accepts ONLY the source text 'Hello world'
+   * and returns the default translation '你好，世界'.
+   */
+  translations?: Record<string, string>
 }
 
 /**
@@ -25,8 +37,12 @@ export interface DeepSeekMockCall {
  *
  * Returns a `calls` array that the test can assert against.
  */
-export const setupDeepSeekMock = async (context: BrowserContext): Promise<{ calls: DeepSeekMockCall[] }> => {
+export const setupDeepSeekMock = async (
+  context: BrowserContext,
+  options?: DeepSeekMockOptions,
+): Promise<{ calls: DeepSeekMockCall[] }> => {
   const calls: DeepSeekMockCall[] = []
+  const translations = options?.translations
 
   // Fallback: abort any unmatched request to api.deepseek.com.
   // Registered first (lower priority); the specific handler registered later
@@ -124,11 +140,13 @@ export const setupDeepSeekMock = async (context: BrowserContext): Promise<{ call
       throw new Error(`DeepSeek mock: invalid or missing request ID: ${requestId}`)
     }
 
-    // Verify the original message text is present exactly once
-    if (!messageText || messageText !== 'Hello world') {
+    if (typeof messageText !== 'string' || !messageText) {
       await route.abort('blockedbyclient')
-      throw new Error(`DeepSeek mock: unexpected message text: "${messageText}"`)
+      throw new Error(`DeepSeek mock: invalid or missing message text: ${messageText}`)
     }
+
+    // --- Resolve translation (strict: rejects unmapped texts) ---
+    const translatedText = resolveMockTranslation(messageText, translations)
 
     // --- Construct deterministic response preserving the received ID ---
     const responseBody = JSON.stringify({
@@ -136,7 +154,7 @@ export const setupDeepSeekMock = async (context: BrowserContext): Promise<{ call
         {
           message: {
             content: JSON.stringify([
-              { id: requestId, translated_text: '你好，世界' },
+              { id: requestId, translated_text: translatedText },
             ]),
           },
         },
