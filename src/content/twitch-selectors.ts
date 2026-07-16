@@ -9,7 +9,7 @@ export const CHAT_USERNAME = '.chat-author__display-name'
 export const CHAT_WHISPER = '[data-test-selector="whisper-message"]'
 
 // Fallback selectors for each primary selector
-const FALLBACKS: Record<string, string[]> = {
+export const FALLBACKS: Record<string, string[]> = {
   [CHAT_CONTAINER]: [
     CHAT_CONTAINER,
     '.chat-scrollable-area__message-container',
