@@ -187,6 +187,7 @@ test.describe('Translation display modes', () => {
       await message.hover()
       await expect(translated).toHaveCSS('display', 'block')
       await expect(translated).toHaveCount(1)
+      await expect(message.locator('[data-tachi-lens-translated]')).toHaveCount(1)
       await page.mouse.move(0, 0)
       await expect(translated).toHaveCSS('display', 'none')
       await expect(translated).toHaveCount(1)
