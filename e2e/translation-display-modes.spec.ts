@@ -198,7 +198,8 @@ test.describe('Translation display modes', () => {
       // --- Assert message root is marked processed ---
       await expect(message).toHaveAttribute('data-tachi-lens-processed', 'true')
 
-      // --- Assert no second provider call ---
+      // --- Assert no second provider call during stability window ---
+      await page.waitForTimeout(6_000)
       expect(calls).toHaveLength(1)
 
       // --- Fail on any collected errors ---
@@ -269,7 +270,8 @@ test.describe('Translation display modes', () => {
       // --- Assert exactly one translated descendant ---
       await expect(translated).toHaveCount(1)
 
-      // --- Assert no second provider call ---
+      // --- Assert no second provider call during stability window ---
+      await page.waitForTimeout(6_000)
       expect(calls).toHaveLength(1)
 
       // --- Fail on any collected errors ---
