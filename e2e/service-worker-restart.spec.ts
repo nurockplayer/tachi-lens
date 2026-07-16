@@ -159,11 +159,17 @@ test.describe('Service Worker restart recovery', () => {
       await expect(messages.nth(1).locator('[data-tachi-lens-translated]')).toHaveCount(1)
 
       // ================================================================
-      //  PHASE 4: Verify persistence and no errors
+      //  PHASE 4: Stability window and persistence verification
       // ================================================================
 
-      // --- Assert total provider calls is exactly 2 ---
+      // --- Stability window: no duplicate provider calls ---
+      // Consistent with existing E2E regressions (translation-happy-path,
+      // translation-display-modes), wait through a full retry-timer cycle
+      // (5 s) using a bounded real wait, then assert.
+      await page.waitForTimeout(6_000)
       expect(calls).toHaveLength(2)
+      await expect(messages.nth(0).locator('[data-tachi-lens-translated]')).toHaveCount(1)
+      await expect(messages.nth(1).locator('[data-tachi-lens-translated]')).toHaveCount(1)
 
       // --- Assert settings and API key persisted without reseeding ---
       // After restart the new SW should still have the original settings

@@ -19,10 +19,45 @@ export interface DeepSeekMockCall {
 export interface DeepSeekMockOptions {
   /**
    * Map from source message text to translated text.
-   * When provided, the mock returns the corresponding translation
-   * instead of the default '你好，世界'.
+   * When provided, the mock accepts ONLY source texts present in the map
+   * and returns the corresponding translation. Unmapped texts are rejected.
+   * When omitted, the mock accepts ONLY the source text 'Hello world'
+   * and returns the default translation '你好，世界'.
    */
   translations?: Record<string, string>
+}
+
+/**
+ * Pure validation: given the message text and optional translations map,
+ * returns the translated text or throws a descriptive error.
+ *
+ * - Without translations map: accept only 'Hello world' → '你好，世界'.
+ * - With translations map: accept only keys in the map, reject unmapped.
+ */
+export const resolveMockTranslation = (
+  messageText: string,
+  translations?: Record<string, string>,
+): string => {
+  if (translations) {
+    const translated = translations[messageText]
+    if (translated === undefined) {
+      throw new Error(
+        `DeepSeek mock: unexpected message text "${messageText}" with translations map. ` +
+        `Expected one of: ${Object.keys(translations).map((k) => `"${k}"`).join(', ')}`,
+      )
+    }
+    return translated
+  }
+
+  // Legacy contract: accept only "Hello world"
+  if (messageText !== 'Hello world') {
+    throw new Error(
+      `DeepSeek mock: unexpected message text "${messageText}". ` +
+      'Without a translations map, only "Hello world" is accepted.',
+    )
+  }
+
+  return '你好，世界'
 }
 
 /**
@@ -39,7 +74,7 @@ export const setupDeepSeekMock = async (
   options?: DeepSeekMockOptions,
 ): Promise<{ calls: DeepSeekMockCall[] }> => {
   const calls: DeepSeekMockCall[] = []
-  const translations = options?.translations ?? {}
+  const translations = options?.translations
 
   // Fallback: abort any unmatched request to api.deepseek.com.
   // Registered first (lower priority); the specific handler registered later
@@ -142,8 +177,8 @@ export const setupDeepSeekMock = async (
       throw new Error(`DeepSeek mock: invalid or missing message text: ${messageText}`)
     }
 
-    // --- Look up or default translation ---
-    const translatedText = translations[messageText] ?? '你好，世界'
+    // --- Resolve translation (strict: rejects unmapped texts) ---
+    const translatedText = resolveMockTranslation(messageText, translations)
 
     // --- Construct deterministic response preserving the received ID ---
     const responseBody = JSON.stringify({
