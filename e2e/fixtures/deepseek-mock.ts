@@ -16,6 +16,15 @@ export interface DeepSeekMockCall {
   serviceWorkerOwned: boolean
 }
 
+export interface DeepSeekMockOptions {
+  /**
+   * Map from source message text to translated text.
+   * When provided, the mock returns the corresponding translation
+   * instead of the default '你好，世界'.
+   */
+  translations?: Record<string, string>
+}
+
 /**
  * Register the DeepSeek mock route handlers on the given BrowserContext.
  *
@@ -25,8 +34,12 @@ export interface DeepSeekMockCall {
  *
  * Returns a `calls` array that the test can assert against.
  */
-export const setupDeepSeekMock = async (context: BrowserContext): Promise<{ calls: DeepSeekMockCall[] }> => {
+export const setupDeepSeekMock = async (
+  context: BrowserContext,
+  options?: DeepSeekMockOptions,
+): Promise<{ calls: DeepSeekMockCall[] }> => {
   const calls: DeepSeekMockCall[] = []
+  const translations = options?.translations ?? {}
 
   // Fallback: abort any unmatched request to api.deepseek.com.
   // Registered first (lower priority); the specific handler registered later
@@ -124,11 +137,13 @@ export const setupDeepSeekMock = async (context: BrowserContext): Promise<{ call
       throw new Error(`DeepSeek mock: invalid or missing request ID: ${requestId}`)
     }
 
-    // Verify the original message text is present exactly once
-    if (!messageText || messageText !== 'Hello world') {
+    if (typeof messageText !== 'string' || !messageText) {
       await route.abort('blockedbyclient')
-      throw new Error(`DeepSeek mock: unexpected message text: "${messageText}"`)
+      throw new Error(`DeepSeek mock: invalid or missing message text: ${messageText}`)
     }
+
+    // --- Look up or default translation ---
+    const translatedText = translations[messageText] ?? '你好，世界'
 
     // --- Construct deterministic response preserving the received ID ---
     const responseBody = JSON.stringify({
@@ -136,7 +151,7 @@ export const setupDeepSeekMock = async (context: BrowserContext): Promise<{ call
         {
           message: {
             content: JSON.stringify([
-              { id: requestId, translated_text: '你好，世界' },
+              { id: requestId, translated_text: translatedText },
             ]),
           },
         },
