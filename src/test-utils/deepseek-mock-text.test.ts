@@ -1,11 +1,10 @@
 /**
- * Unit tests for the DeepSeek mock text-validation logic.
+ * Unit tests for resolveMockTranslation (DeepSeek mock text validation).
  *
- * The pure function resolveMockTranslation is shared by the E2E mock fixture.
- * These focused tests exercise its strict-accept and strict-reject contracts
- * without requiring a full Playwright browser context.
+ * Colocated with the source module under src/test-utils per CLAUDE.md
+ * test/source colocation rule.
  */
-import { resolveMockTranslation } from '../../e2e/fixtures/deepseek-mock'
+import { resolveMockTranslation } from './deepseek-mock-text'
 
 describe('resolveMockTranslation (DeepSeek mock validation)', () => {
   // ── Legacy contract (no translations map) ──────────────────────────
