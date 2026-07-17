@@ -193,6 +193,7 @@ test.describe('Real Twitch DOM compatibility canary', () => {
     context,
     serviceWorker,
     extensionId,
+    collectedErrors,
   }, testInfo) => {
     expect(serviceWorker).toBeDefined()
     expect(extensionId).toMatch(/^[a-z]{32}$/)
@@ -211,19 +212,12 @@ test.describe('Real Twitch DOM compatibility canary', () => {
     // --- Seed settings ---
     await seedTestSettings(serviceWorker)
 
-    // --- Collect Service Worker errors only ---
-    const swErrors: string[] = []
-    const attachSwConsole = (worker: { on: (event: string, fn: (msg: { type: () => string; text: () => string }) => void) => void }): void => {
-      worker.on('console', (msg) => {
-        if (msg.type() === 'error') swErrors.push(msg.text())
-      })
-    }
-    for (const sw of context.serviceWorkers()) {
-      attachSwConsole(sw)
-    }
-    context.on('serviceworker', (sw) => {
-      attachSwConsole(sw)
-    })
+    // --- Collect Extension errors via the shared fixture ---
+    // The fixture's collectedErrors captures both Service Worker console
+    // errors (source: 'service-worker') and page errors (source: 'page').
+    // We filter to SW-only for the assertion since real Twitch pages
+    // produce third-party page errors. Errors are mapped at assertion time
+    // and at catch-artifact time so both paths include collection results.
 
     const selectorResults: SelectorMatch[] = []
     let page: Page | undefined
@@ -295,10 +289,20 @@ test.describe('Real Twitch DOM compatibility canary', () => {
       expect(providerRequests).toEqual([])
 
       // --- Assertion: No SW errors ---
-      expect(swErrors).toEqual([])
+      // Map after the selector-chain toPass so errors emitted during
+      // retries are included.
+      const chainErrors = collectedErrors
+        .filter((e) => e.source === 'service-worker')
+        .map((e) => e.text)
+      expect(chainErrors).toEqual([])
     } catch (err) {
       if (page) {
-        await attachCanaryArtifacts(testInfo, page, serviceWorker, swErrors, selectorResults)
+        // Filter to SW errors only — real Twitch pages produce third-party
+        // page error noise that would leak chat content in artifacts.
+        const caughtErrors = collectedErrors
+          .filter((e) => e.source === 'service-worker')
+          .map((e) => e.text)
+        await attachCanaryArtifacts(testInfo, page, serviceWorker, caughtErrors, selectorResults)
       }
       throw err
     }
@@ -309,26 +313,27 @@ test.describe('Real Twitch DOM compatibility canary', () => {
  * Privacy-conscious failure attachment for the canary.
  *
  * Artifacts match issue #73 evidence spec:
- * - Playwright trace (from config; captures full page state on failure)
+ * - Playwright trace (from config; screenshots + sources on failure)
  * - screenshot (from config; captures visible page state on failure)
  * - HTML report (from config reporter)
  * - page URL
  * - selector results (which fallback selectors matched)
  * - diagnostics (privacy-safe stage identifiers)
- * - Service Worker error logs
+ * - Extension error logs (Service Worker console errors only)
  * - sanitized outer-HTML excerpt around the chat container
  *
- * Trace and screenshot are explicitly required by the issue for failure diagnosis
- * and may contain rendered chat text and network metadata — that is an accepted
- * trade-off. The privacy boundary prohibits upload of: cookies, browser profile,
- * storage dumps, full chat history beyond the sanitized excerpt, and
- * authorization headers. No such data is attached by this handler.
+ * The trace contains screenshots and source but no DOM snapshots or network
+ * HAR data, avoiding cookie/header exposure. Trace and screenshot may contain
+ * rendered chat text — that is an accepted trade-off required by the issue
+ * for failure diagnosis. The privacy boundary prohibits upload of: cookies,
+ * browser profile, storage dumps, full chat history beyond the sanitized
+ * excerpt, and authorization headers. No such data is attached by this handler.
  */
 async function attachCanaryArtifacts(
   testInfo: TestInfo,
   page: Page,
   serviceWorker: { evaluate: <T>(fn: (args: void) => Promise<T>) => Promise<T> },
-  swErrors: string[],
+  extensionErrors: string[],
   selectorResults: SelectorMatch[],
 ): Promise<void> {
   await testInfo
@@ -369,10 +374,12 @@ async function attachCanaryArtifacts(
     }
   }
 
-  if (swErrors.length > 0) {
+  // Extension error logs (Service Worker only — page errors from real
+  // Twitch pages are third-party noise and are not included.)
+  if (extensionErrors.length > 0) {
     await testInfo
-      .attach('sw-errors', {
-        body: JSON.stringify(swErrors, null, 2),
+      .attach('extension-errors', {
+        body: JSON.stringify(extensionErrors, null, 2),
         contentType: 'application/json',
       })
       .catch(() => undefined)
