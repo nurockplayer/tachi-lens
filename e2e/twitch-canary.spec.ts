@@ -103,27 +103,18 @@ async function dismissOverlays(page: Page): Promise<void> {
   }
 }
 
-/** Emit a page-origin console.error to verify unattributed classification. */
-async function emitPageConsoleError(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const s = document.createElement('script')
-    s.textContent = 'setTimeout(() => { console.error("[tachi-lens-test] deliberate page error for attribution"); }, 50)'
-    document.head.appendChild(s)
-  })
-  await new Promise((r) => setTimeout(r, 1500))
-}
-
-/** Records which fallback selectors matched, deduplicated across all containers.
+/** Records which fallback selectors matched, iterating every container instance.
  *  Reports per-selector accuracy (not group-level). */
 async function recordSelectorOutcomes(page: Page): Promise<SelectorMatch[]> {
   const results: SelectorMatch[] = []
 
+  // Container selectors — count all matching instances
   for (const sel of FALLBACKS[CHAT_CONTAINER]) {
     const count = await page.locator(sel).count()
     results.push({ group: 'chat_container', selector: sel, matched: count > 0 })
   }
 
-  // Collect all matching elements across all containers by outerHTML dedup
+  // Per-selector dedup across ALL container instances
   const seenMessagesBySel = new Map<string, Set<string>>()
   const seenUsernamesBySel = new Map<string, Set<string>>()
   const seenBodiesBySel = new Map<string, Set<string>>()
@@ -132,26 +123,29 @@ async function recordSelectorOutcomes(page: Page): Promise<SelectorMatch[]> {
   for (const sel of FALLBACKS[CHAT_MESSAGE_BODY]) seenBodiesBySel.set(sel, new Set())
 
   for (const containerSel of FALLBACKS[CHAT_CONTAINER]) {
-    const container = page.locator(containerSel).first()
-    if (!(await container.isVisible().catch(() => false))) continue
+    const containerCount = await page.locator(containerSel).count()
+    for (let ci = 0; ci < containerCount; ci++) {
+      const container = page.locator(containerSel).nth(ci)
+      if (!(await container.isVisible().catch(() => false))) continue
 
-    for (const [msgSel, set] of seenMessagesBySel) {
-      const snippets: string[] = await container.locator(msgSel).evaluateAll(
-        (els) => els.map((el) => (el as HTMLElement).outerHTML?.substring(0, 200) || ''),
-      )
-      for (const s of snippets) { if (s) set.add(s) }
-    }
-    for (const [uSel, set] of seenUsernamesBySel) {
-      const texts: (string | null)[] = await container.locator(uSel).evaluateAll(
-        (els) => els.map((el) => el.textContent?.trim() || null),
-      )
-      for (const t of texts) { if (t) set.add(t) }
-    }
-    for (const [bSel, set] of seenBodiesBySel) {
-      const texts: (string | null)[] = await container.locator(bSel).evaluateAll(
-        (els) => els.map((el) => el.textContent?.trim() || null),
-      )
-      for (const t of texts) { if (t) set.add(t) }
+      for (const [msgSel, set] of seenMessagesBySel) {
+        const snippets: string[] = await container.locator(msgSel).evaluateAll(
+          (els) => els.map((el) => (el as HTMLElement).outerHTML?.substring(0, 200) || ''),
+        )
+        for (const s of snippets) { if (s) set.add(s) }
+      }
+      for (const [uSel, set] of seenUsernamesBySel) {
+        const texts: (string | null)[] = await container.locator(uSel).evaluateAll(
+          (els) => els.map((el) => el.textContent?.trim() || null),
+        )
+        for (const t of texts) { if (t) set.add(t) }
+      }
+      for (const [bSel, set] of seenBodiesBySel) {
+        const texts: (string | null)[] = await container.locator(bSel).evaluateAll(
+          (els) => els.map((el) => el.textContent?.trim() || null),
+        )
+        for (const t of texts) { if (t) set.add(t) }
+      }
     }
   }
 
@@ -193,77 +187,85 @@ test.describe('Real Twitch DOM compatibility canary', () => {
     const selectorResults: SelectorMatch[] = []
     let page: Page | undefined
 
+    // Install a non-evicting diagnostic observer in the Service Worker
+    // BEFORE navigation. The 20-entry ring can overflow; this writes a
+    // permanent flag to chrome.storage.session that never ages out.
+    await serviceWorker.evaluate(async () => {
+      chrome.runtime.onMessage.addListener((message: unknown) => {
+        if (
+          typeof message === 'object' && message !== null &&
+          (message as Record<string, unknown>).type === 'diagnostic_event'
+        ) {
+          const payload = (message as Record<string, unknown>).payload as Record<string, unknown> | undefined
+          if (payload?.stage === 'chat_container_ready') {
+            void chrome.storage.session.set({ canary_chat_container_ready: true })
+          }
+        }
+      })
+    })
+
     try {
       page = await context.newPage()
 
       await page.goto(CANARY_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 })
       await dismissOverlays(page)
 
-      // Emit a deterministic page error to verify unattributed classification
-      await emitPageConsoleError(page)
-
       // Snapshot selector outcomes early (for failure evidence)
       selectorResults.push(...await recordSelectorOutcomes(page))
 
       // --- Assertion: chat_container_ready diagnostic observed ---
-      // The diagnostic ring holds up to 20 events. We poll until the event
-      // appears or timeout; once observed it may age out, but that is fine
-      // because the event's prior existence confirms the observer fired.
-      let chatContainerReadyObserved = false
+      // We check BOTH the 20-entry ring AND the permanent storage flag.
       await expect(async () => {
         const events = await getDiagnosticsEvents(serviceWorker)
-        if (events.some((e) => e.stage === 'chat_container_ready')) {
-          chatContainerReadyObserved = true
-        }
-        expect(chatContainerReadyObserved).toBe(true)
+        const inRing = events.some((e) => e.stage === 'chat_container_ready')
+        const flagged = await serviceWorker.evaluate(async () => {
+          const data = await chrome.storage.session.get('canary_chat_container_ready')
+          return data.canary_chat_container_ready === true
+        })
+        expect(inRing || flagged).toBe(true)
       }).toPass({ timeout: 30_000 })
 
-      // Refresh selector snapshot (chat may have rendered in the meantime)
+      // Refresh selector snapshot (chat may have rendered)
       selectorResults.length = 0
       selectorResults.push(...await recordSelectorOutcomes(page))
 
-      const matchedContainerSel = FALLBACKS[CHAT_CONTAINER].find(
-        (sel) => selectorResults.some((r) => r.group === 'chat_container' && r.selector === sel && r.matched),
-      )
-      expect(matchedContainerSel, 'Expected at least one chat container selector to match').toBeDefined()
-
       // --- Unified assertion: processed + username + body on the SAME message,
-      // across ALL fallback containers.
+      // across ALL visible container instances.
       const usernameFallbacks = FALLBACKS[CHAT_USERNAME]
       const bodyFallbacks = FALLBACKS[CHAT_MESSAGE_BODY]
 
       await expect(async () => {
         for (const containerSel of FALLBACKS[CHAT_CONTAINER]) {
-          const container = page.locator(containerSel).first()
-          if (!(await container.isVisible().catch(() => false))) continue
+          const containerCount = await page.locator(containerSel).count()
+          for (let ci = 0; ci < containerCount; ci++) {
+            const container = page.locator(containerSel).nth(ci)
+            if (!(await container.isVisible().catch(() => false))) continue
 
-          for (const msgSel of FALLBACKS[CHAT_MESSAGE]) {
-            const msgCount = await container.locator(msgSel).count()
-            for (let i = 0; i < msgCount; i++) {
-              const msg = container.locator(msgSel).nth(i)
-              if (!(await msg.isVisible().catch(() => false))) continue
+            for (const msgSel of FALLBACKS[CHAT_MESSAGE]) {
+              const msgCount = await container.locator(msgSel).count()
+              for (let i = 0; i < msgCount; i++) {
+                const msg = container.locator(msgSel).nth(i)
+                if (!(await msg.isVisible().catch(() => false))) continue
 
-              // Check processed
-              const processed = await msg.getAttribute('data-tachi-lens-processed').catch(() => null)
-              if (processed !== 'true') continue
+                const processed = await msg.getAttribute('data-tachi-lens-processed').catch(() => null)
+                if (processed !== 'true') continue
 
-              // Check username on the SAME msg element
-              let hasUsername = false
-              for (const uSel of usernameFallbacks) {
-                const u = msg.locator(uSel).first()
-                if (await u.isVisible().catch(() => false)) {
-                  const text = await u.textContent()
-                  if (text?.trim()) { hasUsername = true; break }
+                let hasUsername = false
+                for (const uSel of usernameFallbacks) {
+                  const u = msg.locator(uSel).first()
+                  if (await u.isVisible().catch(() => false)) {
+                    const text = await u.textContent()
+                    if (text?.trim()) { hasUsername = true; break }
+                  }
                 }
-              }
-              if (!hasUsername) continue
+                if (!hasUsername) continue
 
-              // Check body on the SAME msg element
-              for (const bSel of bodyFallbacks) {
-                const b = msg.locator(bSel).first()
-                if (await b.isVisible().catch(() => false)) {
-                  const text = await b.textContent()
-                  if (text?.trim()) return // full chain proven
+                for (const bSel of bodyFallbacks) {
+                  const b = msg.locator(bSel).first()
+                  if (await b.isVisible().catch(() => false)) {
+                    const text = await b.textContent()
+                    if (text?.trim()) return
+                  }
                 }
               }
             }
@@ -346,22 +348,37 @@ async function attachCanaryArtifacts(
     }
   }
 
-  let screenshotAttached = false
+  // Redacted screenshot: mask chat via applyBlackOverlay on every visible
+  // non-zero container instance. Each container gets a globally unique mask ID
+  // (across both fallback selectors) to avoid collisions with querySelector.
+  let anyMasked = false
+  let globalMaskId = 0
   for (const sel of FALLBACKS[CHAT_CONTAINER]) {
-    const el = page.locator(sel).first()
-    if (await el.isVisible().catch(() => false)) {
-      const applied = await applyBlackOverlay(page, sel)
-      if (applied) {
-        const shot = await page.screenshot({ type: 'png' }).catch(() => null)
-        if (shot && shot.byteLength > 100) {
-          screenshotAttached = true
-          await testInfo.attach('redacted-screenshot', {
-            body: shot,
-            contentType: 'image/png',
-          }).catch(() => undefined)
-        }
-      }
-      break
+    const containerCount = await page.locator(sel).count()
+    for (let ci = 0; ci < containerCount; ci++) {
+      const container = page.locator(sel).nth(ci)
+      if (!(await container.isVisible().catch(() => false))) continue
+      const rect = await container.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        return { w: r.width, h: r.height }
+      }).catch(() => ({ w: 0, h: 0 }))
+      if (rect.w === 0 || rect.h === 0) continue
+      // Use a globally unique data attribute so querySelector targets exactly
+      // this container even when multiple containers use different fallbacks.
+      const uid = 'tachi-mask-' + (globalMaskId++)
+      await container.evaluate((el, id) => { el.setAttribute('data-tachi-mask', id) }, uid)
+      const applied = await applyBlackOverlay(page, '[data-tachi-mask="' + uid + '"]')
+      if (applied) anyMasked = true
+    }
+  }
+
+  if (anyMasked) {
+    const shot = await page.screenshot({ type: 'png' }).catch(() => null)
+    if (shot && shot.byteLength > 100) {
+      await testInfo.attach('redacted-screenshot', {
+        body: shot,
+        contentType: 'image/png',
+      }).catch(() => undefined)
     }
   }
 

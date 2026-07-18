@@ -144,6 +144,12 @@
   },
   "hotPaths": [
     {
+      "path": "e2e/twitch-canary.spec.ts",
+      "accessCount": 11,
+      "lastAccessed": 1784359701404,
+      "type": "file"
+    },
+    {
       "path": "src/storage/settings.ts",
       "accessCount": 10,
       "lastAccessed": 1783084039563,
@@ -177,6 +183,12 @@
       "path": "src/content/twitch-handler.test.ts",
       "accessCount": 5,
       "lastAccessed": 1783084120084,
+      "type": "file"
+    },
+    {
+      "path": "e2e/privacy-regression.spec.ts",
+      "accessCount": 5,
+      "lastAccessed": 1784360333437,
       "type": "file"
     },
     {
