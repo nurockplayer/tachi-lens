@@ -4,6 +4,3 @@ dist
 .DS_Store
 /test-results/
 /playwright-report/
-/browsers/
-.pnpm-store/
-.omc/
