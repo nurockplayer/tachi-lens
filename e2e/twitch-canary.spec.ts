@@ -16,8 +16,8 @@
 import { expect } from '@playwright/test'
 import type { Page, TestInfo } from '@playwright/test'
 import { test } from './fixtures/extension'
-import type { ExtensionError } from './fixtures/extension'
 import { seedTestSettings, getDiagnosticsEvents } from './fixtures/twitch-page'
+import { sanitizeContainerHtml, applyBlackOverlay, extensionAttributedErrors } from './fixtures/canary-helpers'
 import {
   FALLBACKS,
   CHAT_CONTAINER,
@@ -103,227 +103,96 @@ async function dismissOverlays(page: Page): Promise<void> {
   }
 }
 
-/** Sanitize HTML inside the browser context via page.evaluate. */
-async function sanitizeContainerHtml(page: Page, containerSel: string): Promise<string | null> {
-  const el = page.locator(containerSel).first()
-  if (!(await el.isVisible().catch(() => false))) return null
+/** Sanitize HTML inside the browser context via page.evaluate.
+ * Imported from e2e/fixtures/canary-helpers.ts — shared with privacy-regression.spec.ts. */
+// sanitizeContainerHtml is imported from canary-helpers. No local declaration needed.
 
-  return el.evaluate((node) => {
-    const ALLOWED = /^(class|data-test-selector|data-a-target|role)$/i
-    const clone = (node as HTMLElement).cloneNode(true) as HTMLElement
-    const strip = (el: Element) => {
-      for (const child of Array.from(el.childNodes)) {
-        if (child.nodeType === 3) {
-          child.textContent = '…'
-        } else if (child.nodeType === 8) {
-          child.parentNode?.removeChild(child)
-        } else if (child.nodeType === 1) {
-          strip(child as Element)
-        }
-      }
-      for (const attr of Array.from(el.attributes)) {
-        if (!ALLOWED.test(attr.name)) el.removeAttribute(attr.name)
-      }
-    }
-    strip(clone)
-    return clone.outerHTML.substring(0, 5000)
-  }).catch(() => null)
-}
-
-/** Record all selector outcomes. */
+/** Record all selector outcomes across every matched container. */
 async function recordSelectorOutcomes(page: Page): Promise<SelectorMatch[]> {
   const results: SelectorMatch[] = []
+
+  // Container selectors
   for (const sel of FALLBACKS[CHAT_CONTAINER]) {
     const count = await page.locator(sel).count()
     results.push({ group: 'chat_container', selector: sel, matched: count > 0 })
   }
 
-  const matchedContainer = results.find((r) => r.matched)
-  if (!matchedContainer) return results
+  // Message/username/body across all matching containers, using evaluate
+  // to deduplicate by innerHTML hash (avoids ElementHandle/Locator mismatch).
+  const matched: string[] = []
+  const matchedUsernames: string[] = []
+  const matchedBodies: string[] = []
 
-  const container = page.locator(matchedContainer.selector).first()
+  for (const containerSel of FALLBACKS[CHAT_CONTAINER]) {
+    const containerLoc = page.locator(containerSel).first()
+    if (!(await containerLoc.isVisible().catch(() => false))) continue
+
+    const seen = new Set<string>()
+    for (const msgSel of FALLBACKS[CHAT_MESSAGE]) {
+      const snippets: string[] = await containerLoc.locator(msgSel).evaluateAll(
+        (els) => els.map((el) => (el as HTMLElement).outerHTML?.substring(0, 200) || ''),
+      )
+      for (const s of snippets) {
+        if (!seen.has(s)) { seen.add(s); matched.push(msgSel) }
+      }
+    }
+
+    for (const uSel of FALLBACKS[CHAT_USERNAME]) {
+      const texts: (string | null)[] = await containerLoc.locator(uSel).evaluateAll(
+        (els) => els.map((el) => el.textContent?.trim() || null),
+      )
+      for (const t of texts) {
+        if (t) matchedUsernames.push(uSel)
+      }
+    }
+
+    for (const bSel of FALLBACKS[CHAT_MESSAGE_BODY]) {
+      const texts: (string | null)[] = await containerLoc.locator(bSel).evaluateAll(
+        (els) => els.map((el) => el.textContent?.trim() || null),
+      )
+      for (const t of texts) {
+        if (t) matchedBodies.push(bSel)
+      }
+    }
+  }
+
   for (const sel of FALLBACKS[CHAT_MESSAGE]) {
-    const count = await container.locator(sel).count()
-    results.push({ group: 'chat_message', selector: sel, matched: count > 0 })
+    results.push({ group: 'chat_message', selector: sel, matched: matched.includes(sel) })
   }
   for (const sel of FALLBACKS[CHAT_USERNAME]) {
-    const count = await container.locator(sel).count()
-    results.push({ group: 'chat_username', selector: sel, matched: count > 0 })
+    results.push({ group: 'chat_username', selector: sel, matched: matchedUsernames.includes(sel) })
   }
   for (const sel of FALLBACKS[CHAT_MESSAGE_BODY]) {
-    const count = await container.locator(sel).count()
-    results.push({ group: 'chat_body', selector: sel, matched: count > 0 })
+    results.push({ group: 'chat_body', selector: sel, matched: matchedBodies.includes(sel) })
   }
   return results
 }
 
 /** Filter collectedErrors to only extension-attributed errors with raw text
- * for Service Worker errors only (SW errors are always the extension's own).
+ * for Service Worker errors only (SW errors are attributed by extension URL).
  * Page errors produce only metadata (count), not raw text. Returns both the
- * SW text list and total page-error count for assertion and attachment. */
-function extensionAttributedErrors(errors: ExtensionError[]): { texts: string[]; unattributedPageCount: number; attributedPageCount: number } {
-  const texts = errors
-    .filter((e) => e.source === 'service-worker' && e.isExtensionAttributed)
-    .map((e) => `[SW] ${e.text}`)
-  const unattributedPageCount = errors.filter(
-    (e) => e.source === 'page' && !e.isExtensionAttributed,
-  ).length
-  const attributedPageCount = errors.filter(
-    (e) => e.source === 'page' && e.isExtensionAttributed,
-  ).length
-  return { texts, unattributedPageCount, attributedPageCount }
+ * SW text list and total page-error count for assertion and attachment.
+ *
+ * Imported from e2e/fixtures/canary-helpers.ts — shared with privacy-regression.spec.ts. */
+
+/** Test helper: generate a deterministic page-origin console.error and
+ * return the resulting unattributed error entry. */
+async function emitPageConsoleError(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const s = document.createElement('script')
+    s.textContent = 'setTimeout(() => { console.error("[tachi-lens-test] deliberate page error for attribution"); }, 50)'
+    document.head.appendChild(s)
+  })
+  await new Promise((r) => setTimeout(r, 1500))
 }
 
 /**
  * Apply a black overlay over an element identified by selector, inside the
- * browser page context. Returns getComputedStyle confirmation that the overlay
- * has black background and fixed positioning. Used by both the production
- * artifact path and the deterministic regression test.
- */
-async function applyBlackOverlay(page: Page, containerSel: string): Promise<boolean> {
-  return page.evaluate((s) => {
-    const container = document.querySelector(s)
-    if (!container) return false
-    const rect = container.getBoundingClientRect()
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;background:black;z-index:999999;pointer-events:none;'
-    document.body.appendChild(overlay)
-    const cs = window.getComputedStyle(overlay)
-    return cs.backgroundColor === 'rgb(0, 0, 0)' && cs.position === 'fixed' && cs.zIndex === '999999'
-  }, containerSel)
-}
+ * browser page context. Returns getComputedStyle confirmation.
+ * Imported from e2e/fixtures/canary-helpers.ts — shared with privacy-regression.spec.ts. */
+// applyBlackOverlay is imported from canary-helpers. No local declaration needed.
 
 test.describe('Real Twitch DOM compatibility canary', () => {
-
-  // --- Sanitizer regression: verify privacy redaction ---
-  test('sanitizer removes text, comments, and disallowed attributes', async ({ context }) => {
-    const page = await context.newPage()
-    await page.setContent(`
-      <div class="test" data-test-selector="keep" aria-label="user: chattext" style="color:red"
-           data-userid="12345">
-        visible text
-        <!-- sensitive comment -->
-        <span class="inner" data-a-target="body">username text</span>
-      </div>
-    `)
-    const result = await sanitizeContainerHtml(page, '.test')
-
-    expect(result).not.toBeNull()
-    expect(result!).toContain('class="test"')
-    expect(result!).toContain('data-test-selector="keep"')
-    expect(result!).toContain('data-a-target="body"')
-    expect(result!).not.toContain('aria-label')
-    expect(result!).not.toContain('style')
-    expect(result!).not.toContain('data-userid')
-    expect(result!).not.toContain('visible text')
-    expect(result!).not.toContain('username text')
-    expect(result!).not.toContain('sensitive comment')
-    expect(result!).not.toContain('<!--')
-    expect(result!).toContain('>…<')
-  })
-
-  // --- Redacted screenshot regression: verify the shared applyBlackOverlay helper ---
-  test('redacted screenshot overlay is positively applied and composited', async ({ context }) => {
-    const page = await context.newPage()
-    await page.setContent(`
-      <div id="chat" style="position:fixed;top:10px;left:10px;width:300px;height:100px;background:white;">
-        <p>visible chat text here</p>
-      </div>
-    `)
-
-    // Exercise the SHARED applyBlackOverlay helper — same function used
-    // by the production attachCanaryArtifacts failure path.
-    const applied = await applyBlackOverlay(page, '#chat')
-    expect(applied).toBe(true)
-
-    const ss = await page.screenshot({ type: 'png' })
-    expect(ss.byteLength).toBeGreaterThan(500)
-  })
-
-  // --- Error attribution regression: verify extension-origin filtering ---
-  test.describe('error attribution', () => {
-
-    test('attributed SW errors pass, Twitch page errors are not attributed', async ({
-      context,
-      serviceWorker,
-      extensionId,
-      collectedErrors,
-    }, testInfo) => {
-      expect(serviceWorker).toBeDefined()
-      expect(extensionId).toMatch(/^[a-z]{32}$/)
-
-      await seedTestSettings(serviceWorker)
-      const page = await context.newPage()
-      await page.goto(CANARY_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 })
-      await dismissOverlays(page)
-      await page.waitForTimeout(10_000)
-
-      // Attach detail for diagnosis — only attributed error text (SW errors)
-      // which is always safe for the privacy boundary.
-      const swErrors = collectedErrors.filter((e) => e.source === 'service-worker')
-      for (const e of swErrors) {
-        expect(e.isExtensionAttributed).toBe(true)
-      }
-
-      // At least one Twitch page error should be present and NOT attributed.
-      // (Twitch pages reliably produce third-party ad/tracking console.errors.)
-      const unattributedPageErrors = collectedErrors.filter(
-        (e) => e.source === 'page' && e.isExtensionAttributed === false,
-      )
-      expect(unattributedPageErrors.length).toBeGreaterThan(0)
-
-      // Attach detail for diagnosis — only SW-attributed error text.
-      const { texts: attributedTexts } = extensionAttributedErrors(collectedErrors)
-      await testInfo.attach('attributed-sw-errors', {
-        body: JSON.stringify(attributedTexts, null, 2),
-        contentType: 'application/json',
-      }).catch(() => undefined)
-
-      // Attach unattributed metadata (count, sources, types) but not raw text
-      const unattributedMeta = unattributedPageErrors.map((e) => ({
-        source: e.source,
-        type: e.type,
-        isExtensionAttributed: e.isExtensionAttributed,
-        textLength: e.text.length,
-      }))
-      await testInfo.attach('unattributed-error-metadata', {
-        body: JSON.stringify(unattributedMeta, null, 2),
-        contentType: 'application/json',
-      }).catch(() => undefined)
-    })
-
-    test('deliberate SW console.error is positively attributed', async ({
-      context,
-      extensionId,
-      collectedErrors,
-      serviceWorker,
-    }, testInfo) => {
-      expect(serviceWorker).toBeDefined()
-      expect(extensionId).toMatch(/^[a-z]{32}$/)
-
-      // Force a direct extension SW console.error
-      await serviceWorker.evaluate(() => {
-        console.error('[tachi-lens-test] deliberate SW error for attribution verification')
-      })
-      await new Promise((r) => setTimeout(r, 1000))
-
-      const swAttributed = collectedErrors.filter(
-        (e) => e.source === 'service-worker' && e.isExtensionAttributed,
-      )
-      // The deliberate error should be attributed
-      const found = swAttributed.some((e) => e.text.includes('tachi-lens-test'))
-      expect(found).toBe(true)
-
-      await testInfo.attach('sw-attribution-test', {
-        body: JSON.stringify({
-          totalSwErrors: collectedErrors.filter((e) => e.source === 'service-worker').length,
-          attributedSwErrors: swAttributed.length,
-          deliberateErrorFound: found,
-        }, null, 2),
-        contentType: 'application/json',
-      }).catch(() => undefined)
-    })
-  })
 
   test('Extension attaches, finds chat container and real messages, no provider', async ({
     context,
@@ -376,8 +245,23 @@ test.describe('Real Twitch DOM compatibility canary', () => {
       const usernameFallbacks = FALLBACKS[CHAT_USERNAME]
       const bodyFallbacks = FALLBACKS[CHAT_MESSAGE_BODY]
 
+      // Also verify the extension processed the matched message
+      // by checking for the tachi-lens processed attribute.
       await expect(async () => {
-        for (const msgSel of messageFallbacks) {
+        for (const msgSel of FALLBACKS[CHAT_MESSAGE]) {
+          const msgCount = await container.locator(msgSel).count()
+          for (let i = 0; i < msgCount; i++) {
+            const msg = container.locator(msgSel).nth(i)
+            if (!(await msg.isVisible().catch(() => false))) continue
+            const processed = await msg.getAttribute('data-tachi-lens-processed').catch(() => null)
+            if (processed === 'true') { return }
+          }
+        }
+        expect(false).toBe(true)
+      }).toPass({ timeout: 25_000 })
+
+      await expect(async () => {
+        for (const msgSel of FALLBACKS[CHAT_MESSAGE]) {
           const msgCount = await container.locator(msgSel).count()
           for (let i = 0; i < msgCount; i++) {
             const msg = container.locator(msgSel).nth(i)
@@ -408,9 +292,11 @@ test.describe('Real Twitch DOM compatibility canary', () => {
       expect(providerRequests).toEqual([])
 
       // Assert only extension-attributed errors (SW only for text).
-      // Twitch page noise is excluded via isExtensionAttributed.
+      // Twitch page noise is excluded via isExtensionAttributed;
+      // extension page errors would also be caught here.
       const errorSummary = extensionAttributedErrors(collectedErrors)
       expect(errorSummary.texts).toEqual([])
+      expect(errorSummary.attributedPageCount).toBe(0)
     } catch (err) {
       if (page) {
         const errorSummary = extensionAttributedErrors(collectedErrors)

@@ -51,11 +51,15 @@ export const test = base.extend<{
       const errors: ExtensionError[] = []
       contextErrors.set(context, errors)
 
-      // Service Worker errors — always included (they are the extension)
+      // Service Worker errors — filtered to the extension's own worker by URL.
+      let extensionSwUrl: string | null = null
+      const sw = context.serviceWorkers()[0]
+      if (sw?.url().match(/^chrome-extension:\/\//)) extensionSwUrl = sw.url()
       const attachSwConsole = (worker: Worker): void => {
+        const isExtensionWorker = extensionSwUrl !== null && worker.url() === extensionSwUrl
         worker.on('console', (msg) => {
           if (msg.type() === 'error') {
-            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text(), isExtensionAttributed: true })
+            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text(), isExtensionAttributed: isExtensionWorker })
           }
         })
       }
@@ -63,6 +67,8 @@ export const test = base.extend<{
         attachSwConsole(sw)
       }
       context.on('serviceworker', (sw) => {
+        // Update extension SW URL on new worker registration
+        if (sw.url().match(/^chrome-extension:\/\//)) extensionSwUrl = sw.url()
         attachSwConsole(sw)
       })
 
