@@ -13,10 +13,10 @@ export default defineConfig({
         channel: 'chromium',
         trace: {
           mode: 'retain-on-failure' as const,
-          screenshots: true,
+          screenshots: false,
+          snapshots: false,
           sources: true,
         },
-        screenshot: 'only-on-failure',
       },
     },
   ],

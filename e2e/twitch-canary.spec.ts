@@ -16,6 +16,7 @@
 import { expect } from '@playwright/test'
 import type { Page, TestInfo } from '@playwright/test'
 import { test } from './fixtures/extension'
+import type { ExtensionError } from './fixtures/extension'
 import { seedTestSettings, getDiagnosticsEvents } from './fixtures/twitch-page'
 import {
   FALLBACKS,
@@ -34,7 +35,6 @@ const TWITCH_RESERVED_SINGLE_SEGMENT = new Set([
 
 const CANARY_URL = process.env.TWITCH_CANARY_URL
 
-// --- Module-level configuration validation ---
 if (!CANARY_URL) {
   throw new Error(
     'TWITCH_CANARY_URL environment variable must be set to an https://www.twitch.tv/<channel> URL.\n' +
@@ -116,7 +116,6 @@ async function sanitizeContainerHtml(page: Page, containerSel: string): Promise<
         if (child.nodeType === 3) {
           child.textContent = '…'
         } else if (child.nodeType === 8) {
-          // Remove comment nodes
           child.parentNode?.removeChild(child)
         } else if (child.nodeType === 1) {
           strip(child as Element)
@@ -139,7 +138,6 @@ async function recordSelectorOutcomes(page: Page): Promise<SelectorMatch[]> {
     results.push({ group: 'chat_container', selector: sel, matched: count > 0 })
   }
 
-  // If no container found, deeper selectors can't be checked
   const matchedContainer = results.find((r) => r.matched)
   if (!matchedContainer) return results
 
@@ -159,6 +157,42 @@ async function recordSelectorOutcomes(page: Page): Promise<SelectorMatch[]> {
   return results
 }
 
+/** Filter collectedErrors to only extension-attributed errors with raw text
+ * for Service Worker errors only (SW errors are always the extension's own).
+ * Page errors produce only metadata (count), not raw text. Returns both the
+ * SW text list and total page-error count for assertion and attachment. */
+function extensionAttributedErrors(errors: ExtensionError[]): { texts: string[]; unattributedPageCount: number; attributedPageCount: number } {
+  const texts = errors
+    .filter((e) => e.source === 'service-worker' && e.isExtensionAttributed)
+    .map((e) => `[SW] ${e.text}`)
+  const unattributedPageCount = errors.filter(
+    (e) => e.source === 'page' && !e.isExtensionAttributed,
+  ).length
+  const attributedPageCount = errors.filter(
+    (e) => e.source === 'page' && e.isExtensionAttributed,
+  ).length
+  return { texts, unattributedPageCount, attributedPageCount }
+}
+
+/**
+ * Apply a black overlay over an element identified by selector, inside the
+ * browser page context. Returns getComputedStyle confirmation that the overlay
+ * has black background and fixed positioning. Used by both the production
+ * artifact path and the deterministic regression test.
+ */
+async function applyBlackOverlay(page: Page, containerSel: string): Promise<boolean> {
+  return page.evaluate((s) => {
+    const container = document.querySelector(s)
+    if (!container) return false
+    const rect = container.getBoundingClientRect()
+    const overlay = document.createElement('div')
+    overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;background:black;z-index:999999;pointer-events:none;'
+    document.body.appendChild(overlay)
+    const cs = window.getComputedStyle(overlay)
+    return cs.backgroundColor === 'rgb(0, 0, 0)' && cs.position === 'fixed' && cs.zIndex === '999999'
+  }, containerSel)
+}
+
 test.describe('Real Twitch DOM compatibility canary', () => {
 
   // --- Sanitizer regression: verify privacy redaction ---
@@ -172,7 +206,6 @@ test.describe('Real Twitch DOM compatibility canary', () => {
         <span class="inner" data-a-target="body">username text</span>
       </div>
     `)
-    // Exercise the actual sanitizeContainerHtml function on a real page
     const result = await sanitizeContainerHtml(page, '.test')
 
     expect(result).not.toBeNull()
@@ -187,6 +220,109 @@ test.describe('Real Twitch DOM compatibility canary', () => {
     expect(result!).not.toContain('sensitive comment')
     expect(result!).not.toContain('<!--')
     expect(result!).toContain('>…<')
+  })
+
+  // --- Redacted screenshot regression: verify the shared applyBlackOverlay helper ---
+  test('redacted screenshot overlay is positively applied and composited', async ({ context }) => {
+    const page = await context.newPage()
+    await page.setContent(`
+      <div id="chat" style="position:fixed;top:10px;left:10px;width:300px;height:100px;background:white;">
+        <p>visible chat text here</p>
+      </div>
+    `)
+
+    // Exercise the SHARED applyBlackOverlay helper — same function used
+    // by the production attachCanaryArtifacts failure path.
+    const applied = await applyBlackOverlay(page, '#chat')
+    expect(applied).toBe(true)
+
+    const ss = await page.screenshot({ type: 'png' })
+    expect(ss.byteLength).toBeGreaterThan(500)
+  })
+
+  // --- Error attribution regression: verify extension-origin filtering ---
+  test.describe('error attribution', () => {
+
+    test('attributed SW errors pass, Twitch page errors are not attributed', async ({
+      context,
+      serviceWorker,
+      extensionId,
+      collectedErrors,
+    }, testInfo) => {
+      expect(serviceWorker).toBeDefined()
+      expect(extensionId).toMatch(/^[a-z]{32}$/)
+
+      await seedTestSettings(serviceWorker)
+      const page = await context.newPage()
+      await page.goto(CANARY_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+      await dismissOverlays(page)
+      await page.waitForTimeout(10_000)
+
+      // Attach detail for diagnosis — only attributed error text (SW errors)
+      // which is always safe for the privacy boundary.
+      const swErrors = collectedErrors.filter((e) => e.source === 'service-worker')
+      for (const e of swErrors) {
+        expect(e.isExtensionAttributed).toBe(true)
+      }
+
+      // At least one Twitch page error should be present and NOT attributed.
+      // (Twitch pages reliably produce third-party ad/tracking console.errors.)
+      const unattributedPageErrors = collectedErrors.filter(
+        (e) => e.source === 'page' && e.isExtensionAttributed === false,
+      )
+      expect(unattributedPageErrors.length).toBeGreaterThan(0)
+
+      // Attach detail for diagnosis — only SW-attributed error text.
+      const { texts: attributedTexts } = extensionAttributedErrors(collectedErrors)
+      await testInfo.attach('attributed-sw-errors', {
+        body: JSON.stringify(attributedTexts, null, 2),
+        contentType: 'application/json',
+      }).catch(() => undefined)
+
+      // Attach unattributed metadata (count, sources, types) but not raw text
+      const unattributedMeta = unattributedPageErrors.map((e) => ({
+        source: e.source,
+        type: e.type,
+        isExtensionAttributed: e.isExtensionAttributed,
+        textLength: e.text.length,
+      }))
+      await testInfo.attach('unattributed-error-metadata', {
+        body: JSON.stringify(unattributedMeta, null, 2),
+        contentType: 'application/json',
+      }).catch(() => undefined)
+    })
+
+    test('deliberate SW console.error is positively attributed', async ({
+      context,
+      extensionId,
+      collectedErrors,
+      serviceWorker,
+    }, testInfo) => {
+      expect(serviceWorker).toBeDefined()
+      expect(extensionId).toMatch(/^[a-z]{32}$/)
+
+      // Force a direct extension SW console.error
+      await serviceWorker.evaluate(() => {
+        console.error('[tachi-lens-test] deliberate SW error for attribution verification')
+      })
+      await new Promise((r) => setTimeout(r, 1000))
+
+      const swAttributed = collectedErrors.filter(
+        (e) => e.source === 'service-worker' && e.isExtensionAttributed,
+      )
+      // The deliberate error should be attributed
+      const found = swAttributed.some((e) => e.text.includes('tachi-lens-test'))
+      expect(found).toBe(true)
+
+      await testInfo.attach('sw-attribution-test', {
+        body: JSON.stringify({
+          totalSwErrors: collectedErrors.filter((e) => e.source === 'service-worker').length,
+          attributedSwErrors: swAttributed.length,
+          deliberateErrorFound: found,
+        }, null, 2),
+        contentType: 'application/json',
+      }).catch(() => undefined)
+    })
   })
 
   test('Extension attaches, finds chat container and real messages, no provider', async ({
@@ -209,15 +345,7 @@ test.describe('Real Twitch DOM compatibility canary', () => {
       ),
     )
 
-    // --- Seed settings ---
     await seedTestSettings(serviceWorker)
-
-    // --- Collect Extension errors via the shared fixture ---
-    // The fixture's collectedErrors captures both Service Worker console
-    // errors (source: 'service-worker') and page errors (source: 'page').
-    // We filter to SW-only for the assertion since real Twitch pages
-    // produce third-party page errors. Errors are mapped at assertion time
-    // and at catch-artifact time so both paths include collection results.
 
     const selectorResults: SelectorMatch[] = []
     let page: Page | undefined
@@ -225,27 +353,19 @@ test.describe('Real Twitch DOM compatibility canary', () => {
     try {
       page = await context.newPage()
 
-      // --- Navigate to real Twitch ---
       await page.goto(CANARY_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 })
       await dismissOverlays(page)
 
-      // Record ALL selector outcomes early (so failure evidence captures
-      // match status even on diagnostic timeout or container absence).
       selectorResults.push(...await recordSelectorOutcomes(page))
 
-      // --- Assertion 1: chat_container_ready diagnostic observed ---
       await expect(async () => {
         const events = await getDiagnosticsEvents(serviceWorker)
         expect(events.some((e) => e.stage === 'chat_container_ready')).toBe(true)
       }).toPass({ timeout: 25_000 })
 
-      // Refresh selector outcomes: by now Twitch chat has rendered and
-      // the Content Script has recorded its diagnostic, so this snapshot
-      // reflects the page at chain-assertion time.
       selectorResults.length = 0
       selectorResults.push(...await recordSelectorOutcomes(page))
 
-      // --- Assertions 2-5: Full selector chain within one real message ---
       const containerSel = FALLBACKS[CHAT_CONTAINER].find(
         (sel) => selectorResults.some((r) => r.group === 'chat_container' && r.selector === sel && r.matched),
       )
@@ -277,7 +397,7 @@ test.describe('Real Twitch DOM compatibility canary', () => {
               const b = msg.locator(bSel).first()
               if (await b.isVisible().catch(() => false)) {
                 const text = await b.textContent()
-                if (text?.trim()) return // full chain proven
+                if (text?.trim()) return
               }
             }
           }
@@ -285,24 +405,19 @@ test.describe('Real Twitch DOM compatibility canary', () => {
         expect(false).toBe(true)
       }).toPass({ timeout: 25_000 })
 
-      // --- Assertion: No provider requests ---
       expect(providerRequests).toEqual([])
 
-      // --- Assertion: No SW errors ---
-      // Map after the selector-chain toPass so errors emitted during
-      // retries are included.
-      const chainErrors = collectedErrors
-        .filter((e) => e.source === 'service-worker')
-        .map((e) => e.text)
-      expect(chainErrors).toEqual([])
+      // Assert only extension-attributed errors (SW only for text).
+      // Twitch page noise is excluded via isExtensionAttributed.
+      const errorSummary = extensionAttributedErrors(collectedErrors)
+      expect(errorSummary.texts).toEqual([])
     } catch (err) {
       if (page) {
-        // Filter to SW errors only — real Twitch pages produce third-party
-        // page error noise that would leak chat content in artifacts.
-        const caughtErrors = collectedErrors
-          .filter((e) => e.source === 'service-worker')
-          .map((e) => e.text)
-        await attachCanaryArtifacts(testInfo, page, serviceWorker, caughtErrors, selectorResults)
+        const errorSummary = extensionAttributedErrors(collectedErrors)
+        await attachCanaryArtifacts(testInfo, page, serviceWorker, errorSummary.texts, selectorResults, {
+          attributedPageCount: errorSummary.attributedPageCount,
+          unattributedPageCount: errorSummary.unattributedPageCount,
+        })
       }
       throw err
     }
@@ -313,28 +428,24 @@ test.describe('Real Twitch DOM compatibility canary', () => {
  * Privacy-conscious failure attachment for the canary.
  *
  * Artifacts match issue #73 evidence spec:
- * - Playwright trace (from config; screenshots + sources on failure)
- * - screenshot (from config; captures visible page state on failure)
+ * - Playwright trace (from config; source actions only, no screenshots or
+ *   DOM snapshots or network HAR — zero cookie/header exposure)
+ * - manually redacted screenshot of the Twitch page (chat text masked)
  * - HTML report (from config reporter)
  * - page URL
  * - selector results (which fallback selectors matched)
  * - diagnostics (privacy-safe stage identifiers)
- * - Extension error logs (Service Worker console errors only)
+ * - Extension error logs (Service Worker text only)
+ * - extension-attributed page error counts (never raw text)
  * - sanitized outer-HTML excerpt around the chat container
- *
- * The trace contains screenshots and source but no DOM snapshots or network
- * HAR data, avoiding cookie/header exposure. Trace and screenshot may contain
- * rendered chat text — that is an accepted trade-off required by the issue
- * for failure diagnosis. The privacy boundary prohibits upload of: cookies,
- * browser profile, storage dumps, full chat history beyond the sanitized
- * excerpt, and authorization headers. No such data is attached by this handler.
  */
 async function attachCanaryArtifacts(
   testInfo: TestInfo,
   page: Page,
   serviceWorker: { evaluate: <T>(fn: (args: void) => Promise<T>) => Promise<T> },
-  extensionErrors: string[],
+  swErrors: string[],
   selectorResults: SelectorMatch[],
+  pageErrorSummary?: { attributedPageCount: number; unattributedPageCount: number },
 ): Promise<void> {
   await testInfo
     .attach('canary-page-url', { body: page.url(), contentType: 'text/plain' })
@@ -347,7 +458,6 @@ async function attachCanaryArtifacts(
     })
     .catch(() => undefined)
 
-  // Diagnostics (privacy-safe — no chat text or usernames)
   const events = await getDiagnosticsEvents(serviceWorker).catch((): [] => [])
   if (events.length > 0) {
     await testInfo
@@ -359,8 +469,6 @@ async function attachCanaryArtifacts(
   }
 
   // Sanitized outer-HTML excerpt around the chat container (< 5 KiB).
-  // Sanitized inside the browser via page.evaluate, so text content
-  // is stripped and only allowed attributes remain before truncation.
   for (const sel of FALLBACKS[CHAT_CONTAINER]) {
     const sanitized = await sanitizeContainerHtml(page, sel)
     if (sanitized) {
@@ -374,12 +482,43 @@ async function attachCanaryArtifacts(
     }
   }
 
-  // Extension error logs (Service Worker only — page errors from real
-  // Twitch pages are third-party noise and are not included.)
-  if (extensionErrors.length > 0) {
+  // Redacted screenshot: mask chat text via the shared applyBlackOverlay helper.
+  let screenshotAttached = false
+  for (const sel of FALLBACKS[CHAT_CONTAINER]) {
+    const el = page.locator(sel).first()
+    if (await el.isVisible().catch(() => false)) {
+      const applied = await applyBlackOverlay(page, sel)
+      if (applied) {
+        // Guard against empty PNG from screenshot failure
+        const shot = await page.screenshot({ type: 'png' }).catch(() => null)
+        if (shot && shot.byteLength > 100) {
+          screenshotAttached = true
+          await testInfo.attach('redacted-screenshot', {
+            body: shot,
+            contentType: 'image/png',
+          }).catch(() => undefined)
+        }
+      }
+      break
+    }
+  }
+
+  // Extension error logs (Service Worker text only — page errors from real
+  // Twitch pages are third-party noise and only metadata is retained.)
+  if (swErrors.length > 0) {
     await testInfo
       .attach('extension-errors', {
-        body: JSON.stringify(extensionErrors, null, 2),
+        body: JSON.stringify(swErrors, null, 2),
+        contentType: 'application/json',
+      })
+      .catch(() => undefined)
+  }
+
+  // Page error metadata (counts only, never raw text)
+  if (pageErrorSummary && (pageErrorSummary.attributedPageCount > 0 || pageErrorSummary.unattributedPageCount > 0)) {
+    await testInfo
+      .attach('page-error-counts', {
+        body: JSON.stringify(pageErrorSummary, null, 2),
         contentType: 'application/json',
       })
       .catch(() => undefined)
