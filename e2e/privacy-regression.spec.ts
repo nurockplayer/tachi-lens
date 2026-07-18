@@ -1,17 +1,12 @@
 /**
  * Deterministic privacy and diagnostic regression tests for the Extension.
  *
- * These tests verify the privacy-redaction, screenshot-masking, and error-attribution
- * helpers used by the real-Twitch canary. They run as part of the default E2E suite
- * so pull requests cannot silently break them.
- *
  * All helpers are imported from e2e/fixtures/canary-helpers.ts — the same code
  * used by twitch-canary.spec.ts failure artifacts.
  */
 import { expect } from '@playwright/test'
 import { test } from './fixtures/extension'
 import { sanitizeContainerHtml, applyBlackOverlay, extensionAttributedErrors } from './fixtures/canary-helpers'
-import type { OverlayResult } from './fixtures/canary-helpers'
 
 // --- Tests ---
 
@@ -46,7 +41,7 @@ test.describe('Privacy regression: sanitizer', () => {
 
 test.describe('Privacy regression: redacted screenshot overlay', () => {
 
-  test('masks one visible element — overlay bg, geometry, and data attr verified', async ({ context }) => {
+  test('masks visible on-screen element', async ({ context }) => {
     const page = await context.newPage()
     await page.setContent(`
       <div id="chat" style="position:fixed;top:10px;left:10px;width:300px;height:100px;background:white;">
@@ -63,13 +58,29 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
     expect(r.overlayLeft).toBe(r.targetRect.left)
     expect(r.overlayWidth).toBe(r.targetRect.width)
     expect(r.overlayHeight).toBe(r.targetRect.height)
-
-    // data attribute on the target exists
-    const attr = await page.evaluate(() => document.querySelector('#chat')?.getAttribute('data-tachi-overlay'))
-    expect(attr).toBe(r.targetAttr)
   })
 
-  test('masks two distinct containers — each verified for bg and geometry', async ({ context }) => {
+  test('skips element scrolled out of viewport', async ({ context }) => {
+    const page = await context.newPage()
+
+    // Set viewport to 800x600, place the element far below
+    await page.setViewportSize({ width: 800, height: 600 })
+    await page.setContent(`
+      <div id="offscreen" style="position:absolute;top:5000px;left:10px;width:100px;height:50px;background:white;">offscreen</div>
+      <div id="onscreen" style="position:fixed;top:10px;left:10px;width:100px;height:50px;background:white;">onscreen</div>
+    `)
+
+    const results = await applyBlackOverlay(page, '#offscreen, #onscreen')
+    expect(results.length).toBe(1) // only onscreen
+
+    const r = results[0]!
+    expect(r.overlayBg).toBe('rgb(0, 0, 0)')
+    // Verify it is the onscreen element
+    const onscreenAttr = await page.evaluate(() => document.querySelector('#onscreen')?.getAttribute('data-tachi-overlay'))
+    expect(onscreenAttr).toBe(r.targetAttr)
+  })
+
+  test('masks two distinct containers with unique attrs and black bg', async ({ context }) => {
     const page = await context.newPage()
     await page.setContent(`
       <div class="container-a" style="position:fixed;top:10px;left:10px;width:100px;height:50px;background:white;">text a</div>
@@ -81,23 +92,19 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
 
     for (const r of results) {
       expect(r.overlayBg).toBe('rgb(0, 0, 0)')
-      expect(r.targetAttr).toBeTruthy()
-      // Geometry should match the target
       expect(r.overlayTop).toBe(r.targetRect.top)
       expect(r.overlayLeft).toBe(r.targetRect.left)
       expect(r.overlayWidth).toBe(r.targetRect.width)
       expect(r.overlayHeight).toBe(r.targetRect.height)
     }
 
-    // Unique data attrs
     expect(results[0]!.targetAttr).not.toBe(results[1]!.targetAttr)
 
-    // Data attributes applied in the DOM
     for (const r of results) {
-      const el = await page.evaluate((attr) => {
+      const exists = await page.evaluate((attr) => {
         return document.querySelector('[data-tachi-overlay="' + attr + '"]') !== null
       }, r.targetAttr)
-      expect(el).toBe(true)
+      expect(exists).toBe(true)
     }
   })
 
@@ -106,20 +113,21 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
     await page.setContent(`
       <div id="visible" style="position:fixed;top:10px;left:10px;width:100px;height:50px;background:white;">visible</div>
       <div id="hidden" style="display:none;">hidden</div>
+      <div id="visibility-hidden" style="visibility:hidden;position:fixed;top:200px;left:10px;width:100px;height:50px;">vis-hidden</div>
     `)
 
-    const results = await applyBlackOverlay(page, '#visible, #hidden')
-    expect(results.length).toBe(1) // only the visible one
+    const results = await applyBlackOverlay(page, '#visible, #hidden, #visibility-hidden')
+    expect(results.length).toBe(1) // only #visible
     expect(results[0]!.overlayBg).toBe('rgb(0, 0, 0)')
 
     const attrCount = await page.evaluate(() => document.querySelectorAll('[data-tachi-overlay]').length)
-    expect(attrCount).toBe(1) // only one element marked
+    expect(attrCount).toBe(1)
   })
 })
 
 test.describe('Error attribution regression', () => {
 
-  test('deliberate SW console.error is positively attributed — verified via extensionAttributedErrors', async ({
+  test('deliberate SW console.error is positively attributed', async ({
     context,
     serviceWorker,
     extensionId,
@@ -145,7 +153,7 @@ test.describe('Error attribution regression', () => {
     }).catch(() => undefined)
   })
 
-  test('deliberate page console.error is unattributed — verified via extensionAttributedErrors', async ({
+  test('deliberate page console.error is unattributed', async ({
     context,
     serviceWorker,
     collectedErrors,

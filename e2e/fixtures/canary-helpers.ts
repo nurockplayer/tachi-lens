@@ -42,7 +42,9 @@ export async function sanitizeContainerHtml(page: Page, containerSel: string): P
 }
 
 /**
- * Apply a black overlay over every visible non-zero element matching a selector.
+ * Apply a black overlay over every visible on-screen element matching a selector.
+ * Skips: hidden, zero-sized, visibility-hidden, display-none, and elements
+ * entirely outside the viewport (top+height ≤ 0 or left+width ≤ 0).
  * Returns per-element results including computed background, geometry, and
  * the unique data attribute assigned to each target.
  */
@@ -53,9 +55,17 @@ export async function applyBlackOverlay(page: Page, containerSel: string): Promi
     for (let i = 0; i < targets.length; i++) {
       const el = targets[i] as HTMLElement
       const rect = el.getBoundingClientRect()
+
+      // Skip hidden, zero-sized, visibility-hidden, display-none
       if (rect.width === 0 || rect.height === 0) continue
       const cs = window.getComputedStyle(el)
       if (cs.visibility === 'hidden' || cs.display === 'none') continue
+
+      // Skip elements entirely outside the viewport
+      const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0)
+      const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0)
+      if (rect.top + rect.height <= 0 || rect.left + rect.width <= 0) continue
+      if (rect.top >= vh || rect.left >= vw) continue
 
       const uid = 'tachi-overlay-' + i + '-' + Date.now()
       el.setAttribute('data-tachi-overlay', uid)
