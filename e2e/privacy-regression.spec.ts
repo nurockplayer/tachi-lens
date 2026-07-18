@@ -11,6 +11,7 @@
 import { expect } from '@playwright/test'
 import { test } from './fixtures/extension'
 import { sanitizeContainerHtml, applyBlackOverlay, extensionAttributedErrors } from './fixtures/canary-helpers'
+import type { OverlayResult } from './fixtures/canary-helpers'
 
 // --- Tests ---
 
@@ -45,7 +46,7 @@ test.describe('Privacy regression: sanitizer', () => {
 
 test.describe('Privacy regression: redacted screenshot overlay', () => {
 
-  test('masks one visible element via applyBlackOverlay', async ({ context }) => {
+  test('masks one visible element — overlay bg, geometry, and data attr verified', async ({ context }) => {
     const page = await context.newPage()
     await page.setContent(`
       <div id="chat" style="position:fixed;top:10px;left:10px;width:300px;height:100px;background:white;">
@@ -53,41 +54,51 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
       </div>
     `)
 
-    const masked = await applyBlackOverlay(page, '#chat')
-    expect(masked).toBe(1)
+    const results = await applyBlackOverlay(page, '#chat')
+    expect(results.length).toBe(1)
 
-    const ss = await page.screenshot({ type: 'png' })
-    expect(ss.byteLength).toBeGreaterThan(500)
+    const r = results[0]!
+    expect(r.overlayBg).toBe('rgb(0, 0, 0)')
+    expect(r.overlayTop).toBe(r.targetRect.top)
+    expect(r.overlayLeft).toBe(r.targetRect.left)
+    expect(r.overlayWidth).toBe(r.targetRect.width)
+    expect(r.overlayHeight).toBe(r.targetRect.height)
+
+    // data attribute on the target exists
+    const attr = await page.evaluate(() => document.querySelector('#chat')?.getAttribute('data-tachi-overlay'))
+    expect(attr).toBe(r.targetAttr)
   })
 
-  test('masks two distinct containers matched by different selectors', async ({ context }) => {
+  test('masks two distinct containers — each verified for bg and geometry', async ({ context }) => {
     const page = await context.newPage()
     await page.setContent(`
       <div class="container-a" style="position:fixed;top:10px;left:10px;width:100px;height:50px;background:white;">text a</div>
       <div class="container-b" style="position:fixed;top:80px;left:10px;width:100px;height:50px;background:white;">text b</div>
     `)
 
-    const masked = await applyBlackOverlay(page, '.container-a, .container-b')
-    expect(masked).toBe(2)
+    const results = await applyBlackOverlay(page, '.container-a, .container-b')
+    expect(results.length).toBe(2)
 
-    // Each target should have a unique data-tachi-overlay attribute
-    const dataAttrs: string[] = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('[data-tachi-overlay]')).map(el => el.getAttribute('data-tachi-overlay') || '')
-    })
-    expect(dataAttrs.length).toBe(2)
-    expect(dataAttrs[0]).not.toBe(dataAttrs[1])
+    for (const r of results) {
+      expect(r.overlayBg).toBe('rgb(0, 0, 0)')
+      expect(r.targetAttr).toBeTruthy()
+      // Geometry should match the target
+      expect(r.overlayTop).toBe(r.targetRect.top)
+      expect(r.overlayLeft).toBe(r.targetRect.left)
+      expect(r.overlayWidth).toBe(r.targetRect.width)
+      expect(r.overlayHeight).toBe(r.targetRect.height)
+    }
 
-    // Count overlay divs — the style is set as inline CSS via style.cssText
-    const overlayCount = await page.evaluate(() => {
-      const divs = document.querySelectorAll('div')
-      let n = 0
-      for (const d of divs) {
-        // The overlay has pointer-events:none and z-index:999999
-        if (d.style?.zIndex === '999999' && d.style?.pointerEvents === 'none') n++
-      }
-      return n
-    })
-    expect(overlayCount).toBe(2)
+    // Unique data attrs
+    expect(results[0]!.targetAttr).not.toBe(results[1]!.targetAttr)
+
+    // Data attributes applied in the DOM
+    for (const r of results) {
+      const el = await page.evaluate((attr) => {
+        return document.querySelector('[data-tachi-overlay="' + attr + '"]') !== null
+      }, r.targetAttr)
+      expect(el).toBe(true)
+    }
   })
 
   test('skips hidden elements', async ({ context }) => {
@@ -97,8 +108,9 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
       <div id="hidden" style="display:none;">hidden</div>
     `)
 
-    const masked = await applyBlackOverlay(page, '#visible, #hidden')
-    expect(masked).toBe(1) // only the visible one
+    const results = await applyBlackOverlay(page, '#visible, #hidden')
+    expect(results.length).toBe(1) // only the visible one
+    expect(results[0]!.overlayBg).toBe('rgb(0, 0, 0)')
 
     const attrCount = await page.evaluate(() => document.querySelectorAll('[data-tachi-overlay]').length)
     expect(attrCount).toBe(1) // only one element marked

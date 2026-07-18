@@ -351,8 +351,8 @@ async function attachCanaryArtifacts(
   // Redacted screenshot: mask chat via applyBlackOverlay on container
   // selectors. Only attempt if the page is still open.
   if (page && !page.isClosed()) {
-    const maskedCount = await applyBlackOverlay(page, FALLBACKS[CHAT_CONTAINER].join(',')).catch(() => 0)
-    if (maskedCount > 0) {
+    const results = await applyBlackOverlay(page, FALLBACKS[CHAT_CONTAINER].join(',')).catch((): import('./fixtures/canary-helpers').OverlayResult[] => [])
+    if (results.length > 0) {
       const shot = await page.screenshot({ type: 'png' }).catch(() => null)
       if (shot && shot.byteLength > 100) {
         await testInfo.attach('redacted-screenshot', {
@@ -363,10 +363,13 @@ async function attachCanaryArtifacts(
     }
   }
 
+  // Extension error logs (Service Worker text only — redacted to
+  // 120 chars per entry, never uploaded raw.)
   if (swErrors.length > 0) {
+    const redacted = swErrors.map((s) => s.length > 120 ? s.substring(0, 120) + '…' : s)
     await testInfo
       .attach('extension-errors', {
-        body: JSON.stringify(swErrors, null, 2),
+        body: JSON.stringify(redacted, null, 2),
         contentType: 'application/json',
       })
       .catch(() => undefined)
