@@ -45,7 +45,7 @@ test.describe('Privacy regression: sanitizer', () => {
 
 test.describe('Privacy regression: redacted screenshot overlay', () => {
 
-  test('is positively applied and composited via applyBlackOverlay', async ({ context }) => {
+  test('masks one visible element via applyBlackOverlay', async ({ context }) => {
     const page = await context.newPage()
     await page.setContent(`
       <div id="chat" style="position:fixed;top:10px;left:10px;width:300px;height:100px;background:white;">
@@ -53,8 +53,8 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
       </div>
     `)
 
-    const applied = await applyBlackOverlay(page, '#chat')
-    expect(applied).toBe(true)
+    const masked = await applyBlackOverlay(page, '#chat')
+    expect(masked).toBe(1)
 
     const ss = await page.screenshot({ type: 'png' })
     expect(ss.byteLength).toBeGreaterThan(500)
@@ -67,32 +67,41 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
       <div class="container-b" style="position:fixed;top:80px;left:10px;width:100px;height:50px;background:white;">text b</div>
     `)
 
-    // Simulate the production logic: iterate fallbacks, set unique data attributes
-    const results = await page.evaluate(() => {
-      const selectors = ['.container-a', '.container-b']
-      const uids: string[] = []
-      for (const sel of selectors) {
-        const els = document.querySelectorAll(sel)
-        for (let i = 0; i < els.length; i++) {
-          const el = els[i] as HTMLElement
-          const uid = 'multi-mask-' + uids.length
-          el.setAttribute('data-multi-mask', uid)
-          const overlay = document.createElement('div')
-          overlay.style.cssText = 'position:fixed;top:' + el.offsetTop + 'px;left:' + el.offsetLeft + 'px;width:' + el.offsetWidth + 'px;height:' + el.offsetHeight + 'px;background:black;z-index:999999;pointer-events:none;'
-          document.body.appendChild(overlay)
-          uids.push(uid)
-        }
-      }
-      return uids
+    const masked = await applyBlackOverlay(page, '.container-a, .container-b')
+    expect(masked).toBe(2)
+
+    // Each target should have a unique data-tachi-overlay attribute
+    const dataAttrs: string[] = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('[data-tachi-overlay]')).map(el => el.getAttribute('data-tachi-overlay') || '')
     })
+    expect(dataAttrs.length).toBe(2)
+    expect(dataAttrs[0]).not.toBe(dataAttrs[1])
 
-    expect(results).toEqual(['multi-mask-0', 'multi-mask-1'])
+    // Count overlay divs — the style is set as inline CSS via style.cssText
+    const overlayCount = await page.evaluate(() => {
+      const divs = document.querySelectorAll('div')
+      let n = 0
+      for (const d of divs) {
+        // The overlay has pointer-events:none and z-index:999999
+        if (d.style?.zIndex === '999999' && d.style?.pointerEvents === 'none') n++
+      }
+      return n
+    })
+    expect(overlayCount).toBe(2)
+  })
 
-    // Verify each masked container's overlay via the background of the overlay
-    for (const uid of results) {
-      const overlay = page.locator('[data-multi-mask="' + uid + '"] + div')
-      expect(overlay).not.toBeNull()
-    }
+  test('skips hidden elements', async ({ context }) => {
+    const page = await context.newPage()
+    await page.setContent(`
+      <div id="visible" style="position:fixed;top:10px;left:10px;width:100px;height:50px;background:white;">visible</div>
+      <div id="hidden" style="display:none;">hidden</div>
+    `)
+
+    const masked = await applyBlackOverlay(page, '#visible, #hidden')
+    expect(masked).toBe(1) // only the visible one
+
+    const attrCount = await page.evaluate(() => document.querySelectorAll('[data-tachi-overlay]').length)
+    expect(attrCount).toBe(1) // only one element marked
   })
 })
 
@@ -110,7 +119,6 @@ test.describe('Error attribution regression', () => {
     await serviceWorker.evaluate(() => {
       console.error('[tachi-lens-test] deliberate SW error for attribution verification')
     })
-    // Use a runtime.onMessage event for explicit wait instead of fixed sleep
     await expect(async () => {
       const { texts } = extensionAttributedErrors(collectedErrors)
       expect(texts.some((t) => t.includes('tachi-lens-test'))).toBe(true)
@@ -118,15 +126,9 @@ test.describe('Error attribution regression', () => {
 
     const { texts, unattributedPageCount, attributedPageCount } = extensionAttributedErrors(collectedErrors)
     expect(texts.some((t) => t.includes('tachi-lens-test'))).toBe(true)
-    // unattributedPageCount should be 0 since page has no errors
-    // attributedPageCount should be 0 since page has no extension-origin errors
 
     await testInfo.attach('sw-attribution-test', {
-      body: JSON.stringify({
-        texts,
-        unattributedPageCount,
-        attributedPageCount,
-      }, null, 2),
+      body: JSON.stringify({ texts, unattributedPageCount, attributedPageCount }, null, 2),
       contentType: 'application/json',
     }).catch(() => undefined)
   })
@@ -141,7 +143,6 @@ test.describe('Error attribution regression', () => {
     const page = await context.newPage()
     await page.goto('about:blank')
 
-    // Generate a deterministic page-origin error with a unique, retained tag
     const tag = 'tachi-lens-test-page-' + Date.now()
     await page.evaluate((t) => {
       const s = document.createElement('script')
@@ -149,34 +150,23 @@ test.describe('Error attribution regression', () => {
       document.head.appendChild(s)
     }, tag)
 
-    // Use expect.toPass to wait for the tagged error to appear in collected errors
     await expect(async () => {
       const tagged = collectedErrors.filter(
         (e) => e.source === 'page' && e.text.includes(tag),
       )
       expect(tagged.length).toBeGreaterThan(0)
-      // Every tagged error must be unattributed
       for (const e of tagged) {
         expect(e.isExtensionAttributed).toBe(false)
       }
     }).toPass({ timeout: 5_000 })
 
-    // Now verify through extensionAttributedErrors
     const { texts, unattributedPageCount, attributedPageCount } = extensionAttributedErrors(collectedErrors)
-    // texts is SW-only, must not contain the tag
     expect(texts.some((t) => t.includes(tag))).toBe(false)
-    // unattributedPageCount must be > 0 (the deliberate error plus any ambient page errors)
     expect(unattributedPageCount).toBeGreaterThan(0)
-    // attributedPageCount must be 0 — no extension-origin page errors
     expect(attributedPageCount).toBe(0)
 
     await testInfo.attach('page-attribution-test', {
-      body: JSON.stringify({
-        tag,
-        texts,
-        unattributedPageCount,
-        attributedPageCount,
-      }, null, 2),
+      body: JSON.stringify({ tag, texts, unattributedPageCount, attributedPageCount }, null, 2),
       contentType: 'application/json',
     }).catch(() => undefined)
   })

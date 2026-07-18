@@ -280,7 +280,7 @@ test.describe('Real Twitch DOM compatibility canary', () => {
       expect(errorSummary.texts).toEqual([])
       expect(errorSummary.attributedPageCount).toBe(0)
     } catch (err) {
-      if (page) {
+      if (page && !page.isClosed()) {
         const errorSummary = extensionAttributedErrors(collectedErrors)
         await attachCanaryArtifacts(testInfo, page, serviceWorker, errorSummary.texts, selectorResults, {
           attributedPageCount: errorSummary.attributedPageCount,
@@ -348,37 +348,18 @@ async function attachCanaryArtifacts(
     }
   }
 
-  // Redacted screenshot: mask chat via applyBlackOverlay on every visible
-  // non-zero container instance. Each container gets a globally unique mask ID
-  // (across both fallback selectors) to avoid collisions with querySelector.
-  let anyMasked = false
-  let globalMaskId = 0
-  for (const sel of FALLBACKS[CHAT_CONTAINER]) {
-    const containerCount = await page.locator(sel).count()
-    for (let ci = 0; ci < containerCount; ci++) {
-      const container = page.locator(sel).nth(ci)
-      if (!(await container.isVisible().catch(() => false))) continue
-      const rect = await container.evaluate((el) => {
-        const r = el.getBoundingClientRect()
-        return { w: r.width, h: r.height }
-      }).catch(() => ({ w: 0, h: 0 }))
-      if (rect.w === 0 || rect.h === 0) continue
-      // Use a globally unique data attribute so querySelector targets exactly
-      // this container even when multiple containers use different fallbacks.
-      const uid = 'tachi-mask-' + (globalMaskId++)
-      await container.evaluate((el, id) => { el.setAttribute('data-tachi-mask', id) }, uid)
-      const applied = await applyBlackOverlay(page, '[data-tachi-mask="' + uid + '"]')
-      if (applied) anyMasked = true
-    }
-  }
-
-  if (anyMasked) {
-    const shot = await page.screenshot({ type: 'png' }).catch(() => null)
-    if (shot && shot.byteLength > 100) {
-      await testInfo.attach('redacted-screenshot', {
-        body: shot,
-        contentType: 'image/png',
-      }).catch(() => undefined)
+  // Redacted screenshot: mask chat via applyBlackOverlay on container
+  // selectors. Only attempt if the page is still open.
+  if (page && !page.isClosed()) {
+    const maskedCount = await applyBlackOverlay(page, FALLBACKS[CHAT_CONTAINER].join(',')).catch(() => 0)
+    if (maskedCount > 0) {
+      const shot = await page.screenshot({ type: 'png' }).catch(() => null)
+      if (shot && shot.byteLength > 100) {
+        await testInfo.attach('redacted-screenshot', {
+          body: shot,
+          contentType: 'image/png',
+        }).catch(() => undefined)
+      }
     }
   }
 

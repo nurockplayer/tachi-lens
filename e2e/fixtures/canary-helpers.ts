@@ -35,18 +35,34 @@ export async function sanitizeContainerHtml(page: Page, containerSel: string): P
   }).catch(() => null)
 }
 
-/** Apply a black overlay over an element, inside the browser page context.
- * Returns getComputedStyle confirmation. */
-export async function applyBlackOverlay(page: Page, containerSel: string): Promise<boolean> {
-  return page.evaluate((s) => {
-    const container = document.querySelector(s)
-    if (!container) return false
-    const rect = container.getBoundingClientRect()
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;background:black;z-index:999999;pointer-events:none;'
-    document.body.appendChild(overlay)
-    const cs = window.getComputedStyle(overlay)
-    return cs.backgroundColor === 'rgb(0, 0, 0)' && cs.position === 'fixed' && cs.zIndex === '999999'
+/**
+ * Apply a black overlay over every visible non-zero element matching a selector.
+ * Skips hidden and zero-sized elements. Assigns collision-safe unique data
+ * attributes to each target. Returns the number of elements successfully masked
+ * (0 = nothing was masked).
+ */
+export async function applyBlackOverlay(page: Page, containerSel: string): Promise<number> {
+  return page.evaluate((sel) => {
+    const targets = document.querySelectorAll(sel)
+    let maskedCount = 0
+    for (let i = 0; i < targets.length; i++) {
+      const el = targets[i] as HTMLElement
+      // Skip hidden / zero-sized / visibility-hidden elements
+      const rect = el.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) continue
+      const cs = window.getComputedStyle(el)
+      if (cs.visibility === 'hidden' || cs.display === 'none') continue
+
+      // Assign a unique marker on the target (reuse existing or create new)
+      const uid = 'tachi-overlay-' + i + '-' + Date.now()
+      el.setAttribute('data-tachi-overlay', uid)
+
+      const overlay = document.createElement('div')
+      overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;background:black;z-index:999999;pointer-events:none;'
+      document.body.appendChild(overlay)
+      maskedCount++
+    }
+    return maskedCount
   }, containerSel)
 }
 
