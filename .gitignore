@@ -6,4 +6,3 @@ dist
 /playwright-report/
 /browsers/
 .pnpm-store/
-.omc/
