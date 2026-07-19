@@ -1,0 +1,57 @@
+name: Bug / Fix
+description: Report a bug or propose a fix with maintenance justification
+labels:
+  - bug
+body:
+  - type: textarea
+    id: maintenance-justification
+    attributes:
+      label: Maintenance justification
+      description: "**Required** — cite at least one reason this fix is justified."
+      value: |
+        - [ ] Breaks core translation behavior
+        - [ ] Causes recurring API or operational cost
+        - [ ] Creates severe reliability, performance, or user-abandonment risk
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What is the problem?
+    validations:
+      required: true
+  - type: textarea
+    id: smallest-fix
+    attributes:
+      label: Smallest production-safe fix
+      description: Describe the minimum change that resolves the issue without breaking working behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: What is explicitly out of scope? Delete examples that do not apply.
+      value: |
+        - Refactoring unrelated code
+        - Speculative abstractions
+        - UI polish or cleanup for aesthetics alone
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this issue to be complete?
+      placeholder: |
+        1.
+    validations:
+      required: true
+  - type: textarea
+    id: validation-steps
+    attributes:
+      label: Validation steps
+      description: How will we verify the fix works?
+      placeholder: |
+        1.
+    validations:
+      required: true
