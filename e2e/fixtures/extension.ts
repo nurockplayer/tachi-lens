@@ -10,9 +10,12 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..')
 const DIST_DIR = path.join(PROJECT_ROOT, 'dist')
 
 export interface ExtensionError {
+  /** 'service-worker' for SW console errors, 'page' for page console/pageerror. */
   source: 'service-worker' | 'page'
   type: string
   text: string
+  /** Whether this error is attributed to the tachi-lens Extension. */
+  isExtensionAttributed?: boolean
 }
 
 const contextErrors = new WeakMap<BrowserContext, ExtensionError[]>()
@@ -48,10 +51,15 @@ export const test = base.extend<{
       const errors: ExtensionError[] = []
       contextErrors.set(context, errors)
 
+      // Service Worker errors — filtered to the extension's own worker by URL.
+      let extensionSwUrl: string | null = null
+      const sw = context.serviceWorkers()[0]
+      if (sw?.url().match(/^chrome-extension:\/\//)) extensionSwUrl = sw.url()
       const attachSwConsole = (worker: Worker): void => {
+        const isExtensionWorker = extensionSwUrl !== null && worker.url() === extensionSwUrl
         worker.on('console', (msg) => {
           if (msg.type() === 'error') {
-            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text() })
+            errors.push({ source: 'service-worker', type: msg.type(), text: msg.text(), isExtensionAttributed: isExtensionWorker })
           }
         })
       }
@@ -59,16 +67,30 @@ export const test = base.extend<{
         attachSwConsole(sw)
       }
       context.on('serviceworker', (sw) => {
+        // Update extension SW URL on new worker registration
+        if (sw.url().match(/^chrome-extension:\/\//)) extensionSwUrl = sw.url()
         attachSwConsole(sw)
       })
 
+      // Page errors — attributed by checking if the error originates from
+      // the extension's chrome-extension://<id> origin.
       context.on('page', (page) => {
+        // Derive extensionId from the first SW URL
+        const sw = context.serviceWorkers()[0]
+        const extMatch = sw?.url().match(/^chrome-extension:\/\/([a-z]{32})\//)
+        const extOrigin = extMatch ? `chrome-extension://${extMatch[1]}` : null
+
         page.on('pageerror', (err) => {
-          errors.push({ source: 'page', type: 'pageerror', text: err.message })
+          const stack = err.stack || ''
+          const isExtAttributed = extOrigin !== null && stack.includes(extOrigin)
+          errors.push({ source: 'page', type: 'pageerror', text: err.message, isExtensionAttributed: isExtAttributed })
         })
         page.on('console', (msg) => {
           if (msg.type() === 'error') {
-            errors.push({ source: 'page', type: msg.type(), text: msg.text() })
+            const loc = msg.location()
+            const sourceUrl = loc?.url || ''
+            const isExtAttributed = extOrigin !== null && sourceUrl.startsWith(extOrigin)
+            errors.push({ source: 'page', type: msg.type(), text: msg.text(), isExtensionAttributed: isExtAttributed })
           }
         })
       })

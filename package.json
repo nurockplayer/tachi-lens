@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build && node scripts/check-popup.mjs",
     "test": "vitest run",
     "test:e2e": "pnpm build && playwright test",
+    "test:e2e:canary": "pnpm build && playwright test --config=playwright.canary.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"

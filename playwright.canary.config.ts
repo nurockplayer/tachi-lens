@@ -2,18 +2,21 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: '**/twitch-canary.spec.ts',
+  testMatch: '**/twitch-canary.spec.ts',
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
-  timeout: 30_000,
+  retries: 0,
+  timeout: 120_000,
   projects: [
     {
       name: 'chromium',
       use: {
         channel: 'chromium',
-        trace: 'retain-on-failure',
-        screenshot: 'only-on-failure',
-        video: 'retain-on-failure',
+        trace: {
+          mode: 'retain-on-failure' as const,
+          screenshots: false,
+          snapshots: false,
+          sources: true,
+        },
       },
     },
   ],
