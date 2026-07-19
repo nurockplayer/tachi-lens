@@ -21,6 +21,7 @@ export interface ScriptEvidence {
   hasSimplifiedOnly: boolean
   hasTraditionalOnly: boolean
   hasSharedHan: boolean
+  hasUnknownHan: boolean
   hasJapaneseKana: boolean
   hasHangul: boolean
   hasLatinLetter: boolean
@@ -44,6 +45,33 @@ const TRADITIONAL_ONLY =
 
 const SIMPLIFIED_SET = new Set(SIMPLIFIED_ONLY)
 const TRADITIONAL_SET = new Set(TRADITIONAL_ONLY)
+
+/**
+ * Characters genuinely shared between Simplified and Traditional Chinese.
+ *
+ * These have the same glyph in both scripts and are common enough that
+ * their presence alone does not indicate a specific script. Inclusion is
+ * conservative — only characters that are known to be identical in both
+ * scripts and that help resolve ambiguous shared-only text.
+ *
+ * Characters absent from all three tables (SIMPLIFIED_ONLY, TRADITIONAL_ONLY,
+ * KNOWN_SHARED) are classified as "unknown Han" and favor translation.
+ */
+const KNOWN_SHARED =
+  '的人大上山水中小日月天手工生心力口王白石田目足' +
+  '土火木水火土金木' +
+  '文子父女母子母' +
+  '今明早星空原海名林花音然思安心気自' +
+  '先前后左右南北东西里内外上下' +
+  '千百万元角分' +
+  '我你他她它们' +
+  '不也而已何其如之' +
+  '能可要以会用' +
+  '好高正新老' +
+  '很真' +
+  '雨'
+
+const KNOWN_SHARED_SET = new Set(KNOWN_SHARED)
 
 // ─── Unicode ranges (BMP only) ───────────────────────────────────────────────
 
@@ -121,6 +149,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let hasSimplifiedOnly = false
   let hasTraditionalOnly = false
   let hasSharedHan = false
+  let hasUnknownHan = false
   let hasJapaneseKana = false
   let hasHangul = false
   let hasLatinLetter = false
@@ -144,8 +173,10 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
         hasSimplifiedOnly = true
       } else if (TRADITIONAL_SET.has(char)) {
         hasTraditionalOnly = true
-      } else {
+      } else if (KNOWN_SHARED_SET.has(char)) {
         hasSharedHan = true
+      } else {
+        hasUnknownHan = true
       }
       continue
     }
@@ -160,6 +191,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     hasSimplifiedOnly,
     hasTraditionalOnly,
     hasSharedHan,
+    hasUnknownHan,
     hasJapaneseKana,
     hasHangul,
     hasLatinLetter,
@@ -226,7 +258,10 @@ export function shouldSkipMessage(
     if (evidence.hasTraditionalOnly) {
       return false
     }
-    // Only shared characters → skip (confidently Chinese, ambiguous script)
+    // Only shared or unknown characters:
+    // Unknown Han could be unlisted S/T or Japanese Kanji → favor translation.
+    if (evidence.hasUnknownHan) return false
+    // Only known-shared characters → skip (confidently Chinese, ambiguous script)
     return true
   }
 
@@ -237,6 +272,9 @@ export function shouldSkipMessage(
   if (evidence.hasSimplifiedOnly) {
     return false
   }
-  // Only shared characters → skip
+  // Only shared or unknown characters:
+  // Unknown Han could be unlisted S/T or Japanese Kanji → favor translation.
+  if (evidence.hasUnknownHan) return false
+  // Only known-shared characters → skip
   return true
 }

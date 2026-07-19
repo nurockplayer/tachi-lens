@@ -362,17 +362,25 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
   })
 
   // Shared-Han Shinjitai-overlap examples in translate_other_script mode
-  // These are now shared-only after Shinjitai removal, so they hit the
-  // same shared-Han → skip path as 今天很好 (per-spec for specific targets).
-  it('skips Kanji-only Japanese 中国 for zh-TW in translate_other_script (shared-Han path)', () => {
-    expect(shouldSkipMessage('中国', 'zh-TW', 'translate_other_script')).toBe(true)
+  // After Shinjitai removal, these are unknown/unlisted Han → must translate
+  it('processes Kanji-only Japanese 中国 for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('中国', 'zh-TW', 'translate_other_script')).toBe(false)
   })
 
-  it('skips Kanji-only Japanese 会社 for zh-TW in translate_other_script (shared-Han path)', () => {
-    expect(shouldSkipMessage('会社', 'zh-TW', 'translate_other_script')).toBe(true)
+  it('processes Kanji-only Japanese 会社 for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('会社', 'zh-TW', 'translate_other_script')).toBe(false)
   })
 
-  it('skips Kanji-only Japanese 体調 for zh-TW in translate_other_script (shared-Han path)', () => {
-    expect(shouldSkipMessage('体調', 'zh-TW', 'translate_other_script')).toBe(true)
+  it('processes Kanji-only Japanese 体調 for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('体調', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  // Unlisted Han must remain translatable in translate_other_script mode
+  it('does not skip 学校 for zh-TW in translate_other_script (学 not in curated table)', () => {
+    expect(shouldSkipMessage('学校', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip 网络 for zh-TW in translate_other_script (网/络 not in curated table)', () => {
+    expect(shouldSkipMessage('网络', 'zh-TW', 'translate_other_script')).toBe(false)
   })
 })
