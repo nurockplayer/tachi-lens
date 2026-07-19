@@ -95,7 +95,7 @@ describe('classifyChineseScriptTarget', () => {
 
 describe('analyzeMessageScript', () => {
   it('detects simplified-only characters', () => {
-    const result = analyzeMessageScript('体国长东马')
+    const result = analyzeMessageScript('长东马车门开')
     expect(result.hasHan).toBe(true)
     expect(result.hasSimplifiedOnly).toBe(true)
     expect(result.hasTraditionalOnly).toBe(false)
@@ -125,7 +125,7 @@ describe('analyzeMessageScript', () => {
   })
 
   it('detects mixed simplified and traditional evidence', () => {
-    const result = analyzeMessageScript('体國')
+    const result = analyzeMessageScript('长東')
     expect(result.hasHan).toBe(true)
     expect(result.hasSimplifiedOnly).toBe(true)
     expect(result.hasTraditionalOnly).toBe(true)
@@ -228,7 +228,7 @@ describe('analyzeMessageScript', () => {
 
 describe('shouldSkipMessage — skip_all_chinese mode', () => {
   it('skips simplified Chinese for zh-TW target', () => {
-    expect(shouldSkipMessage('体国长东马', 'zh-TW', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('长东马车门开', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
   it('skips traditional Chinese for zh-CN target', () => {
@@ -236,7 +236,20 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
   })
 
   it('skips Chinese for generic zh target', () => {
-    expect(shouldSkipMessage('体国长东马', 'zh', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('长东马车门开', 'zh', 'skip_all_chinese')).toBe(true)
+  })
+
+  // Kanji-only Japanese must not be skipped as Chinese (Shinjitai overlap)
+  it('does not skip Kanji-only Japanese text 中国', () => {
+    expect(shouldSkipMessage('中国', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese text 会社', () => {
+    expect(shouldSkipMessage('会社', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese text 体調', () => {
+    expect(shouldSkipMessage('体調', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
   it('does not skip shared-only Han (could be Kanji-only Japanese)', () => {
@@ -286,7 +299,7 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
     })
 
     it('processes text with mixed simplified and traditional evidence', () => {
-      expect(shouldSkipMessage('体國', 'zh-TW', 'translate_other_script')).toBe(false)
+      expect(shouldSkipMessage('长國', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
     it('skips text with only shared Han characters (#46: 今天很好 → skip)', () => {
@@ -318,7 +331,7 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
     })
 
     it('processes text with mixed evidence', () => {
-      expect(shouldSkipMessage('体國', 'zh-CN', 'translate_other_script')).toBe(false)
+      expect(shouldSkipMessage('长國', 'zh-CN', 'translate_other_script')).toBe(false)
     })
 
     it('skips text with only shared Han characters', () => {
@@ -346,5 +359,20 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
 
   it('does not skip mixed Latin and Han text (#46: hello 大家好)', () => {
     expect(shouldSkipMessage('hello 大家好', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  // Shared-Han Shinjitai-overlap examples in translate_other_script mode
+  // These are now shared-only after Shinjitai removal, so they hit the
+  // same shared-Han → skip path as 今天很好 (per-spec for specific targets).
+  it('skips Kanji-only Japanese 中国 for zh-TW in translate_other_script (shared-Han path)', () => {
+    expect(shouldSkipMessage('中国', 'zh-TW', 'translate_other_script')).toBe(true)
+  })
+
+  it('skips Kanji-only Japanese 会社 for zh-TW in translate_other_script (shared-Han path)', () => {
+    expect(shouldSkipMessage('会社', 'zh-TW', 'translate_other_script')).toBe(true)
+  })
+
+  it('skips Kanji-only Japanese 体調 for zh-TW in translate_other_script (shared-Han path)', () => {
+    expect(shouldSkipMessage('体調', 'zh-TW', 'translate_other_script')).toBe(true)
   })
 })

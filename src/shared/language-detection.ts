@@ -30,10 +30,10 @@ export interface ScriptEvidence {
 
 /** Characters exclusive to Simplified Chinese. */
 const SIMPLIFIED_ONLY =
-  '体国长东马车门开关见贝风飞发电对时来乐个为书说话认识过还' +
-  '这会当们几处么两让儿习头买卖红级纪经给组织纸线练张' +
-  '将奖医义农动区华协单双号罗备宝报边变参层产场陈础触传' +
-  '达带导点独断夺队吨热'
+  '长东马车门开关见贝风飞发电对时乐个为书说话认识过还' +
+  '这们几处么两让儿习头买卖红级纪经给组织纸线练张' +
+  '奖义农动华协单罗备宝报边变参层产场陈础触传' +
+  '达带导夺队吨热'
 
 /** Characters exclusive to Traditional Chinese. */
 const TRADITIONAL_ONLY =
