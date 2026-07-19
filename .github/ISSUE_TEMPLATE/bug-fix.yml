@@ -3,15 +3,17 @@ description: Report a bug or propose a fix with maintenance justification
 labels:
   - bug
 body:
-  - type: textarea
+  - type: dropdown
     id: maintenance-justification
     attributes:
       label: Maintenance justification
-      description: "**Required** — cite at least one reason this fix is justified."
-      value: |
-        - [ ] Breaks core translation behavior
-        - [ ] Causes recurring API or operational cost
-        - [ ] Creates severe reliability, performance, or user-abandonment risk
+      description: Select at least one reason this fix is justified.
+      multiple: true
+      options:
+        - Breaks core functionality
+        - Causes recurring API or operational cost
+        - Creates severe reliability or performance problems
+        - Is likely to make users abandon the extension
     validations:
       required: true
   - type: textarea
@@ -37,6 +39,8 @@ body:
         - Refactoring unrelated code
         - Speculative abstractions
         - UI polish or cleanup for aesthetics alone
+    validations:
+      required: true
   - type: textarea
     id: acceptance-criteria
     attributes:
