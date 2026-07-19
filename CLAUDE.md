@@ -41,6 +41,17 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 - React 只用於 Popup；Content Script 保持原生 TypeScript/DOM。
 - 不提交 `dist/`、`.omc` session/state noise、release zip 或其他 generated artifact。
 
+## Maintenance policy
+
+- Prefer the smallest production-safe fix over architectural completeness.
+- Work is justified only when it: (a) breaks core translation behavior, (b) causes recurring API/operational cost, or (c) creates severe reliability, performance, or user-abandonment risk.
+- Do not refactor unrelated code, add speculative abstractions, or clean up for aesthetics alone.
+- Add only the minimum regression coverage needed to prove the fix.
+- Preserve working behavior outside the explicit acceptance criteria.
+- Record non-blocking cleanup, UI polish, architecture improvements, and broader edge cases as deferred technical debt.
+- Stop once acceptance criteria and validation pass.
+- Use `arbiter` only for clearly scoped, high-difficulty decisions the default model cannot resolve reliably.
+
 ## Scope and Git policy
 
 - GitHub Issue 是 implementation source of truth；每個 PR 聚焦一個明確問題，額外需求另開 issue/PR。
