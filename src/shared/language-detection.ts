@@ -24,7 +24,7 @@ export interface ScriptEvidence {
   hasUnknownHan: boolean
   hasJapaneseKana: boolean
   hasHangul: boolean
-  hasLatinLetter: boolean
+  hasForeignLetter: boolean
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -33,7 +33,7 @@ export interface ScriptEvidence {
 const SIMPLIFIED_ONLY =
   '长东马车门开关见贝风飞发电对时乐个为书说话认识过还' +
   '这们几处么两让儿习头买卖红级纪经给组织纸线练张' +
-  '奖义农动华协单罗备宝报边变参层产场陈础触传' +
+  '奖义农动华协单罗备报边变层产场陈础传' +
   '达带导夺队吨热'
 
 /** Characters exclusive to Traditional Chinese. */
@@ -61,12 +61,12 @@ const KNOWN_SHARED =
   '的人大上山水中小日月天手工生心力口王白石田目足' +
   '土火木水火土金木' +
   '文子父女母子母' +
-  '今明早星空原海名林花音然思安心気自' +
-  '先前后左右南北东西里内外上下' +
-  '千百万元角分' +
+  '今明早星空原海名林花音然思安心自' +
+  '先前左右南北东西里内外上下' +
+  '千百元角分' +
   '我你他她它们' +
   '不也而已何其如之' +
-  '能可要以会用' +
+  '能可要用' +
   '好高正新老' +
   '很真' +
   '雨'
@@ -91,10 +91,15 @@ const isHangul = (code: number): boolean =>
   (code >= 0xA960 && code <= 0xA97C) || // Hangul Jamo Extended-A
   (code >= 0xD7B0 && code <= 0xD7FF)    // Hangul Jamo Extended-B
 
-const isLatinLetter = (code: number): boolean =>
-  (code >= 0x41 && code <= 0x5A) || (code >= 0x61 && code <= 0x7A) ||
-  (code >= 0xC0 && code <= 0x24F && code !== 0xD7 && code !== 0xF7) ||
-  (code >= 0xFF21 && code <= 0xFF3A) || (code >= 0xFF41 && code <= 0xFF5A)
+/**
+ * Any Unicode letter that is not Han, Kana, or Hangul.
+ *
+ * Han, Kana, and Hangul are handled earlier in the analysis loop (each
+ * `continue`s), so a character reaching this check that satisfies
+ * the Letter property is from another script (Latin, Cyrillic, Greek,
+ * Arabic, Hebrew, etc.) and marks the message as mixed-language.
+ */
+const isForeignLetter = (char: string): boolean => /\p{L}/u.test(char)
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -152,7 +157,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let hasUnknownHan = false
   let hasJapaneseKana = false
   let hasHangul = false
-  let hasLatinLetter = false
+  let hasForeignLetter = false
 
   for (const char of text) {
     const code = char.charCodeAt(0)
@@ -181,8 +186,8 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       continue
     }
 
-    if (isLatinLetter(code)) {
-      hasLatinLetter = true
+    if (isForeignLetter(char)) {
+      hasForeignLetter = true
     }
   }
 
@@ -194,7 +199,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     hasUnknownHan,
     hasJapaneseKana,
     hasHangul,
-    hasLatinLetter,
+    hasForeignLetter,
   }
 }
 
@@ -206,18 +211,19 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
  * 1. Non-zh target families are never skipped here.
  * 2. Text with Japanese Kana or Hangul is never classified as Chinese.
  * 3. Text without any Han characters is not confidently Chinese.
- * 4. Latin letters mixed with Han indicate a mixed-language message;
- *    these are not skipped.
+ * 4. Letters from any non-Han/Kana/Hangul script mixed with Han indicate a
+ *    mixed-language message; these are not skipped.
  * 5. `skip_all_chinese`: skip messages with explicit Simplified or Traditional
  *    evidence. Shared-only Han text is conservatively kept translatable to
  *    avoid misclassifying Kanji-only Japanese.
  * 6. `translate_other_script`:
  *    - Generic zh target → never skip (conservative, favor translation).
+ *    - Unknown/unclassified Han overrides same-script evidence → translate.
  *    - For a specific script target (simplified or traditional):
  *      - Only same-script evidence → skip
  *      - Opposite-script evidence → process (translate)
  *      - Mixed evidence → process
- *      - Shared-only characters → skip
+ *      - Known-shared-only characters → skip
  */
 export function shouldSkipMessage(
   text: string,
@@ -235,8 +241,9 @@ export function shouldSkipMessage(
   // No Han characters → nothing to skip
   if (!evidence.hasHan) return false
 
-  // Mixed Latin+Han → keep translatable
-  if (evidence.hasLatinLetter) return false
+  // Any foreign (non-Han/Kana/Hangul) letter mixed with Han → mixed-language,
+  // keep translatable
+  if (evidence.hasForeignLetter) return false
 
   if (mode === 'skip_all_chinese') {
     // Only skip when there is explicit simplified or traditional evidence.
@@ -251,6 +258,11 @@ export function shouldSkipMessage(
   // Generic zh without script preference → conservative, do not skip
   if (scriptTarget === 'generic' || scriptTarget === null) return false
 
+  // Unknown Han overrides same-script evidence: an unlisted opposite-script
+  // character mixed with recognized same-script characters is not confidently
+  // in the target script → favor translation.
+  if (evidence.hasUnknownHan) return false
+
   if (scriptTarget === 'simplified') {
     if (evidence.hasSimplifiedOnly && !evidence.hasTraditionalOnly) {
       return true
@@ -258,9 +270,6 @@ export function shouldSkipMessage(
     if (evidence.hasTraditionalOnly) {
       return false
     }
-    // Only shared or unknown characters:
-    // Unknown Han could be unlisted S/T or Japanese Kanji → favor translation.
-    if (evidence.hasUnknownHan) return false
     // Only known-shared characters → skip (confidently Chinese, ambiguous script)
     return true
   }
@@ -272,9 +281,6 @@ export function shouldSkipMessage(
   if (evidence.hasSimplifiedOnly) {
     return false
   }
-  // Only shared or unknown characters:
-  // Unknown Han could be unlisted S/T or Japanese Kanji → favor translation.
-  if (evidence.hasUnknownHan) return false
   // Only known-shared characters → skip
   return true
 }

@@ -149,9 +149,22 @@ describe('analyzeMessageScript', () => {
     const result = analyzeMessageScript('hello 大家好')
     expect(result.hasHan).toBe(true)
     expect(result.hasSharedHan).toBe(true)
-    expect(result.hasLatinLetter).toBe(true)
+    expect(result.hasForeignLetter).toBe(true)
     expect(result.hasJapaneseKana).toBe(false)
     expect(result.hasHangul).toBe(false)
+  })
+
+  it('detects Cyrillic letters mixed with Han', () => {
+    const result = analyzeMessageScript('привет 国')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasForeignLetter).toBe(true)
+  })
+
+  it('does not treat × or ÷ as foreign letters', () => {
+    expect(analyzeMessageScript('×').hasForeignLetter).toBe(false)
+    expect(analyzeMessageScript('÷').hasForeignLetter).toBe(false)
+    // Real Latin letters around them still count
+    expect(analyzeMessageScript('A×B').hasForeignLetter).toBe(true)
   })
 
   it('returns empty evidence for Latin-only text', () => {
@@ -239,6 +252,19 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
     expect(shouldSkipMessage('长东马车门开', 'zh', 'skip_all_chinese')).toBe(true)
   })
 
+  // Shinjitai-overlap characters removed from SIMPLIFIED_ONLY must not skip
+  it('does not skip Kanji-only Japanese 参加 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('参加', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese 宝石 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('宝石', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese 接触 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('接触', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   // Kanji-only Japanese must not be skipped as Chinese (Shinjitai overlap)
   it('does not skip Kanji-only Japanese text 中国', () => {
     expect(shouldSkipMessage('中国', 'zh-TW', 'skip_all_chinese')).toBe(false)
@@ -316,6 +342,28 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
       expect(shouldSkipMessage('今天真的很热', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
+    it('processes 這個学校 for zh-TW (unknown Han overrides same-script evidence)', () => {
+      // 這/個 are Traditional, 学/校 are unlisted Han → unknown overrides → translate
+      expect(shouldSkipMessage('這個学校', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 不会 for zh-TW (会 removed from KNOWN_SHARED)', () => {
+      // 会 is now unknown Han → favor translation
+      expect(shouldSkipMessage('不会', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 参加 for zh-TW in translate_other_script (参 removed from SIMPLIFIED_ONLY)', () => {
+      expect(shouldSkipMessage('参加', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 宝石 for zh-TW in translate_other_script (宝 removed from SIMPLIFIED_ONLY)', () => {
+      expect(shouldSkipMessage('宝石', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 接触 for zh-TW in translate_other_script (触 removed from SIMPLIFIED_ONLY)', () => {
+      expect(shouldSkipMessage('接触', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
     it('does not skip Japanese text with Kana (#46/51 explicit)', () => {
       expect(shouldSkipMessage('今天は暑い', 'zh-TW', 'translate_other_script')).toBe(false)
     })
@@ -323,7 +371,7 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
 
   describe('simplified target (zh-CN)', () => {
     it('skips text with only simplified evidence', () => {
-      expect(shouldSkipMessage('体国长东马', 'zh-CN', 'translate_other_script')).toBe(true)
+      expect(shouldSkipMessage('长东马车门开', 'zh-CN', 'translate_other_script')).toBe(true)
     })
 
     it('processes text with only traditional evidence', () => {
@@ -336,6 +384,11 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
 
     it('skips text with only shared Han characters', () => {
       expect(shouldSkipMessage('大人山水', 'zh-CN', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 这个學校 for zh-CN (unknown Han overrides same-script evidence)', () => {
+      // 这/个 are Simplified, 學/校 are unlisted Han → unknown overrides → translate
+      expect(shouldSkipMessage('这个學校', 'zh-CN', 'translate_other_script')).toBe(false)
     })
   })
 
@@ -359,6 +412,11 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
 
   it('does not skip mixed Latin and Han text (#46: hello 大家好)', () => {
     expect(shouldSkipMessage('hello 大家好', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip Cyrillic mixed with Han (привет 国)', () => {
+    expect(shouldSkipMessage('привет 国', 'zh-CN', 'translate_other_script')).toBe(false)
+    expect(shouldSkipMessage('привет 国', 'zh-CN', 'skip_all_chinese')).toBe(false)
   })
 
   // Shared-Han Shinjitai-overlap examples in translate_other_script mode
