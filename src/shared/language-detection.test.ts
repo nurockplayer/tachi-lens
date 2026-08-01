@@ -270,6 +270,15 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
     expect(shouldSkipMessage('中国', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
+  // Traditional-only glyphs also used in Japanese must not imply Chinese language
+  it('does not skip kana-less Japanese 手紙 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('手紙', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 営業時間 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('営業時間', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   it('does not skip Kanji-only Japanese text 会社', () => {
     expect(shouldSkipMessage('会社', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
@@ -307,7 +316,7 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
   })
 
   it('skips mixed simplified and traditional Chinese text', () => {
-    expect(shouldSkipMessage('体國', 'zh-TW', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('长國', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 })
 
@@ -330,6 +339,11 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
 
     it('skips text with only shared Han characters (#46: 今天很好 → skip)', () => {
       expect(shouldSkipMessage('今天很好', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('does not skip kana-less Japanese 手紙 for zh-TW in translate_other_script', () => {
+      // 手 is known-shared, 紙 is a Traditional glyph also used in modern Japanese
+      expect(shouldSkipMessage('手紙', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
     it('skips 今天真的很熱 for zh-TW (#46 explicit)', () => {
