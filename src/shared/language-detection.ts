@@ -25,10 +25,7 @@ export interface ScriptEvidence {
   hasJapaneseKana: boolean
   hasHangul: boolean
   hasForeignLetter: boolean
-  /** Number of Han characters with explicit Simplified-only or Traditional-only evidence. */
-  scriptEvidenceCount: number
-  /** Total number of Han characters in the message. */
-  totalHanCount: number
+  hasChineseMarker: boolean
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -62,7 +59,7 @@ const TRADITIONAL_SET = new Set(TRADITIONAL_ONLY)
  * KNOWN_SHARED) are classified as "unknown Han" and favor translation.
  */
 const KNOWN_SHARED =
-  '的人大上山水中小日月天手工生心力口王白石田目足' +
+  '人大上山水中小日月天手工生心力口王白石田目足' +
   '土火木水火土金木' +
   '文子父女母子母' +
   '今明早星空原海名林花音然思安心自' +
@@ -72,10 +69,26 @@ const KNOWN_SHARED =
   '不也而已何其如之' +
   '能可要用' +
   '好高正新老' +
-  '很真' +
+  '真' +
   '雨'
 
 const KNOWN_SHARED_SET = new Set(KNOWN_SHARED)
+
+/**
+ * Strong Chinese-language markers: function and structural characters that
+ * are characteristic of Mandarin and not ordinary modern-Japanese Kanji
+ * usage.
+ *
+ * Simplified/Traditional glyph evidence (e.g. 紙, 時, 車) also appears
+ * unchanged in Japanese, so it cannot establish that the language is
+ * Chinese. A message containing a marker is confidently Chinese; script
+ * evidence alone is never treated as language evidence.
+ *
+ * 的 marks the Chinese possessive 的-particle (Japanese uses の);
+ * 了/吧/啊/呢 are clause-final particles with no Japanese equivalent.
+ */
+const CHINESE_LANGUAGE_MARKERS = '的了吗呢吧啊很'
+const CHINESE_MARKER_SET = new Set(CHINESE_LANGUAGE_MARKERS)
 
 // ─── Unicode ranges (BMP only) ───────────────────────────────────────────────
 
@@ -150,8 +163,13 @@ export function classifyChineseScriptTarget(
  * Analyze a message string for script evidence.
  *
  * Iterates character-by-character to detect Han (CJK Ideographs),
- * Japanese Kana, Hangul, Latin letters, and distinguishes Simplified-only
- * vs Traditional-only vs shared Han characters using the curated evidence tables.
+ * Japanese Kana, Hangul, foreign letters, Chinese-language markers,
+ * and distinguishes Simplified-only vs Traditional-only vs shared Han
+ * characters using the curated evidence tables.
+ *
+ * Chinese-language markers are checked before script-variant classification
+ * so a marker character (的, 很, 了, …) is not also recorded as shared or
+ * unknown Han.
  */
 export function analyzeMessageScript(text: string): ScriptEvidence {
   let hasHan = false
@@ -162,8 +180,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let hasJapaneseKana = false
   let hasHangul = false
   let hasForeignLetter = false
-  let scriptEvidenceCount = 0
-  let totalHanCount = 0
+  let hasChineseMarker = false
 
   for (const char of text) {
     const code = char.charCodeAt(0)
@@ -180,13 +197,14 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
 
     if (isCJK(code)) {
       hasHan = true
-      totalHanCount += 1
+      if (CHINESE_MARKER_SET.has(char)) {
+        hasChineseMarker = true
+        continue
+      }
       if (SIMPLIFIED_SET.has(char)) {
         hasSimplifiedOnly = true
-        scriptEvidenceCount += 1
       } else if (TRADITIONAL_SET.has(char)) {
         hasTraditionalOnly = true
-        scriptEvidenceCount += 1
       } else if (KNOWN_SHARED_SET.has(char)) {
         hasSharedHan = true
       } else {
@@ -209,30 +227,19 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     hasJapaneseKana,
     hasHangul,
     hasForeignLetter,
-    scriptEvidenceCount,
-    totalHanCount,
+    hasChineseMarker,
   }
 }
 
 /**
- * Decide whether script-variant evidence is sufficient to treat a message
- * as confidently Chinese.
- *
- * A single Traditional/Simplified-only glyph (e.g. 紙, 時, 車) also appears
- * unchanged in modern Japanese, so it cannot alone establish that the
- * language is Chinese. Confidence requires either:
- * - at least two S/T glyphs, or
- * - one S/T glyph with no unknown Han and enough Han for a real sentence.
- */
-const hasSufficientScriptConfidence = (evidence: ScriptEvidence): boolean =>
-  evidence.scriptEvidenceCount >= 2 ||
-  (evidence.scriptEvidenceCount >= 1 &&
-    !evidence.hasUnknownHan &&
-    evidence.totalHanCount >= 4)
-
-/**
  * Decide whether a chat message should be skipped for the given target language
  * and Chinese variant mode.
+ *
+ * Chinese-language confidence comes only from CHINESE_LANGUAGE_MARKERS
+ * (的, 了, 吧, 啊, 呢, 很). Simplified/Traditional glyph evidence is used
+ * only to determine script direction and is never treated as proof that the
+ * language is Chinese, because those glyphs also appear unchanged in modern
+ * Japanese.
  *
  * Rules:
  * 1. Non-zh target families are never skipped here.
@@ -240,14 +247,14 @@ const hasSufficientScriptConfidence = (evidence: ScriptEvidence): boolean =>
  * 3. Text without any Han characters is not confidently Chinese.
  * 4. Letters from any non-Han/Kana/Hangul script mixed with Han indicate a
  *    mixed-language message; these are not skipped.
- * 5. `skip_all_chinese`: skip messages with sufficient Simplified/Traditional
- *    script confidence. A single variant glyph (potentially a Japanese
- *    glyph) is not enough; shared-only Han stays translatable.
- * 6. `translate_other_script`:
+ * 5. Without a Chinese-language marker the message is not confidently
+ *    Chinese and stays translatable (conservative).
+ * 6. `skip_all_chinese`: any confidently Chinese message is skipped.
+ * 7. `translate_other_script`:
  *    - Generic zh target → never skip (conservative, favor translation).
  *    - Unknown/unclassified Han overrides same-script evidence → translate.
  *    - For a specific script target (simplified or traditional):
- *      - Only same-script evidence with sufficient confidence → skip
+ *      - Only same-script evidence → skip
  *      - Opposite-script evidence → process (translate)
  *      - Mixed evidence → process
  *      - Known-shared-only characters → skip
@@ -272,13 +279,12 @@ export function shouldSkipMessage(
   // keep translatable
   if (evidence.hasForeignLetter) return false
 
+  // Without a Chinese-language marker the message is not confidently Chinese.
+  // S/T glyph evidence alone (e.g. 手紙, 電話, 自動車) could be Japanese.
+  if (!evidence.hasChineseMarker) return false
+
   if (mode === 'skip_all_chinese') {
-    // Require sufficient script-variant confidence. A lone S/T glyph could
-    // be a modern-Japanese character (紙, 時, 車), so it must not skip.
-    if (!evidence.hasSimplifiedOnly && !evidence.hasTraditionalOnly) {
-      return false
-    }
-    return hasSufficientScriptConfidence(evidence)
+    return true
   }
 
   // mode === 'translate_other_script'
@@ -293,19 +299,10 @@ export function shouldSkipMessage(
   if (evidence.hasUnknownHan) return false
 
   if (scriptTarget === 'simplified') {
-    if (
-      evidence.hasSimplifiedOnly &&
-      !evidence.hasTraditionalOnly &&
-      hasSufficientScriptConfidence(evidence)
-    ) {
+    if (evidence.hasSimplifiedOnly && !evidence.hasTraditionalOnly) {
       return true
     }
     if (evidence.hasTraditionalOnly) {
-      return false
-    }
-    if (evidence.hasSimplifiedOnly) {
-      // Same-script evidence present but below the confidence threshold:
-      // could be a lone Shinjitai glyph → favor translation.
       return false
     }
     // Only known-shared characters → skip (confidently Chinese, ambiguous script)
@@ -313,19 +310,10 @@ export function shouldSkipMessage(
   }
 
   // scriptTarget === 'traditional'
-  if (
-    evidence.hasTraditionalOnly &&
-    !evidence.hasSimplifiedOnly &&
-    hasSufficientScriptConfidence(evidence)
-  ) {
+  if (evidence.hasTraditionalOnly && !evidence.hasSimplifiedOnly) {
     return true
   }
   if (evidence.hasSimplifiedOnly) {
-    return false
-  }
-  if (evidence.hasTraditionalOnly) {
-    // Same-script evidence present but below the confidence threshold:
-    // could be a lone Japanese glyph (紙, 時) → favor translation.
     return false
   }
   // Only known-shared characters → skip

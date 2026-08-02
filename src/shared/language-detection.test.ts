@@ -241,15 +241,15 @@ describe('analyzeMessageScript', () => {
 
 describe('shouldSkipMessage — skip_all_chinese mode', () => {
   it('skips simplified Chinese for zh-TW target', () => {
-    expect(shouldSkipMessage('长东马车门开', 'zh-TW', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('这个很热', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
   it('skips traditional Chinese for zh-CN target', () => {
-    expect(shouldSkipMessage('體國長東馬', 'zh-CN', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('這個很熱', 'zh-CN', 'skip_all_chinese')).toBe(true)
   })
 
   it('skips Chinese for generic zh target', () => {
-    expect(shouldSkipMessage('长东马车门开', 'zh', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('这个很热', 'zh', 'skip_all_chinese')).toBe(true)
   })
 
   // Shinjitai-overlap characters removed from SIMPLIFIED_ONLY must not skip
@@ -277,6 +277,14 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
 
   it('does not skip kana-less Japanese 営業時間 for zh-TW in skip_all_chinese', () => {
     expect(shouldSkipMessage('営業時間', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 電話 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('電話', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 自動車 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('自動車', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
   it('does not skip Kanji-only Japanese text 会社', () => {
@@ -316,7 +324,7 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
   })
 
   it('skips mixed simplified and traditional Chinese text', () => {
-    expect(shouldSkipMessage('长國', 'zh-TW', 'skip_all_chinese')).toBe(true)
+    expect(shouldSkipMessage('这个熱吧', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 })
 
@@ -325,16 +333,16 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
   // Targets from #51: traditional, simplified, generic, mixed
 
   describe('traditional target (zh-TW)', () => {
-    it('skips text with only traditional evidence', () => {
-      expect(shouldSkipMessage('體國長東馬', 'zh-TW', 'translate_other_script')).toBe(true)
+    it('skips text with only traditional evidence and a Chinese marker', () => {
+      expect(shouldSkipMessage('這個很熱', 'zh-TW', 'translate_other_script')).toBe(true)
     })
 
     it('processes text with only simplified evidence', () => {
-      expect(shouldSkipMessage('体国长东马', 'zh-TW', 'translate_other_script')).toBe(false)
+      expect(shouldSkipMessage('这个很热', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
     it('processes text with mixed simplified and traditional evidence', () => {
-      expect(shouldSkipMessage('长國', 'zh-TW', 'translate_other_script')).toBe(false)
+      expect(shouldSkipMessage('这个熱吧', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
     it('skips text with only shared Han characters (#46: 今天很好 → skip)', () => {
@@ -344,6 +352,14 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
     it('does not skip kana-less Japanese 手紙 for zh-TW in translate_other_script', () => {
       // 手 is known-shared, 紙 is a Traditional glyph also used in modern Japanese
       expect(shouldSkipMessage('手紙', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 電話 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('電話', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 自動車 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('自動車', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
     it('skips 今天真的很熱 for zh-TW (#46 explicit)', () => {
@@ -384,20 +400,20 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
   })
 
   describe('simplified target (zh-CN)', () => {
-    it('skips text with only simplified evidence', () => {
-      expect(shouldSkipMessage('长东马车门开', 'zh-CN', 'translate_other_script')).toBe(true)
+    it('skips text with only simplified evidence and a Chinese marker', () => {
+      expect(shouldSkipMessage('这个很热', 'zh-CN', 'translate_other_script')).toBe(true)
     })
 
     it('processes text with only traditional evidence', () => {
-      expect(shouldSkipMessage('體國長東馬', 'zh-CN', 'translate_other_script')).toBe(false)
+      expect(shouldSkipMessage('這個很熱', 'zh-CN', 'translate_other_script')).toBe(false)
     })
 
     it('processes text with mixed evidence', () => {
-      expect(shouldSkipMessage('长國', 'zh-CN', 'translate_other_script')).toBe(false)
+      expect(shouldSkipMessage('这个熱吧', 'zh-CN', 'translate_other_script')).toBe(false)
     })
 
-    it('skips text with only shared Han characters', () => {
-      expect(shouldSkipMessage('大人山水', 'zh-CN', 'translate_other_script')).toBe(true)
+    it('skips text with only shared Han characters and a Chinese marker', () => {
+      expect(shouldSkipMessage('今天很好', 'zh-CN', 'translate_other_script')).toBe(true)
     })
 
     it('processes 这个學校 for zh-CN (unknown Han overrides same-script evidence)', () => {
