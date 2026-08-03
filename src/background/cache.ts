@@ -1,4 +1,5 @@
 import type { BatchItemResult } from '@/providers/types'
+import { buildTranslationIdentity } from '@/shared/translation-identity'
 
 interface CacheEntry {
   result: BatchItemResult
@@ -13,9 +14,13 @@ export class TranslationCache {
     this.maxSize = maxSize
   }
 
+  /**
+   * Build the canonical cache key for a translation request, delegating to
+   * the shared translation identity so cache lookups and the in-flight /
+   * deduplication layers always agree on equivalence.
+   */
   buildKey(text: string, targetLang: string, provider: string, model: string, sourceLang?: string): string {
-    const base = `${text}|${targetLang}|${provider}|${model}`
-    return sourceLang ? `${base}|${sourceLang}` : base
+    return buildTranslationIdentity({ text, targetLang, provider, model, sourceLang })
   }
 
   get(key: string): BatchItemResult | undefined {

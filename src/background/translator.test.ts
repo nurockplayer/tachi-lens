@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ProviderId, type TranslationProvider } from '@/providers/types'
 import { createGeminiProvider } from '@/providers/gemini'
+import { buildTranslationIdentity } from '@/shared/translation-identity'
 import { TranslationCache } from './cache'
 import type { Clock } from './clock'
 import { RateLimiter } from './rate-limiter'
@@ -12,6 +13,19 @@ import {
 } from './gemini-quota'
 import { QuotaScheduler } from './quota-scheduler'
 import { type TranslatorDependencies, Translator } from './translator'
+
+const cacheKey = (
+  text: string,
+  provider: string,
+  model: string,
+  sourceLang?: string,
+): string => buildTranslationIdentity({
+  text,
+  targetLang: 'zh-TW',
+  provider,
+  model,
+  sourceLang,
+})
 
 const createMockProvider = (id: ProviderId = 'deepseek'): TranslationProvider => ({
   id,
@@ -831,7 +845,7 @@ describe('Translator', () => {
     it('returns cached result without calling the provider', async () => {
       const provider = createMockProvider()
       deps.getProvider = vi.fn(() => provider)
-      deps.cache.set('Hello|zh-TW|deepseek|deepseek-v4-flash', {
+      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'), {
         id: 'msg1',
         translatedText: '你好',
       })
@@ -861,7 +875,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = new QuotaScheduler(quota)
-      deps.cache.set('Hello|zh-TW|gemini|gemini-2.5-flash', {
+      deps.cache.set(cacheKey('Hello', 'gemini', 'gemini-2.5-flash'), {
         id: 'cached-id',
         translatedText: '你好',
       })
@@ -909,7 +923,7 @@ describe('Translator', () => {
       vi.advanceTimersByTime(300)
       await promise1
 
-      expect(deps.cache.has('Hello|zh-TW|deepseek|deepseek-v4-flash')).toBe(true)
+      expect(deps.cache.has(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'))).toBe(true)
     })
 
     it('does not cache error results', async () => {
@@ -923,7 +937,7 @@ describe('Translator', () => {
       vi.advanceTimersByTime(300)
       await promise
 
-      expect(deps.cache.has('Hello|zh-TW|deepseek|deepseek-v4-flash')).toBe(false)
+      expect(deps.cache.has(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'))).toBe(false)
     })
 
     it('coalesces concurrent identical translations through one scheduler provider call', async () => {
@@ -1566,7 +1580,7 @@ describe('Translator', () => {
       deps.getApiKey = vi.fn(async (providerId) => `key-${providerId}`)
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.rateLimiter.recordError('gemini', 30_000)
-      deps.cache.set('Hello|zh-TW|deepseek|deepseek-v4-flash', {
+      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'), {
         id: 'old-id',
         translatedText: '快取翻譯',
       })
@@ -1593,7 +1607,7 @@ describe('Translator', () => {
       }))
       deps.getApiKey = vi.fn(async (providerId) => providerId === 'gemini' ? 'gemini-key' : 'deepseek-key')
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
-      deps.cache.set('Hello|zh-TW|deepseek|deepseek-v4-flash', {
+      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'), {
         id: 'cached-id',
         translatedText: '快取翻譯',
       })
@@ -1634,7 +1648,7 @@ describe('Translator', () => {
       const quota = new GeminiQuotaStore(quotaStorage)
       await quota.openCooldown(60_000, 'gemini-2.5-flash')
       deps.quotaScheduler = new QuotaScheduler(quota, { deepseekMaxConcurrency: 2 })
-      deps.cache.set('cached|zh-TW|deepseek|deepseek-v4-flash', {
+      deps.cache.set(cacheKey('cached', 'deepseek', 'deepseek-v4-flash'), {
         id: 'cached-before',
         translatedText: '快取翻譯',
       })
