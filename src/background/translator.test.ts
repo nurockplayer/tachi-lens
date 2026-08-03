@@ -54,7 +54,7 @@ describe('Translator', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     deps = defaultDeps()
-    translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+    translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
   })
 
   afterEach(() => {
@@ -62,7 +62,7 @@ describe('Translator', () => {
   })
 
   describe('batching', () => {
-    it('resolves a single translation request after debounce', async () => {
+    it('resolves a single translation request after the batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([
         { id: 'msg1', translatedText: '你好' },
@@ -71,7 +71,7 @@ describe('Translator', () => {
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
 
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.messageId).toBe('msg1')
@@ -96,7 +96,64 @@ describe('Translator', () => {
       expect(results[9]!.translatedText).toBe('trans-text9')
     })
 
-    it('batches multiple requests within the same debounce window', async () => {
+    it('flushes immediately when max batch size is reached without advancing timers', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((r) => ({ id: r.id, translatedText: `trans-${r.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+
+      const promises = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      const results = await Promise.all(promises)
+
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(results).toHaveLength(10)
+    })
+
+    it('does not send a single message at 299 ms but sends it at 300 ms', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((r) => ({ id: r.id, translatedText: `T-${r.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+
+      const promise = translator.translate({ messageId: 'msg1', text: 'one' })
+
+      vi.advanceTimersByTime(299)
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(1)
+      await promise
+
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+    })
+
+    it('anchors the batch window to the first queued message', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((r) => ({ id: r.id, translatedText: `T-${r.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+
+      const promise1 = translator.translate({ messageId: 'msg1', text: 'one' })
+      vi.advanceTimersByTime(200)
+      const promise2 = translator.translate({ messageId: 'msg2', text: 'two' })
+
+      vi.advanceTimersByTime(99)
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(1)
+      const [result1, result2] = await Promise.all([promise1, promise2])
+
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['msg1', 'msg2'])
+      expect(result1.translatedText).toBe('T-one')
+      expect(result2.translatedText).toBe('T-two')
+    })
+
+    it('batches multiple requests within the same batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
         requests.map((r) => ({ id: r.id, translatedText: `T-${r.text}` })),
@@ -105,7 +162,7 @@ describe('Translator', () => {
 
       const promise1 = translator.translate({ messageId: 'msg1', text: 'one' })
       const promise2 = translator.translate({ messageId: 'msg2', text: 'two' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
 
       const [result1, result2] = await Promise.all([promise1, promise2])
       expect(provider.translateBatch).toHaveBeenCalledTimes(1)
@@ -121,7 +178,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await vi.waitFor(() => {
         expect(provider.translateBatch).toHaveBeenCalledTimes(1)
       })
@@ -141,7 +198,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       translator.translate({ messageId: 'msg1', text: 'Hello', sourceLang: 'en' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await vi.waitFor(() => {
         expect(provider.translateBatch).toHaveBeenCalledTimes(1)
       })
@@ -157,12 +214,12 @@ describe('Translator', () => {
       )
       deps.getProvider = vi.fn(() => provider)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const backlog = translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })
       const live = translator.translate({ messageId: 'live', text: 'new', priority: 'live' })
-      await vi.advanceTimersByTimeAsync(150)
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
+      await vi.advanceTimersByTimeAsync(300)
       await Promise.all([backlog, live])
 
       expect(provider.translateBatch).toHaveBeenCalledTimes(2)
@@ -177,7 +234,7 @@ describe('Translator', () => {
       )
       deps.getProvider = vi.fn(() => provider)
       deps.quotaScheduler = createQuotaScheduler(20)
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
 
       const pending = [translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })]
       for (let index = 0; index < 8; index++) {
@@ -200,7 +257,7 @@ describe('Translator', () => {
         ['backlog'],
       ])
 
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await expect(Promise.all(pending)).resolves.toHaveLength(9)
     })
 
@@ -214,7 +271,7 @@ describe('Translator', () => {
       })
       deps.getProvider = vi.fn(() => provider)
       deps.quotaScheduler = createQuotaScheduler(1)
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const holder = translator.translate({ messageId: 'holder', text: 'holder', priority: 'live' })
       await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
@@ -246,7 +303,7 @@ describe('Translator', () => {
       })
       deps.getProvider = vi.fn(() => provider)
       deps.quotaScheduler = createQuotaScheduler(2)
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const pending = ['a', 'b', 'c'].map((id) => translator.translate({ messageId: id, text: id }))
       await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(2))
@@ -293,7 +350,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const results = await Promise.all([
         translator.translate({ messageId: 'first', text: 'one', priority: 'backlog' }),
@@ -348,10 +405,10 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = new QuotaScheduler(quota, { now: () => now })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
 
       const translatePromise = translator.translate({ messageId: 'quota-denied', text: 'hello', priority: 'backlog' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
 
       const result = await translatePromise
@@ -400,10 +457,10 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = new QuotaScheduler(quota, { now: () => now })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
 
       const translatePromise = translator.translate({ messageId: 'quota-fallback-ok', text: 'hello', priority: 'backlog' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
 
       const result = await translatePromise
@@ -461,7 +518,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = new QuotaScheduler(quota, { now: () => now })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
 
       const live = Promise.all([
         translator.translate({ messageId: 'live-1', text: 'live one', priority: 'live' }),
@@ -472,7 +529,7 @@ describe('Translator', () => {
 
       selectedModel = 'gemini-2.5-pro'
       const backlog = translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       // The backlog runs Gemini because its quotaKey (gemini-2.5-pro) is distinct
       // from the live waiter's (gemini-2.5-flash), so it is not blocked.
@@ -521,7 +578,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       await expect(translator.translate({ messageId: 'flash-first', text: 'one', priority: 'backlog' }))
         .resolves.toEqual({ messageId: 'flash-first', translatedText: 'g-flash-first' })
@@ -567,7 +624,7 @@ describe('Translator', () => {
       deps.getApiKey = vi.fn(async (providerId) => `key-${providerId}`)
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       await expect(translator.translate({ messageId: 'flash', text: 'one', priority: 'backlog' }))
         .resolves.toEqual({ messageId: 'flash', translatedText: 'd-flash' })
@@ -607,7 +664,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
 
       const pending = ['a', 'b', 'c', 'd'].map((id) => translator.translate({
         messageId: id,
@@ -651,7 +708,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const flash = translator.translate({ messageId: 'flash', text: 'one', priority: 'backlog' })
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
@@ -695,7 +752,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const flashHolder = translator.translate({ messageId: 'flash-holder', text: 'one', priority: 'live' })
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
@@ -756,7 +813,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = new QuotaScheduler(new GeminiQuotaStore(storage, () => now), { now: () => now })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const backlog = translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })
       await vi.waitFor(() => expect(writes).toBe(1))
@@ -780,7 +837,7 @@ describe('Translator', () => {
       })
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.translatedText).toBe('你好')
@@ -808,7 +865,7 @@ describe('Translator', () => {
         id: 'cached-id',
         translatedText: '你好',
       })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       await expect(translator.translate({ messageId: 'message', text: 'Hello' }))
         .resolves.toEqual({ messageId: 'message', translatedText: '你好' })
@@ -829,11 +886,11 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const promise1 = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await promise1
 
       const promise2 = translator.translate({ messageId: 'msg2', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result2 = await promise2
 
       expect(result2.translatedText).toBe('你好')
@@ -849,7 +906,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const promise1 = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await promise1
 
       expect(deps.cache.has('Hello|zh-TW|deepseek|deepseek-v4-flash')).toBe(true)
@@ -863,7 +920,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const promise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await promise
 
       expect(deps.cache.has('Hello|zh-TW|deepseek|deepseek-v4-flash')).toBe(false)
@@ -886,7 +943,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       let settlements = 0
       const first = translator.translate({ messageId: 'first', text: 'Hello' }).then((result) => {
@@ -933,7 +990,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const english = translator.translate({ messageId: 'english', text: 'same', sourceLang: 'en' })
       const japanese = translator.translate({ messageId: 'japanese', text: 'same', sourceLang: 'ja' })
@@ -968,7 +1025,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const backlog = translator.translate({ messageId: 'backlog', text: 'same', priority: 'backlog' })
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
@@ -1005,7 +1062,7 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const live = translator.translate({ messageId: 'live-leader', text: 'same', priority: 'live' })
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
@@ -1029,7 +1086,7 @@ describe('Translator', () => {
       deps.getApiKey = vi.fn(async () => undefined)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.messageId).toBe('msg1')
@@ -1043,7 +1100,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.messageId).toBe('msg1')
@@ -1055,7 +1112,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => undefined)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.messageId).toBe('msg1')
@@ -1072,7 +1129,7 @@ describe('Translator', () => {
 
       const promise1 = translator.translate({ messageId: 'msg1', text: 'Hello' })
       const promise2 = translator.translate({ messageId: 'msg2', text: 'World' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
 
       const [result1, result2] = await Promise.all([promise1, promise2])
       expect(result1.translatedText).toBe('你好')
@@ -1092,7 +1149,7 @@ describe('Translator', () => {
 
       const promise1 = translator.translate({ messageId: 'msg1', text: 'Hello' })
       const promise2 = translator.translate({ messageId: 'msg2', text: 'World' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
 
       const [result1, result2] = await Promise.all([promise1, promise2])
       expect(result1.translatedText).toBe('T-Hello')
@@ -1108,7 +1165,7 @@ describe('Translator', () => {
         return value
       })
 
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toMatchObject({
         messageId: 'msg1',
@@ -1128,10 +1185,10 @@ describe('Translator', () => {
       deps.getApiKey = vi.fn(async () => undefined)
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toMatchObject({ error: { type: 'auth' } })
       expect(gemini.translateBatch).not.toHaveBeenCalled()
@@ -1152,10 +1209,10 @@ describe('Translator', () => {
       deps.getApiKey = vi.fn(async (providerId) => providerId === 'gemini' ? 'gemini-key' : undefined)
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toMatchObject({
         error: {
@@ -1190,10 +1247,10 @@ describe('Translator', () => {
         return fallbackFailure === 'bad_request' ? undefined : deepseek
       })
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toEqual({
         messageId: 'msg1',
@@ -1224,10 +1281,10 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
       const cacheSet = vi.spyOn(deps.cache, 'set')
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toEqual({ messageId: 'msg1', translatedText: '你好' })
       expect(cacheSet).toHaveBeenCalledTimes(1)
@@ -1255,7 +1312,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = createQuotaScheduler()
       const cacheSet = vi.spyOn(deps.cache, 'set')
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const results = await Promise.all([
         translator.translate({ messageId: 'first', text: 'Hello' }),
@@ -1309,7 +1366,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = scheduler
       deps.rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       await expect(translator.translate({
         messageId: 'before-rollback',
@@ -1366,7 +1423,7 @@ describe('Translator', () => {
       }
       deps.quotaScheduler = new QuotaScheduler(new GeminiQuotaStore(quotaStorage, clock), { clock })
       deps.rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const result = translator.translate({ messageId: 'live', text: 'Hello', priority: 'live' })
       await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1))
@@ -1394,7 +1451,7 @@ describe('Translator', () => {
       const provider = createMockProvider()
       deps.getProvider = vi.fn(() => provider)
 
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
 
       expect(provider.translateBatch).not.toHaveBeenCalled()
     })
@@ -1408,13 +1465,13 @@ describe('Translator', () => {
 
       // First batch
       const promise1 = translator.translate({ messageId: 'msg1', text: 'one' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await promise1
       expect(provider.translateBatch).toHaveBeenCalledTimes(1)
 
       // Second batch
       const promise2 = translator.translate({ messageId: 'msg2', text: 'two' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result2 = await promise2
 
       expect(result2.translatedText).toBe('T-msg2')
@@ -1429,7 +1486,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const promise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await promise
 
       expect(deps.getSettings).toHaveBeenCalled()
@@ -1461,7 +1518,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result).toEqual({ messageId: 'msg1', translatedText: '你好' })
@@ -1490,7 +1547,7 @@ describe('Translator', () => {
       deps.rateLimiter.recordError('gemini', 30_000)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.translatedText).toBe('冷卻期間的翻譯')
@@ -1515,7 +1572,7 @@ describe('Translator', () => {
       })
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result).toEqual({ messageId: 'msg1', translatedText: '快取翻譯' })
@@ -1541,10 +1598,10 @@ describe('Translator', () => {
         translatedText: '快取翻譯',
       })
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toEqual({ messageId: 'msg1', translatedText: '快取翻譯' })
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
@@ -1581,7 +1638,7 @@ describe('Translator', () => {
         id: 'cached-before',
         translatedText: '快取翻譯',
       })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const first = translator.translate({ messageId: 'held-1', text: 'one' })
       const second = translator.translate({ messageId: 'held-2', text: 'two' })
@@ -1619,10 +1676,10 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.rateLimiter.recordError('deepseek', 10_000)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toMatchObject({ error: { type: 'rate_limited' } })
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
@@ -1647,11 +1704,11 @@ describe('Translator', () => {
       deps.quotaScheduler = createQuotaScheduler()
 
       const first = translator.translate({ messageId: 'first', text: 'one' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await expect(first).resolves.toMatchObject({ error: { type: 'rate_limited' } })
 
       const second = translator.translate({ messageId: 'second', text: 'two' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await expect(second).resolves.toMatchObject({ error: { type: 'rate_limited' } })
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
@@ -1671,7 +1728,7 @@ describe('Translator', () => {
         .mockImplementationOnce(() => secondResponse)
       deps.getProvider = vi.fn(() => deepseek)
       deps.quotaScheduler = createQuotaScheduler(2)
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 1 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const first = translator.translate({ messageId: 'first', text: 'one' })
       const second = translator.translate({ messageId: 'second', text: 'two' })
@@ -1682,7 +1739,7 @@ describe('Translator', () => {
       await expect(second).resolves.toMatchObject({ translatedText: 'done' })
 
       const third = translator.translate({ messageId: 'third', text: 'three' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await expect(third).resolves.toMatchObject({ error: { type: 'rate_limited' } })
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(2)
     })
@@ -1702,7 +1759,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.error).toMatchObject({ type: 'rate_limited', retryAfterMs: 57_000 })
@@ -1726,7 +1783,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.error?.type).not.toBe('rate_limited')
@@ -1741,7 +1798,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
 
       await expect(result).resolves.toMatchObject({
         messageId: 'msg1',
@@ -1757,7 +1814,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
 
       await expect(result).resolves.toEqual({
         messageId: 'msg1',
@@ -1783,7 +1840,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result).toEqual({
@@ -1805,11 +1862,11 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
 
       const firstPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const firstResult = await firstPromise
 
       const secondPromise = translator.translate({ messageId: 'msg2', text: 'World' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const secondResult = await secondPromise
 
       expect(firstResult.error?.type).toBe('network')
@@ -1823,7 +1880,7 @@ describe('Translator', () => {
       deps.rateLimiter.recordError('deepseek', 10_000)
 
       const resultPromise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result = await resultPromise
 
       expect(result.error?.type).toBe('rate_limited')
@@ -1840,7 +1897,7 @@ describe('Translator', () => {
 
       // First call should be rate limited
       const promise1 = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result1 = await promise1
       expect(result1.error?.type).toBe('rate_limited')
 
@@ -1849,7 +1906,7 @@ describe('Translator', () => {
       deps.rateLimiter.reset('deepseek')
 
       const promise2 = translator.translate({ messageId: 'msg2', text: 'World' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const result2 = await promise2
 
       expect(result2.translatedText).toBe('T-World')
@@ -1869,7 +1926,7 @@ describe('Translator', () => {
       deps.rateLimiter.reset('deepseek')
 
       const promise = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await promise
 
       expect(deps.rateLimiter.isLimited('deepseek')).toBe(false)
@@ -1883,7 +1940,7 @@ describe('Translator', () => {
       const promises = Array.from({ length: 5 }, (_, i) =>
         translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
       )
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       const results = await Promise.all(promises)
 
       results.forEach((r) => {
@@ -1904,10 +1961,10 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'deepseek' ? deepseek : undefined)
       deps.quotaScheduler = createQuotaScheduler()
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 10 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
 
       const result = translator.translate({ messageId: 'msg1', text: 'Hello' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(result).resolves.toMatchObject({
         messageId: 'msg1',
@@ -1954,10 +2011,10 @@ describe('Translator', () => {
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.quotaScheduler = new QuotaScheduler(quota, { now: () => now })
-      translator = new Translator(deps, { debounceMs: 150, maxBatchSize: 2 })
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
 
       const translatePromise = translator.translate({ messageId: 'quota-denied', text: 'hello', priority: 'backlog' })
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(300)
       await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
 
       const result = await translatePromise

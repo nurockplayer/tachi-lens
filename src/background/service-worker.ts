@@ -56,7 +56,7 @@ const translator = new Translator(
     getProvider: (providerId) => getProvider(providerId),
     quotaScheduler,
   },
-  { debounceMs: 150, maxBatchSize: 10 },
+  { batchWindowMs: 300, maxBatchSize: 10 },
 )
 
 const router = createMessageRouter({

@@ -31,7 +31,7 @@ const makeRouter = (routerDepOverrides?: Partial<RouterDependencies>) => {
       getApiKey: vi.fn(async () => 'test-key'),
       getProvider: vi.fn(() => createMockProvider()),
     },
-    { debounceMs: 150, maxBatchSize: 10 },
+    { batchWindowMs: 300, maxBatchSize: 10 },
   )
 
   return {
@@ -75,7 +75,7 @@ describe('MessageRouter', () => {
 
       expect(result).toBe(true)
 
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(300)
       await vi.waitFor(() => {
         expect(sendResponse).toHaveBeenCalledTimes(1)
       })
