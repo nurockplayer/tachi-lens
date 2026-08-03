@@ -61,6 +61,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(1_000),
         requestsToday: 1,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: false,
         hasConservativelyImputedDailyState: false,
         hasUnsafeRollingCount: false,
@@ -85,6 +86,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(1_000),
         requestsToday: 1,
         cooldownUntil: 6_000,
+        monotonicCooldownUntil: 5_000,
         hasConservativelyImputedRollingState: false,
         hasConservativelyImputedDailyState: false,
         hasUnsafeRollingCount: false,
@@ -92,6 +94,7 @@ describe('deriveQuotaHealth', () => {
       snapshot: completeSnapshot(),
       wallNow: 1_000,
       highWaterMark: 1_000,
+      monotonicNow: 1_000,
     })
 
     expect(result.status).toBe('cooldown')
@@ -107,6 +110,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(2_000),
         requestsToday: 1,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: false,
         hasConservativelyImputedDailyState: false,
         hasUnsafeRollingCount: false,
@@ -128,6 +132,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: '2099-01-01',
         requestsToday: 1,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: false,
         hasConservativelyImputedDailyState: false,
         hasUnsafeRollingCount: false,
@@ -151,6 +156,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(1_000),
         requestsToday: Number.MAX_SAFE_INTEGER,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: true,
         hasConservativelyImputedDailyState: true,
         hasUnsafeRollingCount: false,
@@ -173,6 +179,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(1_000),
         requestsToday: Number.MAX_SAFE_INTEGER,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: false,
         hasConservativelyImputedDailyState: true,
         hasUnsafeRollingCount: false,
@@ -194,6 +201,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(1_000),
         requestsToday: 1,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: true,
         hasConservativelyImputedDailyState: false,
         hasUnsafeRollingCount: false,
@@ -213,6 +221,7 @@ describe('deriveQuotaHealth', () => {
         providerDay: getGeminiProviderDayId(1_000),
         requestsToday: 1,
         cooldownUntil: 0,
+        monotonicCooldownUntil: 0,
         hasConservativelyImputedRollingState: false,
         hasConservativelyImputedDailyState: false,
         hasUnsafeRollingCount: false,
@@ -239,6 +248,84 @@ describe('deriveQuotaHealth', () => {
     expect(result.status).toBe('healthy')
     expect(result.snapshotStatus).toBe('missing')
     expect(result.snapshotVersion).toBe(null)
+  })
+
+  it('keeps reporting cooldown when the monotonic deadline is active even after a forward wall-clock jump', () => {
+    // The persisted wall-clock cooldown deadline (6_000) has already passed at
+    // wallNow 16_000, but the monotonic cooldown deadline reserve() checks
+    // (5_000) is still ahead of the monotonic clock (1_000). reserve() would
+    // still deny with cooldown, so the diagnostics must not report healthy.
+    const result = deriveQuotaHealth({
+      quotaKey: 'default',
+      bucket: {
+        providerDay: getGeminiProviderDayId(16_000),
+        requestsToday: 1,
+        cooldownUntil: 6_000,
+        monotonicCooldownUntil: 5_000,
+        hasConservativelyImputedRollingState: false,
+        hasConservativelyImputedDailyState: false,
+        hasUnsafeRollingCount: false,
+      },
+      snapshot: completeSnapshot(),
+      wallNow: 16_000,
+      highWaterMark: 16_000,
+      monotonicNow: 1_000,
+    })
+
+    expect(result.status).toBe('cooldown')
+    expect(result.denialReason).toBe('cooldown')
+    // The wall-clock recovery field is not reported: it is no longer ahead of
+    // the (jumped) wall clock, so it is not a trustworthy recovery instant.
+    expect(result.cooldownUntil).toBeUndefined()
+    expect(result.recoveryAt).toBeUndefined()
+  })
+
+  it('reports healthy when both the monotonic and wall-clock cooldowns have elapsed', () => {
+    const result = deriveQuotaHealth({
+      quotaKey: 'default',
+      bucket: {
+        providerDay: getGeminiProviderDayId(16_000),
+        requestsToday: 1,
+        cooldownUntil: 6_000,
+        monotonicCooldownUntil: 4_000,
+        hasConservativelyImputedRollingState: false,
+        hasConservativelyImputedDailyState: false,
+        hasUnsafeRollingCount: false,
+      },
+      snapshot: completeSnapshot(),
+      wallNow: 16_000,
+      highWaterMark: 16_000,
+      monotonicNow: 5_000,
+    })
+
+    expect(result.status).toBe('healthy')
+    expect(result.cooldownUntil).toBeUndefined()
+  })
+
+  it('reports cooldown when the wall-clock deadline is still ahead even after the monotonic deadline elapsed', () => {
+    // The monotonic cooldown has elapsed but the persisted wall-clock deadline
+    // is still in the future and the clock is trusted. reserve() would deny, so
+    // keep reporting cooldown with the trustworthy wall-clock recovery field.
+    const result = deriveQuotaHealth({
+      quotaKey: 'default',
+      bucket: {
+        providerDay: getGeminiProviderDayId(4_000),
+        requestsToday: 1,
+        cooldownUntil: 10_000,
+        monotonicCooldownUntil: 4_000,
+        hasConservativelyImputedRollingState: false,
+        hasConservativelyImputedDailyState: false,
+        hasUnsafeRollingCount: false,
+      },
+      snapshot: completeSnapshot(),
+      wallNow: 4_000,
+      highWaterMark: 4_000,
+      monotonicNow: 5_000,
+    })
+
+    expect(result.status).toBe('cooldown')
+    expect(result.denialReason).toBe('cooldown')
+    expect(result.cooldownUntil).toBe(10_000)
   })
 })
 
@@ -270,6 +357,34 @@ describe('GeminiQuotaStore.getDiagnosticState', () => {
     expect(result.denialReason).toBe('cooldown')
     expect(result.cooldownUntil).toBe(6_000)
     expect(result.providerDay).toBe(getGeminiProviderDayId(1_000))
+  })
+
+  it('keeps reporting cooldown after a forward wall-clock jump while the monotonic cooldown is still active', async () => {
+    const storage = createStorage()
+    const clock = new MutableClock(10_000, 1_000)
+    const store = new GeminiQuotaStore(storage, clock)
+    await store.reserve({ ...profile, requestsPerDay: 100, requestsPerMinute: 100 }, 1)
+    await store.openCooldown(5_000)
+
+    // Forward wall-clock jump of 90 seconds. The persisted wall-clock cooldown
+    // deadline (15_000) is now in the past, but the store's monotonic cooldown
+    // deadline (6_000) is still ahead of the monotonic clock (1_000).
+    clock.wall = 100_000
+    const diagnostic = await store.getDiagnosticState()
+    const result = collectQuotaHealthResults(diagnostic)[0]!
+
+    expect(result.status).toBe('cooldown')
+    expect(result.denialReason).toBe('cooldown')
+    // The wall-clock deadline is no longer ahead of the jumped clock, so the
+    // recovery field is not a trustworthy future instant.
+    expect(result.cooldownUntil).toBeUndefined()
+    expect(result.recoveryAt).toBeUndefined()
+
+    // reserve() still denies with cooldown: diagnostics agree with the store.
+    await expect(store.reserve(profile, 1)).resolves.toMatchObject({
+      accepted: false,
+      reason: 'cooldown',
+    })
   })
 
   it('reports clock_rollback when the raw wall clock falls behind the high-water mark', async () => {
@@ -375,6 +490,33 @@ describe('GeminiQuotaStore.getDiagnosticState', () => {
 
     expect(JSON.stringify(storage.local)).toBe(localBefore)
     expect(JSON.stringify(storage.session)).toBe(sessionBefore)
+  })
+
+  it('does not claim a persisted v3 snapshot when the local write fails', async () => {
+    const storage = createStorage()
+    let failLocalWrite = true
+    const originalSetLocal = storage.setLocal.bind(storage)
+    storage.setLocal = async (value) => {
+      if (failLocalWrite) throw new Error('local write failed')
+      await originalSetLocal(value)
+    }
+    const store = new GeminiQuotaStore(storage, () => 10_000)
+
+    // A reservation mutation triggers persist(), whose local write throws.
+    await expect(store.reserve(profile, 1)).rejects.toThrow('local write failed')
+
+    // The persist metadata must not claim a successful persisted v3 snapshot.
+    const diagnostic = await store.getDiagnosticState()
+    expect(diagnostic.snapshot.isPresent).toBe(false)
+    expect(diagnostic.snapshot.version).toBeNull()
+    expect(diagnostic.snapshot.hasSafeHighWaterMark).toBe(true)
+
+    // A later successful write commits the snapshot and flips the metadata.
+    failLocalWrite = false
+    await store.reserve(profile, 1)
+    const after = await store.getDiagnosticState()
+    expect(after.snapshot.isPresent).toBe(true)
+    expect(after.snapshot.version).toBe(3)
   })
 
   it('keeps separate per-model buckets ordered by persisted insertion', async () => {

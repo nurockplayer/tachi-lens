@@ -145,10 +145,14 @@ const handleMessage = (
           ? allResults.filter((entry) => entry.quotaKey === requested)
           : [deriveQuotaHealth({
               quotaKey: requested,
-              bucket: undefined,
+              // A requested key with no exact bucket inherits the ambiguous
+              // legacy baseline when one exists, mirroring how getBucket() clones
+              // legacyBaseline into a fresh bucket on first use.
+              bucket: diagnostic.legacyBaseline ?? undefined,
               snapshot: diagnostic.snapshot,
               wallNow: diagnostic.wallNow,
               highWaterMark: diagnostic.highWaterMark,
+              monotonicNow: diagnostic.monotonicNow,
             })]
         : allResults
       sendResponse({ type: 'quota_health_result', payload: results })

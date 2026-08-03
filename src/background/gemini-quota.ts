@@ -39,6 +39,8 @@ export interface QuotaBucketDiagnosticState {
   providerDay: string
   requestsToday: number
   cooldownUntil: number
+  /** Same cooldown source reserve() checks: monotonic deadline in monotonic ms. */
+  monotonicCooldownUntil: number
   hasConservativelyImputedRollingState: boolean
   hasConservativelyImputedDailyState: boolean
   hasUnsafeRollingCount: boolean
@@ -52,6 +54,8 @@ export interface QuotaDiagnosticState {
   /** Ambiguous legacy usage is copied into every bucket; reported once here. */
   legacyBaseline?: QuotaBucketDiagnosticState
   wallNow: number
+  /** Read from the same monotonic clock reserve() uses for cooldown checks. */
+  monotonicNow: number
   highWaterMark: number
   /** True when the raw wall clock is below the persisted high-water mark. */
   runtimeRollback: boolean
@@ -492,6 +496,7 @@ export class GeminiQuotaStore {
         buckets,
         legacyBaseline,
         wallNow: rawWallNow,
+        monotonicNow: this.readMonotonicNow(),
         highWaterMark,
         runtimeRollback: rawWallNow < highWaterMark,
       }
@@ -503,6 +508,7 @@ export class GeminiQuotaStore {
       providerDay: bucket.providerDay,
       requestsToday: bucket.requestsToday,
       cooldownUntil: bucket.cooldownUntil,
+      monotonicCooldownUntil: bucket.monotonicCooldownUntil,
       hasConservativelyImputedRollingState: bucket.reservations.some(
         (reservation) => reservation.id.startsWith('malformed:'),
       ),
@@ -852,6 +858,10 @@ export class GeminiQuotaStore {
   }
 
   private async persist(): Promise<void> {
+    // The diagnostics metadata only claims a persisted canonical snapshot once
+    // the local write actually succeeds. If persistLocal throws, the previous
+    // metadata stays untouched so diagnostics keep reflecting real persistence.
+    await this.persistLocal()
     // A completed write means canonical quota state now exists on disk.
     this.quotaStatePresent = true
     this.persistedQuotaVersion = QUOTA_STORAGE_VERSION
@@ -859,7 +869,6 @@ export class GeminiQuotaStore {
     // One local write is the restart-safe commit point. The session record is
     // only a legacy/best-effort mirror, so cross-area partial writes cannot
     // restore a quota state that was never committed.
-    await this.persistLocal()
     try {
       await this.persistSession()
     } catch {

@@ -112,6 +112,11 @@ const computeRollbackRecoveryAt = (options: {
  *
  * When bucket is undefined the bucket could not be materialized from persisted
  * state and a conservative fail-closed view is reported without mutating state.
+ *
+ * Cooldown classification uses the same monotonic cooldown state that
+ * GeminiQuotaStore.reserve() checks (`monotonicCooldownUntil > monotonicNow`),
+ * so a forward wall-clock jump that would still deny a reservation is reported
+ * as cooldown instead of healthy.
  */
 export const deriveQuotaHealth = (options: {
   quotaKey: string
@@ -119,8 +124,10 @@ export const deriveQuotaHealth = (options: {
   snapshot: QuotaSnapshotDiagnosticState
   wallNow: number
   highWaterMark: number
+  /** Monotonic clock reading from the store; only required when bucket is set. */
+  monotonicNow?: number
 }): QuotaHealthResult => {
-  const { quotaKey, bucket, snapshot, wallNow, highWaterMark } = options
+  const { quotaKey, bucket, snapshot, wallNow, highWaterMark, monotonicNow } = options
   const snapshotStatus = classifySnapshot(snapshot)
 
   let status: QuotaHealthStatus
@@ -143,7 +150,21 @@ export const deriveQuotaHealth = (options: {
       ) {
         // Integrity problems outrank a temporary cooldown.
         status = 'malformed_snapshot'
-      } else if (bucket.cooldownUntil > wallNow) {
+      } else if (
+        monotonicNow !== undefined &&
+        bucket.monotonicCooldownUntil > monotonicNow
+      ) {
+        // Same cooldown source reserve() checks. This stays active across a
+        // forward wall-clock jump, matching the store's monotonic deadline.
+        status = 'cooldown'
+        denialReason = 'cooldown'
+        if (snapshot.clockTrusted && bucket.cooldownUntil > wallNow) {
+          cooldownUntil = bucket.cooldownUntil
+        }
+      } else if (snapshot.clockTrusted && bucket.cooldownUntil > wallNow) {
+        // Monotonic cooldown has already elapsed but the persisted wall-clock
+        // deadline is still in the future. Trust the wall clock (no rollback
+        // was detected) and keep reporting cooldown.
         status = 'cooldown'
         denialReason = 'cooldown'
         cooldownUntil = bucket.cooldownUntil
@@ -206,6 +227,7 @@ export const collectQuotaHealthResults = (diagnostic: QuotaDiagnosticState): Quo
       snapshot: diagnostic.snapshot,
       wallNow: diagnostic.wallNow,
       highWaterMark: diagnostic.highWaterMark,
+      monotonicNow: diagnostic.monotonicNow,
     }))
   }
 
@@ -216,6 +238,7 @@ export const collectQuotaHealthResults = (diagnostic: QuotaDiagnosticState): Quo
       snapshot: diagnostic.snapshot,
       wallNow: diagnostic.wallNow,
       highWaterMark: diagnostic.highWaterMark,
+      monotonicNow: diagnostic.monotonicNow,
     }))
   }
 
@@ -226,6 +249,7 @@ export const collectQuotaHealthResults = (diagnostic: QuotaDiagnosticState): Quo
       snapshot: diagnostic.snapshot,
       wallNow: diagnostic.wallNow,
       highWaterMark: diagnostic.highWaterMark,
+      monotonicNow: diagnostic.monotonicNow,
     }))
   }
 
