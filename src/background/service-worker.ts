@@ -12,13 +12,14 @@ import {
   saveApiKey,
   saveUserSettings,
 } from '@/storage/settings'
-import { isBaseMessage, isDiagnosticEventMessage } from '@/shared/messages'
+import { isBaseMessage, isDiagnosticEventMessage, isGetQuotaHealthMessage } from '@/shared/messages'
 import type { DiagnosticEvent, SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { createSystemClock } from './clock'
 import { createMessageRouter } from './message-router'
 import { RateLimiter } from './rate-limiter'
 import { createRestartSafeReservationId, GeminiQuotaStore } from './gemini-quota'
+import { collectQuotaHealthResults, deriveQuotaHealth } from './quota-health'
 import { QuotaScheduler } from './quota-scheduler'
 import { Translator } from './translator'
 
@@ -33,7 +34,7 @@ initializeTrustedStorageAccess()
 const cache = new TranslationCache()
 const clock = createSystemClock()
 const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
-const quotaScheduler = new QuotaScheduler(new GeminiQuotaStore({
+const geminiQuotaStore = new GeminiQuotaStore({
   getSession: async () => {
     const items = await chrome.storage.session.get('geminiQuotaSession')
     return (items.geminiQuotaSession as Record<string, unknown> | undefined) ?? {}
@@ -44,7 +45,8 @@ const quotaScheduler = new QuotaScheduler(new GeminiQuotaStore({
     return (items.geminiQuotaUsage as Record<string, unknown> | undefined) ?? {}
   },
   setLocal: async (value) => chrome.storage.local.set({ geminiQuotaUsage: value }),
-}, clock, createRestartSafeReservationId), { clock })
+}, clock, createRestartSafeReservationId)
+const quotaScheduler = new QuotaScheduler(geminiQuotaStore, { clock })
 const translator = new Translator(
   {
     cache,
@@ -127,6 +129,35 @@ const handleMessage = (
   if (isBaseMessage(message) && message.type === 'get_diagnostics') {
     void getDiagnostics().then((events) =>
       sendResponse({ type: 'diagnostics_snapshot', payload: { events } }),
+    )
+    return true
+  }
+
+  if (isGetQuotaHealthMessage(message)) {
+    const requestedKey = message.payload?.quotaKey
+    void geminiQuotaStore.getDiagnosticState().then((diagnostic) => {
+      const allResults = collectQuotaHealthResults(diagnostic)
+      const requested = typeof requestedKey === 'string' && requestedKey.trim()
+        ? requestedKey.trim()
+        : undefined
+      const results = requested
+        ? allResults.some((entry) => entry.quotaKey === requested)
+          ? allResults.filter((entry) => entry.quotaKey === requested)
+          : [deriveQuotaHealth({
+              quotaKey: requested,
+              // A requested key with no exact bucket inherits the ambiguous
+              // legacy baseline when one exists, mirroring how getBucket() clones
+              // legacyBaseline into a fresh bucket on first use.
+              bucket: diagnostic.legacyBaseline ?? undefined,
+              snapshot: diagnostic.snapshot,
+              wallNow: diagnostic.wallNow,
+              highWaterMark: diagnostic.highWaterMark,
+              monotonicNow: diagnostic.monotonicNow,
+            })]
+        : allResults
+      sendResponse({ type: 'quota_health_result', payload: results })
+    }).catch(() =>
+      sendResponse({ type: 'quota_health_result', payload: [] }),
     )
     return true
   }

@@ -1,4 +1,5 @@
 import { createSystemClock, type Clock } from './clock'
+import type { QuotaHealthDenialReason } from '@/shared/messages'
 
 export interface GeminiQuotaSettings {
   requestsPerMinute: number
@@ -22,7 +23,55 @@ export const DEFAULT_GEMINI_QUOTA: GeminiQuotaSettings = {
   maxConcurrency: 1,
 }
 
-export type GeminiQuotaDenial = 'rpm' | 'tpm' | 'rpd' | 'cooldown' | 'clock_rollback'
+export type GeminiQuotaDenial = QuotaHealthDenialReason
+
+/** Read-only view of the persisted quota snapshot used for diagnostics. */
+export interface QuotaSnapshotDiagnosticState {
+  isPresent: boolean
+  version: number | null
+  hasSafeHighWaterMark: boolean
+  clockTrusted: boolean
+  hasUnsafeDailyCount: boolean
+}
+
+/** Read-only view of one in-memory bucket used for diagnostics. */
+export interface QuotaBucketDiagnosticState {
+  providerDay: string
+  /**
+   * Whether providerDay is a trustworthy verbatim persisted value. Synthetic or
+   * normalized substitutions (current-day fallbacks for invalid persisted days,
+   * legacy/conservative buckets) are never trusted.
+   */
+  providerDayTrusted: boolean
+  /**
+   * Canonical bucket whose persisted provider day string was invalid and had to
+   * be substituted. Such a bucket is reported as malformed_snapshot rather than
+   * a healthy normalized state.
+   */
+  hasInvalidProviderDay: boolean
+  requestsToday: number
+  cooldownUntil: number
+  /** Same cooldown source reserve() checks: monotonic deadline in monotonic ms. */
+  monotonicCooldownUntil: number
+  hasConservativelyImputedRollingState: boolean
+  hasConservativelyImputedDailyState: boolean
+  hasUnsafeRollingCount: boolean
+}
+
+/** Complete read-only diagnostic state extracted from GeminiQuotaStore. */
+export interface QuotaDiagnosticState {
+  snapshot: QuotaSnapshotDiagnosticState
+  bucketIndex: Record<string, number>
+  buckets: Record<string, QuotaBucketDiagnosticState>
+  /** Ambiguous legacy usage is copied into every bucket; reported once here. */
+  legacyBaseline?: QuotaBucketDiagnosticState
+  wallNow: number
+  /** Read from the same monotonic clock reserve() uses for cooldown checks. */
+  monotonicNow: number
+  highWaterMark: number
+  /** True when the raw wall clock is below the persisted high-water mark. */
+  runtimeRollback: boolean
+}
 
 export interface GeminiQuotaReservation {
   accepted: boolean
@@ -83,12 +132,17 @@ interface LocalState {
   requestsToday: number
 }
 
-interface QuotaBucketState extends SessionState, LocalState {}
+interface QuotaBucketState extends SessionState, LocalState {
+  /** Verbatim persisted provider day; false once a substitute was applied. */
+  providerDayTrusted: boolean
+  /** Set only on canonical loads where the persisted provider day was invalid. */
+  hasInvalidProviderDay: boolean
+}
 
 const ROLLING_WINDOW_MS = 60_000
 const PROVIDER_TIME_ZONE = 'America/Los_Angeles'
 const MAX_PROVIDER_DAY_MS = 36 * 3_600_000
-const QUOTA_STORAGE_VERSION = 3
+export const QUOTA_STORAGE_VERSION = 3
 const DEFAULT_QUOTA_BUCKET = 'default'
 
 const providerDayFormatter = new Intl.DateTimeFormat('en-US', {
@@ -251,6 +305,12 @@ export class GeminiQuotaStore {
   private lastMonotonicNow: number | undefined
   private mutation = Promise.resolve()
   private clock: Clock
+  /** Original persisted snapshot version; null when no quota state exists. */
+  private persistedQuotaVersion: number | null = null
+  /** Whether the persisted snapshot carried a trustworthy high-water mark. */
+  private safeHighWaterMark = true
+  /** Whether any persisted quota state exists at all. */
+  private quotaStatePresent = false
 
   constructor(
     private storage: QuotaStorage,
@@ -411,6 +471,73 @@ export class GeminiQuotaStore {
     })
   }
 
+  /**
+   * Exposes a read-only view of the loaded quota state for diagnostics.
+   * Never mutates, normalizes, or repairs persisted state. Reads only what is
+   * already loaded; the store is hydrated lazily when a write has occurred.
+   */
+  async getDiagnosticState(): Promise<QuotaDiagnosticState> {
+    return this.exclusively(async () => {
+      // Hydrate from persisted storage. Loading only reads and classifies; it
+      // never writes back, so diagnostics remain strictly read-only.
+      await this.load()
+
+      const snapshot: QuotaSnapshotDiagnosticState = {
+        isPresent: this.quotaStatePresent,
+        version: this.persistedQuotaVersion,
+        hasSafeHighWaterMark: this.safeHighWaterMark,
+        clockTrusted: this.clockTrusted,
+        hasUnsafeDailyCount: Array.from(this.buckets!.values()).some(
+          (bucket) => bucket.requestsToday === Number.MAX_SAFE_INTEGER,
+        ),
+      }
+
+      const bucketIndex: Record<string, number> = {}
+      const buckets: Record<string, QuotaBucketDiagnosticState> = {}
+      let order = 0
+      for (const [key, bucket] of this.buckets!) {
+        bucketIndex[key] = order++
+        buckets[key] = this.toBucketDiagnostic(bucket)
+      }
+
+      const legacyBaseline = this.legacyBaseline
+        ? this.toBucketDiagnostic(this.legacyBaseline)
+        : undefined
+
+      const rawWallNow = this.readWallNow()
+      const highWaterMark = this.wallHighWaterMark ?? rawWallNow
+
+      return {
+        snapshot,
+        bucketIndex,
+        buckets,
+        legacyBaseline,
+        wallNow: rawWallNow,
+        monotonicNow: this.readMonotonicNow(),
+        highWaterMark,
+        runtimeRollback: rawWallNow < highWaterMark,
+      }
+    })
+  }
+
+  private toBucketDiagnostic(bucket: QuotaBucketState): QuotaBucketDiagnosticState {
+    return {
+      providerDay: bucket.providerDay,
+      providerDayTrusted: bucket.providerDayTrusted,
+      hasInvalidProviderDay: bucket.hasInvalidProviderDay,
+      requestsToday: bucket.requestsToday,
+      cooldownUntil: bucket.cooldownUntil,
+      monotonicCooldownUntil: bucket.monotonicCooldownUntil,
+      hasConservativelyImputedRollingState: bucket.reservations.some(
+        (reservation) => reservation.id.startsWith('malformed:'),
+      ),
+      hasConservativelyImputedDailyState: bucket.requestsToday === Number.MAX_SAFE_INTEGER,
+      hasUnsafeRollingCount: bucket.reservations.some(
+        (reservation) => reservation.inputTokens === Number.MAX_SAFE_INTEGER,
+      ),
+    }
+  }
+
   private async exclusively<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.mutation
     let release!: () => void
@@ -434,8 +561,11 @@ export class GeminiQuotaStore {
     let legacyBaseline: QuotaBucketState | undefined
 
     if (storedLocal.quotaVersion === QUOTA_STORAGE_VERSION) {
+      this.quotaStatePresent = true
+      this.persistedQuotaVersion = QUOTA_STORAGE_VERSION
       const storedHighWater = storedLocal.wallHighWaterMark
       const validHighWater = isStoredCount(storedHighWater)
+      this.safeHighWaterMark = validHighWater
       this.clockTrusted = validHighWater && storedLocal.clockTrusted === true
       this.wallHighWaterMark = validHighWater ? Math.floor(storedHighWater) : wallNow
       const trustedWallNow = Math.max(wallNow, this.wallHighWaterMark)
@@ -471,6 +601,9 @@ export class GeminiQuotaStore {
     const hasAnyQuotaState = Object.keys(storedLocal).length > 0 || Object.keys(storedSession).length > 0
 
     if (!hasAnyQuotaState) {
+      this.quotaStatePresent = false
+      this.persistedQuotaVersion = null
+      this.safeHighWaterMark = true
       this.clockTrusted = true
       this.wallHighWaterMark = wallNow
       this.buckets = buckets
@@ -479,7 +612,10 @@ export class GeminiQuotaStore {
     }
 
     if (storedLocal.quotaVersion === 2) {
+      this.quotaStatePresent = true
+      this.persistedQuotaVersion = 2
       const derivedHighWater = getCompleteVersionTwoHighWater(storedLocal)
+      this.safeHighWaterMark = derivedHighWater !== undefined
       this.clockTrusted = derivedHighWater !== undefined
       this.wallHighWaterMark = derivedHighWater ?? wallNow
       const trustedWallNow = Math.max(wallNow, this.wallHighWaterMark)
@@ -503,14 +639,26 @@ export class GeminiQuotaStore {
         legacyBaseline = legacyBaseline ?? this.conservativeBucket(wallNow, monotonicNow)
       }
     } else if (storedLocal.quotaVersion === 1) {
+      this.quotaStatePresent = true
+      this.persistedQuotaVersion = 1
+      this.safeHighWaterMark = false
       this.clockTrusted = true
       this.wallHighWaterMark = wallNow
       legacyBaseline = this.readVersionOneBucket(storedLocal, wallNow, monotonicNow)
     } else if (storedLocal.quotaVersion !== undefined) {
+      this.quotaStatePresent = true
+      this.persistedQuotaVersion =
+        typeof storedLocal.quotaVersion === 'number' && Number.isFinite(storedLocal.quotaVersion)
+          ? storedLocal.quotaVersion
+          : null
+      this.safeHighWaterMark = false
       this.clockTrusted = false
       this.wallHighWaterMark = wallNow
       legacyBaseline = this.conservativeBucket(wallNow, monotonicNow, storedLocal)
     } else {
+      this.quotaStatePresent = true
+      this.persistedQuotaVersion = null
+      this.safeHighWaterMark = false
       this.clockTrusted = true
       this.wallHighWaterMark = wallNow
       legacyBaseline = this.readLegacyBucket(storedLocal, storedSession, wallNow, monotonicNow)
@@ -536,6 +684,13 @@ export class GeminiQuotaStore {
     const validRollingState = Array.isArray(value.reservations) && isStoredCount(value.cooldownUntil)
     const cooldownUntil = toNonNegativeInteger(value.cooldownUntil)
     const remainingCooldown = Math.max(0, cooldownUntil - trustedWallNow)
+    const storedProviderDay = isProviderDay(value.providerDay)
+      ? value.providerDay
+      : undefined
+    // The persisted day is only adopted verbatim when the daily count is also a
+    // valid stored count. Otherwise the current day substitutes so the rollover
+    // logic can never zero a malformed fail-closed count that merely looks old.
+    const useStoredProviderDay = validRequestsToday && storedProviderDay !== undefined
 
     return {
       reservations: validRollingState
@@ -543,9 +698,12 @@ export class GeminiQuotaStore {
         : [conservativeReservation(trustedWallNow, monotonicNow, 0)],
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + remainingCooldown,
-      providerDay: validRequestsToday && isProviderDay(value.providerDay)
-        ? value.providerDay
-        : currentProviderDay,
+      providerDay: useStoredProviderDay ? storedProviderDay! : currentProviderDay,
+      // The substituted current day is never exposed as trusted persisted data.
+      providerDayTrusted: useStoredProviderDay,
+      // Provenance flag for diagnostics: a canonical bucket whose persisted
+      // provider day string itself was invalid must surface as malformed_snapshot.
+      hasInvalidProviderDay: storedProviderDay === undefined,
       requestsToday,
     }
   }
@@ -571,6 +729,10 @@ export class GeminiQuotaStore {
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + Math.max(0, cooldownUntil - wallNow),
       providerDay: currentProviderDay,
+      // The v1 loader always resets the day to today's value, so it never
+      // exposes the persisted string as trusted provider-day data.
+      providerDayTrusted: false,
+      hasInvalidProviderDay: false,
       requestsToday: providerDayIsPast && isStoredCount(storedRequestsToday) ? 0 : requestsToday,
     }
   }
@@ -588,6 +750,9 @@ export class GeminiQuotaStore {
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + Math.max(0, cooldownUntil - wallNow),
       providerDay: currentProviderDay,
+      // The legacy loader invents today's day; it is not persisted provider data.
+      providerDayTrusted: false,
+      hasInvalidProviderDay: false,
       // Legacy provider-day identity used a fixed offset, so even a date that
       // appears old is ambiguous around DST/midnight and must retain usage.
       requestsToday: isStoredCount(local.requestsToday)
@@ -607,6 +772,9 @@ export class GeminiQuotaStore {
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + Math.max(0, cooldownUntil - wallNow),
       providerDay: getGeminiProviderDayId(wallNow),
+      // A synthetic fail-closed bucket never exposes a trusted persisted day.
+      providerDayTrusted: false,
+      hasInvalidProviderDay: false,
       requestsToday: isStoredCount(value.requestsToday)
         ? Math.floor(value.requestsToday)
         : Number.MAX_SAFE_INTEGER,
@@ -628,6 +796,8 @@ export class GeminiQuotaStore {
           cooldownUntil: 0,
           monotonicCooldownUntil: 0,
           providerDay: getGeminiProviderDayId(time.wallNow),
+          providerDayTrusted: false,
+          hasInvalidProviderDay: false,
           requestsToday: 0,
         }
     this.buckets!.set(key, bucket)
@@ -729,10 +899,17 @@ export class GeminiQuotaStore {
   }
 
   private async persist(): Promise<void> {
+    // The diagnostics metadata only claims a persisted canonical snapshot once
+    // the local write actually succeeds. If persistLocal throws, the previous
+    // metadata stays untouched so diagnostics keep reflecting real persistence.
+    await this.persistLocal()
+    // A completed write means canonical quota state now exists on disk.
+    this.quotaStatePresent = true
+    this.persistedQuotaVersion = QUOTA_STORAGE_VERSION
+    this.safeHighWaterMark = true
     // One local write is the restart-safe commit point. The session record is
     // only a legacy/best-effort mirror, so cross-area partial writes cannot
     // restore a quota state that was never committed.
-    await this.persistLocal()
     try {
       await this.persistSession()
     } catch {

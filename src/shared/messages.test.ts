@@ -3,11 +3,15 @@ import {
   isBaseMessage,
   isContentSettingsRequestMessage,
   isErrorNotificationMessage,
+  isGetQuotaHealthMessage,
+  isQuotaHealthResult,
+  isQuotaHealthResultMessage,
   isSettingsUpdateMessage,
   isTranslationRequestMessage,
   serializeMessage,
   type BaseMessage,
   type ErrorNotification,
+  type QuotaHealthResult,
   type TranslationRequest,
   type SettingsUpdatePayload,
 } from './messages'
@@ -142,5 +146,138 @@ describe('settings_updated message', () => {
 
   it('rejects non-settings_updated messages', () => {
     expect(isSettingsUpdateMessage({ type: 'translate_request', payload: {} })).toBe(false)
+  })
+})
+
+describe('quota_health messages', () => {
+  it('accepts a healthy quota-health result and preserves the fields', () => {
+    const result: QuotaHealthResult = {
+      quotaKey: 'gemini-2.5-flash',
+      status: 'healthy',
+      providerDay: '2026-07-13',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+    }
+
+    expect(isQuotaHealthResult(result)).toBe(true)
+    const serialized = serializeMessage({ type: 'quota_health_result', payload: [result] } as const)
+    const parsed = JSON.parse(serialized)
+    expect(isQuotaHealthResultMessage(parsed)).toBe(true)
+    expect(parsed.payload[0]).toEqual(result)
+  })
+
+  it('accepts a cooldown result with denialReason and cooldownUntil', () => {
+    const result = {
+      quotaKey: 'gemini-2.5-flash',
+      status: 'cooldown',
+      denialReason: 'cooldown',
+      providerDay: '2026-07-13',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+      cooldownUntil: 1_234_567_890,
+    }
+
+    expect(isQuotaHealthResult(result)).toBe(true)
+  })
+
+  it('accepts a clock-rollback result with recoveryAt', () => {
+    const result = {
+      quotaKey: 'default',
+      status: 'clock_rollback',
+      denialReason: 'clock_rollback',
+      providerDay: '2026-07-13',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+      recoveryAt: 1_234_567_890,
+    }
+
+    expect(isQuotaHealthResult(result)).toBe(true)
+  })
+
+  it('accepts the integrity statuses and rejects unknown statuses', () => {
+    for (const status of ['untrusted_migration', 'malformed_snapshot', 'unsupported_version']) {
+      expect(isQuotaHealthResult({
+        quotaKey: 'default',
+        status,
+        snapshotVersion: 3,
+        snapshotStatus: status === 'unsupported_version' ? 'unsupported_version' : 'complete',
+      })).toBe(true)
+    }
+
+    expect(isQuotaHealthResult({
+      quotaKey: 'default',
+      status: 'not_a_status',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+    })).toBe(false)
+  })
+
+  it('rejects quota-health results with unknown denial reasons or malformed snapshot statuses', () => {
+    expect(isQuotaHealthResult({
+      quotaKey: 'default',
+      status: 'cooldown',
+      denialReason: 'banana',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+    })).toBe(false)
+
+    expect(isQuotaHealthResult({
+      quotaKey: 'default',
+      status: 'healthy',
+      snapshotVersion: 3,
+      snapshotStatus: 'banana',
+    })).toBe(false)
+  })
+
+  it('rejects quota-health results with non-numeric recovery or cooldown timestamps', () => {
+    expect(isQuotaHealthResult({
+      quotaKey: 'default',
+      status: 'clock_rollback',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+      recoveryAt: 'banana',
+    })).toBe(false)
+
+    expect(isQuotaHealthResult({
+      quotaKey: 'default',
+      status: 'cooldown',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+      cooldownUntil: Number.NaN,
+    })).toBe(false)
+  })
+
+  it('narrows get_quota_health requests with and without a quotaKey', () => {
+    expect(isGetQuotaHealthMessage({ type: 'get_quota_health', payload: {} })).toBe(true)
+    expect(isGetQuotaHealthMessage({
+      type: 'get_quota_health',
+      payload: { quotaKey: 'gemini-2.5-flash' },
+    })).toBe(true)
+    expect(isGetQuotaHealthMessage({ type: 'get_quota_health', payload: { quotaKey: 123 } })).toBe(false)
+    expect(isGetQuotaHealthMessage({ type: 'get_diagnostics', payload: {} })).toBe(false)
+  })
+
+  it('serializes a full quota_health_result through the message boundary', () => {
+    const result: QuotaHealthResult = {
+      quotaKey: 'gemini-2.5-flash',
+      status: 'clock_rollback',
+      denialReason: 'clock_rollback',
+      providerDay: '2026-07-13',
+      snapshotVersion: 3,
+      snapshotStatus: 'complete',
+      recoveryAt: 1_234_567_890,
+    }
+    const msg: BaseMessage<'quota_health_result', QuotaHealthResult[]> = {
+      type: 'quota_health_result',
+      payload: [result],
+    }
+    const serialized = serializeMessage(msg)
+    const parsed: unknown = JSON.parse(serialized)
+    if (!isQuotaHealthResultMessage(parsed)) {
+      throw new Error('Expected a valid quota_health_result message')
+    }
+    expect(parsed.payload).toHaveLength(1)
+    expect(parsed.payload[0]!.status).toBe('clock_rollback')
+    expect(JSON.stringify(parsed)).not.toContain('secret')
   })
 })
