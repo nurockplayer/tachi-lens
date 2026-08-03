@@ -9,6 +9,7 @@ import {
   type GeminiQuotaSettings,
   type QuotaStorage,
 } from './gemini-quota'
+import { collectQuotaHealthResults } from './quota-health'
 
 const profile: GeminiQuotaSettings = {
   requestsPerMinute: 5,
@@ -723,6 +724,55 @@ describe('GeminiQuotaStore', () => {
     const store = new GeminiQuotaStore(storage, () => now)
 
     await expect(store.getUsage()).resolves.toMatchObject({ requestsToday: Number.MAX_SAFE_INTEGER })
+  })
+
+  it('flags a canonical bucket with an invalid persisted provider day as malformed without mutating storage', async () => {
+    const storage = createStorage()
+    const now = Date.UTC(2026, 6, 13, 12, 0, 0)
+    Object.assign(storage.local, {
+      quotaVersion: 3,
+      wallHighWaterMark: now,
+      clockTrusted: true,
+      buckets: {
+        default: {
+          reservations: [],
+          cooldownUntil: 0,
+          // The persisted provider day string is impossible, but every other
+          // field is valid. The loader substitutes a day to keep operating
+          // fail-closed, yet must never report the substitute as trusted data.
+          providerDay: '2026-02-30',
+          requestsToday: 200,
+        },
+      },
+    })
+    const store = new GeminiQuotaStore(storage, () => now)
+    const permissive = {
+      ...profile,
+      requestsPerMinute: 100,
+      inputTokensPerMinute: 100_000,
+      requestsPerDay: 100,
+    }
+
+    const diagnostic = await store.getDiagnosticState()
+    expect(diagnostic.snapshot.hasSafeHighWaterMark).toBe(true)
+    expect(diagnostic.snapshot.clockTrusted).toBe(true)
+    expect(diagnostic.buckets.default!.hasInvalidProviderDay).toBe(true)
+    expect(diagnostic.buckets.default!.providerDayTrusted).toBe(false)
+    const result = collectQuotaHealthResults(diagnostic)[0]!
+    expect(result.status).toBe('malformed_snapshot')
+    expect(result.providerDay).toBeUndefined()
+
+    // The read must not repair or normalize persisted storage.
+    expect((storage.local.buckets as Record<string, { providerDay: string }>).default!.providerDay)
+      .toBe('2026-02-30')
+
+    // Fail-closed accounting: the persisted daily count is retained (never
+    // zeroed by provenance substitution), so the daily limit still denies.
+    await expect(store.reserve(permissive, 1)).resolves.toMatchObject({
+      accepted: false,
+      reason: 'rpd',
+    })
+    await expect(store.getUsage()).resolves.toMatchObject({ requestsToday: 200 })
   })
 
   it('resets RPD only for a valid canonical day that is provably in the past', async () => {

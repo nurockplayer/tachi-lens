@@ -37,6 +37,18 @@ export interface QuotaSnapshotDiagnosticState {
 /** Read-only view of one in-memory bucket used for diagnostics. */
 export interface QuotaBucketDiagnosticState {
   providerDay: string
+  /**
+   * Whether providerDay is a trustworthy verbatim persisted value. Synthetic or
+   * normalized substitutions (current-day fallbacks for invalid persisted days,
+   * legacy/conservative buckets) are never trusted.
+   */
+  providerDayTrusted: boolean
+  /**
+   * Canonical bucket whose persisted provider day string was invalid and had to
+   * be substituted. Such a bucket is reported as malformed_snapshot rather than
+   * a healthy normalized state.
+   */
+  hasInvalidProviderDay: boolean
   requestsToday: number
   cooldownUntil: number
   /** Same cooldown source reserve() checks: monotonic deadline in monotonic ms. */
@@ -120,7 +132,12 @@ interface LocalState {
   requestsToday: number
 }
 
-interface QuotaBucketState extends SessionState, LocalState {}
+interface QuotaBucketState extends SessionState, LocalState {
+  /** Verbatim persisted provider day; false once a substitute was applied. */
+  providerDayTrusted: boolean
+  /** Set only on canonical loads where the persisted provider day was invalid. */
+  hasInvalidProviderDay: boolean
+}
 
 const ROLLING_WINDOW_MS = 60_000
 const PROVIDER_TIME_ZONE = 'America/Los_Angeles'
@@ -506,6 +523,8 @@ export class GeminiQuotaStore {
   private toBucketDiagnostic(bucket: QuotaBucketState): QuotaBucketDiagnosticState {
     return {
       providerDay: bucket.providerDay,
+      providerDayTrusted: bucket.providerDayTrusted,
+      hasInvalidProviderDay: bucket.hasInvalidProviderDay,
       requestsToday: bucket.requestsToday,
       cooldownUntil: bucket.cooldownUntil,
       monotonicCooldownUntil: bucket.monotonicCooldownUntil,
@@ -665,6 +684,13 @@ export class GeminiQuotaStore {
     const validRollingState = Array.isArray(value.reservations) && isStoredCount(value.cooldownUntil)
     const cooldownUntil = toNonNegativeInteger(value.cooldownUntil)
     const remainingCooldown = Math.max(0, cooldownUntil - trustedWallNow)
+    const storedProviderDay = isProviderDay(value.providerDay)
+      ? value.providerDay
+      : undefined
+    // The persisted day is only adopted verbatim when the daily count is also a
+    // valid stored count. Otherwise the current day substitutes so the rollover
+    // logic can never zero a malformed fail-closed count that merely looks old.
+    const useStoredProviderDay = validRequestsToday && storedProviderDay !== undefined
 
     return {
       reservations: validRollingState
@@ -672,9 +698,12 @@ export class GeminiQuotaStore {
         : [conservativeReservation(trustedWallNow, monotonicNow, 0)],
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + remainingCooldown,
-      providerDay: validRequestsToday && isProviderDay(value.providerDay)
-        ? value.providerDay
-        : currentProviderDay,
+      providerDay: useStoredProviderDay ? storedProviderDay! : currentProviderDay,
+      // The substituted current day is never exposed as trusted persisted data.
+      providerDayTrusted: useStoredProviderDay,
+      // Provenance flag for diagnostics: a canonical bucket whose persisted
+      // provider day string itself was invalid must surface as malformed_snapshot.
+      hasInvalidProviderDay: storedProviderDay === undefined,
       requestsToday,
     }
   }
@@ -700,6 +729,10 @@ export class GeminiQuotaStore {
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + Math.max(0, cooldownUntil - wallNow),
       providerDay: currentProviderDay,
+      // The v1 loader always resets the day to today's value, so it never
+      // exposes the persisted string as trusted provider-day data.
+      providerDayTrusted: false,
+      hasInvalidProviderDay: false,
       requestsToday: providerDayIsPast && isStoredCount(storedRequestsToday) ? 0 : requestsToday,
     }
   }
@@ -717,6 +750,9 @@ export class GeminiQuotaStore {
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + Math.max(0, cooldownUntil - wallNow),
       providerDay: currentProviderDay,
+      // The legacy loader invents today's day; it is not persisted provider data.
+      providerDayTrusted: false,
+      hasInvalidProviderDay: false,
       // Legacy provider-day identity used a fixed offset, so even a date that
       // appears old is ambiguous around DST/midnight and must retain usage.
       requestsToday: isStoredCount(local.requestsToday)
@@ -736,6 +772,9 @@ export class GeminiQuotaStore {
       cooldownUntil,
       monotonicCooldownUntil: monotonicNow + Math.max(0, cooldownUntil - wallNow),
       providerDay: getGeminiProviderDayId(wallNow),
+      // A synthetic fail-closed bucket never exposes a trusted persisted day.
+      providerDayTrusted: false,
+      hasInvalidProviderDay: false,
       requestsToday: isStoredCount(value.requestsToday)
         ? Math.floor(value.requestsToday)
         : Number.MAX_SAFE_INTEGER,
@@ -757,6 +796,8 @@ export class GeminiQuotaStore {
           cooldownUntil: 0,
           monotonicCooldownUntil: 0,
           providerDay: getGeminiProviderDayId(time.wallNow),
+          providerDayTrusted: false,
+          hasInvalidProviderDay: false,
           requestsToday: 0,
         }
     this.buckets!.set(key, bucket)

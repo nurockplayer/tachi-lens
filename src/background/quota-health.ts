@@ -116,7 +116,9 @@ const computeRollbackRecoveryAt = (options: {
  * Cooldown classification uses the same monotonic cooldown state that
  * GeminiQuotaStore.reserve() checks (`monotonicCooldownUntil > monotonicNow`),
  * so a forward wall-clock jump that would still deny a reservation is reported
- * as cooldown instead of healthy.
+ * as cooldown instead of healthy. Once the monotonic deadline elapses the
+ * store clears the cooldown and reserve() admits again, so the diagnostics
+ * never report cooldown based on the wall-clock field alone.
  */
 export const deriveQuotaHealth = (options: {
   quotaKey: string
@@ -124,7 +126,11 @@ export const deriveQuotaHealth = (options: {
   snapshot: QuotaSnapshotDiagnosticState
   wallNow: number
   highWaterMark: number
-  /** Monotonic clock reading from the store; only required when bucket is set. */
+  /**
+   * Monotonic clock reading from the store. Required whenever a bucket is
+   * provided (the store always has one); the fallback deriveQuotaHealth call
+   * without a bucket does not need it.
+   */
   monotonicNow?: number
 }): QuotaHealthResult => {
   const { quotaKey, bucket, snapshot, wallNow, highWaterMark, monotonicNow } = options
@@ -137,7 +143,16 @@ export const deriveQuotaHealth = (options: {
   let recoveryAt: number | undefined
 
   if (bucket) {
-    providerDay = bucket.providerDay
+    if (monotonicNow === undefined) {
+      throw new Error('monotonicNow is required when a quota bucket is provided')
+    }
+    // providerDay is only exposed when the snapshot is complete and the day is
+    // a verbatim trusted persisted value. untrusted_migration and
+    // unsupported_version never carry a trustworthy provider day, and a
+    // substituted/normalized day is never exposed as persisted data.
+    if (snapshotStatus === 'complete' && bucket.providerDayTrusted) {
+      providerDay = bucket.providerDay
+    }
     if (snapshotStatus === 'complete') {
       if (isRollbackActive({ bucket, wallNow, highWaterMark })) {
         status = 'clock_rollback'
@@ -146,12 +161,14 @@ export const deriveQuotaHealth = (options: {
       } else if (
         bucket.hasConservativelyImputedRollingState ||
         bucket.hasConservativelyImputedDailyState ||
-        bucket.hasUnsafeRollingCount
+        bucket.hasUnsafeRollingCount ||
+        bucket.hasInvalidProviderDay
       ) {
-        // Integrity problems outrank a temporary cooldown.
+        // Integrity problems outrank a temporary cooldown. An invalid persisted
+        // provider day is provenance corruption, so it is never normalized into
+        // a healthy state.
         status = 'malformed_snapshot'
       } else if (
-        monotonicNow !== undefined &&
         bucket.monotonicCooldownUntil > monotonicNow
       ) {
         // Same cooldown source reserve() checks. This stays active across a
@@ -161,13 +178,6 @@ export const deriveQuotaHealth = (options: {
         if (snapshot.clockTrusted && bucket.cooldownUntil > wallNow) {
           cooldownUntil = bucket.cooldownUntil
         }
-      } else if (snapshot.clockTrusted && bucket.cooldownUntil > wallNow) {
-        // Monotonic cooldown has already elapsed but the persisted wall-clock
-        // deadline is still in the future. Trust the wall clock (no rollback
-        // was detected) and keep reporting cooldown.
-        status = 'cooldown'
-        denialReason = 'cooldown'
-        cooldownUntil = bucket.cooldownUntil
       } else {
         status = 'healthy'
       }
