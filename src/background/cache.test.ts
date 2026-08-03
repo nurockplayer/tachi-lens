@@ -1,12 +1,30 @@
 import { describe, expect, it } from 'vitest'
+import { buildTranslationIdentity } from '@/shared/translation-identity'
 import { TranslationCache } from './cache'
 
 describe('TranslationCache', () => {
   describe('buildKey', () => {
-    it('builds a cache key from text and params', () => {
+    it('delegates to the canonical translation identity', () => {
       const cache = new TranslationCache()
       const key = cache.buildKey('Hello', 'zh-TW', 'deepseek', 'deepseek-v4-flash')
-      expect(key).toBe('Hello|zh-TW|deepseek|deepseek-v4-flash')
+      expect(key).toBe(buildTranslationIdentity({
+        text: 'Hello',
+        targetLang: 'zh-TW',
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+      }))
+    })
+
+    it('includes the source-language hint when present', () => {
+      const cache = new TranslationCache()
+      const key = cache.buildKey('Hello', 'zh-TW', 'deepseek', 'deepseek-v4-flash', 'en')
+      expect(key).toBe(buildTranslationIdentity({
+        text: 'Hello',
+        targetLang: 'zh-TW',
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+        sourceLang: 'en',
+      }))
     })
   })
 
