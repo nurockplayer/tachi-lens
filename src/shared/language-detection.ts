@@ -111,6 +111,15 @@ const isHangul = (code: number): boolean =>
   (code >= 0xD7B0 && code <= 0xD7FF)    // Hangul Jamo Extended-B
 
 /**
+ * Bopomofo (Zhuyin) phonetic characters, used in Traditional Chinese
+ * chat. Neutral Chinese phonetic content: it is not a foreign letter and
+ * does not determine Simplified/Traditional direction.
+ */
+const isBopomofo = (code: number): boolean =>
+  (code >= 0x3100 && code <= 0x312F) || // Bopomofo
+  (code >= 0x31A0 && code <= 0x31BF)    // Bopomofo Extended
+
+/**
  * Any Unicode letter that is not Han, Kana, or Hangul.
  *
  * Han, Kana, and Hangul are handled earlier in the analysis loop (each
@@ -194,6 +203,12 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
 
     if (isHangul(code)) {
       hasHangul = true
+      continue
+    }
+
+    if (isBopomofo(code)) {
+      // Neutral Chinese phonetic content: no foreign-letter evidence,
+      // no Han evidence, and no S/T direction.
       continue
     }
 

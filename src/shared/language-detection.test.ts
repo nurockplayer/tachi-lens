@@ -167,6 +167,25 @@ describe('analyzeMessageScript', () => {
     expect(analyzeMessageScript('A×B').hasForeignLetter).toBe(true)
   })
 
+  it('treats Bopomofo as neutral Chinese phonetic content, not foreign', () => {
+    const result = analyzeMessageScript('ㄏㄏ')
+    expect(result.hasForeignLetter).toBe(false)
+    expect(result.hasHan).toBe(false)
+  })
+
+  it('treats Bopomofo alongside Han as Chinese, not foreign', () => {
+    const result = analyzeMessageScript('這個很好ㄏㄏ')
+    expect(result.hasForeignLetter).toBe(false)
+    expect(result.hasHan).toBe(true)
+  })
+
+  it('treats Bopomofo Extended as neutral, not a foreign letter', () => {
+    // ㆠ is Bopomofo Extended U+31A0
+    const result = analyzeMessageScript('ㆠ')
+    expect(result.hasForeignLetter).toBe(false)
+    expect(result.hasHan).toBe(false)
+  })
+
   it('returns empty evidence for Latin-only text', () => {
     const result = analyzeMessageScript('Hello World')
     expect(result.hasHan).toBe(false)
@@ -324,6 +343,19 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
     expect(shouldSkipMessage('今天は暑い', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
+  it('skips Traditional Chinese with Bopomofo for zh-TW in skip_all_chinese', () => {
+    // ㄏㄏ is neutral Chinese phonetic content, not a foreign letter
+    expect(shouldSkipMessage('這個很好ㄏㄏ', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('does not skip Bopomofo-only text for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('ㄏㄏ', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Bopomofo-only text for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('ㄏㄏ', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
   it('does not skip Korean text with Hangul', () => {
     expect(shouldSkipMessage('안녕하세요', 'zh-CN', 'skip_all_chinese')).toBe(false)
   })
@@ -356,6 +388,15 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
   describe('traditional target (zh-TW)', () => {
     it('skips text with only traditional evidence and a Chinese marker', () => {
       expect(shouldSkipMessage('這個很熱', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('skips Traditional Chinese with Bopomofo for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('這個很好ㄏㄏ', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes Traditional Chinese with Bopomofo for zh-CN in translate_other_script', () => {
+      // 這個 = traditional evidence → opposite-script for zh-CN → translate
+      expect(shouldSkipMessage('這個很好ㄏㄏ', 'zh-CN', 'translate_other_script')).toBe(false)
     })
 
     it('processes text with only simplified evidence', () => {
