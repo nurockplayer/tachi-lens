@@ -1,0 +1,577 @@
+import { describe, expect, it } from 'vitest'
+import {
+  normalizeLocale,
+  classifyChineseScriptTarget,
+  analyzeMessageScript,
+  shouldSkipMessage,
+} from './language-detection'
+
+describe('normalizeLocale', () => {
+  it('returns "zh" for zh', () => {
+    expect(normalizeLocale('zh')).toBe('zh')
+  })
+
+  it('returns "zh" for zh-TW', () => {
+    expect(normalizeLocale('zh-TW')).toBe('zh')
+  })
+
+  it('returns "zh" for zh-CN', () => {
+    expect(normalizeLocale('zh-CN')).toBe('zh')
+  })
+
+  it('returns "zh" for zh-HK', () => {
+    expect(normalizeLocale('zh-HK')).toBe('zh')
+  })
+
+  it('returns "zh" for zh-Hans', () => {
+    expect(normalizeLocale('zh-Hans')).toBe('zh')
+  })
+
+  it('returns "zh" for zh-Hant', () => {
+    expect(normalizeLocale('zh-Hant')).toBe('zh')
+  })
+
+  it('returns "en" for en', () => {
+    expect(normalizeLocale('en')).toBe('en')
+  })
+
+  it('returns "en" for en-US', () => {
+    expect(normalizeLocale('en-US')).toBe('en')
+  })
+
+  it('returns "en" for en-GB', () => {
+    expect(normalizeLocale('en-GB')).toBe('en')
+  })
+
+  it('returns "ja" for ja', () => {
+    expect(normalizeLocale('ja')).toBe('ja')
+  })
+
+  it('returns "ko" for ko', () => {
+    expect(normalizeLocale('ko')).toBe('ko')
+  })
+
+  it('handles case-insensitive input', () => {
+    expect(normalizeLocale('ZH-TW')).toBe('zh')
+    expect(normalizeLocale('zh-tw')).toBe('zh')
+    expect(normalizeLocale('En')).toBe('en')
+  })
+
+  it('handles underscore separator', () => {
+    expect(normalizeLocale('zh_TW')).toBe('zh')
+    expect(normalizeLocale('en_US')).toBe('en')
+  })
+
+  it('returns unknown locale as-is lowercased', () => {
+    expect(normalizeLocale('fr')).toBe('fr')
+    expect(normalizeLocale('FR')).toBe('fr')
+    expect(normalizeLocale('de-DE')).toBe('de')
+  })
+})
+
+describe('classifyChineseScriptTarget', () => {
+  it.each([
+    ['zh-CN', 'simplified'],
+    ['zh-Hans', 'simplified'],
+    ['zh-SG', 'simplified'],
+    ['zh-TW', 'traditional'],
+    ['zh-HK', 'traditional'],
+    ['zh-Hant', 'traditional'],
+    ['zh-MO', 'traditional'],
+    ['zh', 'generic'],
+    ['en', null],
+    ['ja', null],
+    ['ko', null],
+    ['fr', null],
+  ])('classifies %s as %s', (locale, expected) => {
+    expect(classifyChineseScriptTarget(locale)).toBe(expected)
+  })
+
+  it('handles case-insensitive input', () => {
+    expect(classifyChineseScriptTarget('zh-cn')).toBe('simplified')
+    expect(classifyChineseScriptTarget('zh-tw')).toBe('traditional')
+  })
+})
+
+describe('analyzeMessageScript', () => {
+  it('detects simplified-only characters', () => {
+    const result = analyzeMessageScript('长东马车门开')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasSimplifiedOnly).toBe(true)
+    expect(result.hasTraditionalOnly).toBe(false)
+    expect(result.hasSharedHan).toBe(false)
+    expect(result.hasJapaneseKana).toBe(false)
+    expect(result.hasHangul).toBe(false)
+  })
+
+  it('detects traditional-only characters', () => {
+    const result = analyzeMessageScript('體國長東馬')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasSimplifiedOnly).toBe(false)
+    expect(result.hasTraditionalOnly).toBe(true)
+    expect(result.hasSharedHan).toBe(false)
+    expect(result.hasJapaneseKana).toBe(false)
+    expect(result.hasHangul).toBe(false)
+  })
+
+  it('detects shared Han characters', () => {
+    const result = analyzeMessageScript('大人山水')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasSimplifiedOnly).toBe(false)
+    expect(result.hasTraditionalOnly).toBe(false)
+    expect(result.hasSharedHan).toBe(true)
+    expect(result.hasJapaneseKana).toBe(false)
+    expect(result.hasHangul).toBe(false)
+  })
+
+  it('detects mixed simplified and traditional evidence', () => {
+    const result = analyzeMessageScript('长東')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasSimplifiedOnly).toBe(true)
+    expect(result.hasTraditionalOnly).toBe(true)
+  })
+
+  it('detects Japanese Kana alongside Han', () => {
+    const result = analyzeMessageScript('今天は暑い')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasJapaneseKana).toBe(true)
+    expect(result.hasHangul).toBe(false)
+  })
+
+  it('detects Hangul', () => {
+    const result = analyzeMessageScript('안녕하세요')
+    expect(result.hasHangul).toBe(true)
+    expect(result.hasHan).toBe(false)
+    expect(result.hasJapaneseKana).toBe(false)
+  })
+
+  it('detects Latin letters mixed with Han', () => {
+    const result = analyzeMessageScript('hello 大家好')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasSharedHan).toBe(true)
+    expect(result.hasForeignLetter).toBe(true)
+    expect(result.hasJapaneseKana).toBe(false)
+    expect(result.hasHangul).toBe(false)
+  })
+
+  it('detects Cyrillic letters mixed with Han', () => {
+    const result = analyzeMessageScript('привет 国')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasForeignLetter).toBe(true)
+  })
+
+  it('does not treat × or ÷ as foreign letters', () => {
+    expect(analyzeMessageScript('×').hasForeignLetter).toBe(false)
+    expect(analyzeMessageScript('÷').hasForeignLetter).toBe(false)
+    // Real Latin letters around them still count
+    expect(analyzeMessageScript('A×B').hasForeignLetter).toBe(true)
+  })
+
+  it('treats Bopomofo as neutral Chinese phonetic content, not foreign', () => {
+    const result = analyzeMessageScript('ㄏㄏ')
+    expect(result.hasForeignLetter).toBe(false)
+    expect(result.hasHan).toBe(false)
+  })
+
+  it('treats Bopomofo alongside Han as Chinese, not foreign', () => {
+    const result = analyzeMessageScript('這個很好ㄏㄏ')
+    expect(result.hasForeignLetter).toBe(false)
+    expect(result.hasHan).toBe(true)
+  })
+
+  it('treats Bopomofo Extended as neutral, not a foreign letter', () => {
+    // ㆠ is Bopomofo Extended U+31A0
+    const result = analyzeMessageScript('ㆠ')
+    expect(result.hasForeignLetter).toBe(false)
+    expect(result.hasHan).toBe(false)
+  })
+
+  it('returns empty evidence for Latin-only text', () => {
+    const result = analyzeMessageScript('Hello World')
+    expect(result.hasHan).toBe(false)
+    expect(result.hasJapaneseKana).toBe(false)
+    expect(result.hasHangul).toBe(false)
+    expect(result.hasSimplifiedOnly).toBe(false)
+    expect(result.hasTraditionalOnly).toBe(false)
+    expect(result.hasSharedHan).toBe(false)
+  })
+
+  it('returns empty evidence for numbers and punctuation', () => {
+    const result = analyzeMessageScript('12345!@#$%')
+    expect(result.hasHan).toBe(false)
+    expect(result.hasJapaneseKana).toBe(false)
+    expect(result.hasHangul).toBe(false)
+    expect(result.hasSimplifiedOnly).toBe(false)
+    expect(result.hasTraditionalOnly).toBe(false)
+  })
+
+  it('does not treat numbers as false confidence', () => {
+    const result = analyzeMessageScript('1234567890')
+    expect(result.hasHan).toBe(false)
+  })
+
+  it('treats Katakana as Japanese Kana', () => {
+    const result = analyzeMessageScript('テスト韓国')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasJapaneseKana).toBe(true)
+  })
+
+  it('treats halfwidth Katakana alongside Han as Kana', () => {
+    // Codex finding: ｶﾅ国 was incorrectly classified as pure Chinese
+    expect(shouldSkipMessage('ｶﾅ国', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('ｶﾅ国', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('treats Katakana Phonetic Extensions alongside Han as Kana', () => {
+    // ㇰ is Katakana Phonetic Extension U+31F0
+    expect(shouldSkipMessage('漢ㇰ', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('detects Hangul alongside Han', () => {
+    const result = analyzeMessageScript('한국어測試')
+    expect(result.hasHan).toBe(true)
+    expect(result.hasHangul).toBe(true)
+    expect(result.hasJapaneseKana).toBe(false)
+  })
+
+  it('treats Hangul Jamo alongside Han as Korean', () => {
+    // Codex finding: 한国 was incorrectly classified as pure Chinese
+    expect(shouldSkipMessage('한国', 'zh-CN', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('한国', 'zh-CN', 'translate_other_script')).toBe(false)
+  })
+
+  it('treats Hangul Compatibility Jamo alongside Han as Korean', () => {
+    // ㅋ U+314B is Compatibility Jamo
+    expect(shouldSkipMessage('漢字ㅋㅋ', 'zh-CN', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('treats accented Latin plus Han as mixed-language', () => {
+    // Codex finding: é国 was incorrectly skipped as pure Chinese
+    expect(shouldSkipMessage('é国', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('é国', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('treats fullwidth Latin plus Han as mixed-language', () => {
+    // Codex finding: Ａ国 was incorrectly skipped (fullwidth Latin A)
+    expect(shouldSkipMessage('Ａ国', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('Ａ国', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+})
+
+describe('shouldSkipMessage — skip_all_chinese mode', () => {
+  it('skips simplified Chinese for zh-TW target', () => {
+    expect(shouldSkipMessage('这个很热', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('skips traditional Chinese for zh-CN target', () => {
+    expect(shouldSkipMessage('這個很熱', 'zh-CN', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('skips Chinese for generic zh target', () => {
+    expect(shouldSkipMessage('这个很热', 'zh', 'skip_all_chinese')).toBe(true)
+  })
+
+  // Shinjitai-overlap characters removed from SIMPLIFIED_ONLY must not skip
+  it('does not skip Kanji-only Japanese 参加 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('参加', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese 宝石 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('宝石', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese 接触 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('接触', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  // Kanji-only Japanese must not be skipped as Chinese (Shinjitai overlap)
+  it('does not skip Kanji-only Japanese text 中国', () => {
+    expect(shouldSkipMessage('中国', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  // Traditional-only glyphs also used in Japanese must not imply Chinese language
+  it('does not skip kana-less Japanese 手紙 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('手紙', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 営業時間 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('営業時間', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 電話 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('電話', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 自動車 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('自動車', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  // 的/了 are ordinary Japanese Kanji, not Chinese-only markers
+  it('does not skip kana-less Japanese 目的 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('目的', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 個人的 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('個人的', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 終了 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('終了', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 完了 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('完了', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 了解 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('了解', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese text 会社', () => {
+    expect(shouldSkipMessage('会社', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Kanji-only Japanese text 体調', () => {
+    expect(shouldSkipMessage('体調', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip shared-only Han (could be Kanji-only Japanese)', () => {
+    expect(shouldSkipMessage('大人山水', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Japanese text with Kana', () => {
+    expect(shouldSkipMessage('今天は暑い', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('skips Traditional Chinese with Bopomofo for zh-TW in skip_all_chinese', () => {
+    // ㄏㄏ is neutral Chinese phonetic content, not a foreign letter
+    expect(shouldSkipMessage('這個很好ㄏㄏ', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('does not skip Bopomofo-only text for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('ㄏㄏ', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Bopomofo-only text for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('ㄏㄏ', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip Korean text with Hangul', () => {
+    expect(shouldSkipMessage('안녕하세요', 'zh-CN', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip Latin-only text', () => {
+    expect(shouldSkipMessage('Hello World!', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip mixed Latin and Han text', () => {
+    expect(shouldSkipMessage('hello 大家好', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip non-zh target even with Chinese text', () => {
+    expect(shouldSkipMessage('体国长东马', 'en', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip text with only numbers', () => {
+    expect(shouldSkipMessage('12345', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('skips mixed simplified and traditional Chinese text', () => {
+    expect(shouldSkipMessage('这个熱吧', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+})
+
+describe('shouldSkipMessage — translate_other_script mode', () => {
+  // Requirements from #46: 今天真的很熱 → skip, 今天真的很热 → translate, 今天很好 → skip
+  // Targets from #51: traditional, simplified, generic, mixed
+
+  describe('traditional target (zh-TW)', () => {
+    it('skips text with only traditional evidence and a Chinese marker', () => {
+      expect(shouldSkipMessage('這個很熱', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('skips Traditional Chinese with Bopomofo for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('這個很好ㄏㄏ', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes Traditional Chinese with Bopomofo for zh-CN in translate_other_script', () => {
+      // 這個 = traditional evidence → opposite-script for zh-CN → translate
+      expect(shouldSkipMessage('這個很好ㄏㄏ', 'zh-CN', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes text with only simplified evidence', () => {
+      expect(shouldSkipMessage('这个很热', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes text with mixed simplified and traditional evidence', () => {
+      expect(shouldSkipMessage('这个熱吧', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips text with only shared Han characters (#46: 今天很好 → skip)', () => {
+      expect(shouldSkipMessage('今天很好', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('does not skip kana-less Japanese 手紙 for zh-TW in translate_other_script', () => {
+      // 手 is known-shared, 紙 is a Traditional glyph also used in modern Japanese
+      expect(shouldSkipMessage('手紙', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 電話 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('電話', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 自動車 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('自動車', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 目的 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('目的', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 個人的 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('個人的', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 終了 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('終了', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 完了 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('完了', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 了解 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('了解', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips 今天真的很熱 for zh-TW (#46 explicit)', () => {
+      // 今天真的很熱: 今/天/真/的/很 are shared, 熱 is traditional-only
+      expect(shouldSkipMessage('今天真的很熱', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('skips 今天很好 for zh-TW (shared marker 很 + shared Han)', () => {
+      expect(shouldSkipMessage('今天很好', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 这个很好 for zh-TW (simplified marker 这 forces translation)', () => {
+      // 这个 = simplified script evidence → opposite-script → translate
+      expect(shouldSkipMessage('这个很好', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips 這個很好 for zh-TW (traditional marker 這 + same-script)', () => {
+      expect(shouldSkipMessage('這個很好', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 你好吗 for zh-TW (simplified marker 吗 forces translation)', () => {
+      expect(shouldSkipMessage('你好吗', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips 你好嗎 for zh-TW (traditional marker 嗎 + same-script)', () => {
+      expect(shouldSkipMessage('你好嗎', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 今天真的很热 for zh-TW (#46 explicit)', () => {
+      // 今天真的很热: 今/天/真/的/很 are shared, 热 is simplified-only
+      expect(shouldSkipMessage('今天真的很热', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 這個学校 for zh-TW (unknown Han overrides same-script evidence)', () => {
+      // 這/個 are Traditional, 学/校 are unlisted Han → unknown overrides → translate
+      expect(shouldSkipMessage('這個学校', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 不会 for zh-TW (会 removed from KNOWN_SHARED)', () => {
+      // 会 is now unknown Han → favor translation
+      expect(shouldSkipMessage('不会', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 参加 for zh-TW in translate_other_script (参 removed from SIMPLIFIED_ONLY)', () => {
+      expect(shouldSkipMessage('参加', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 宝石 for zh-TW in translate_other_script (宝 removed from SIMPLIFIED_ONLY)', () => {
+      expect(shouldSkipMessage('宝石', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes 接触 for zh-TW in translate_other_script (触 removed from SIMPLIFIED_ONLY)', () => {
+      expect(shouldSkipMessage('接触', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip Japanese text with Kana (#46/51 explicit)', () => {
+      expect(shouldSkipMessage('今天は暑い', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+  })
+
+  describe('simplified target (zh-CN)', () => {
+    it('skips text with only simplified evidence and a Chinese marker', () => {
+      expect(shouldSkipMessage('这个很热', 'zh-CN', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes text with only traditional evidence', () => {
+      expect(shouldSkipMessage('這個很熱', 'zh-CN', 'translate_other_script')).toBe(false)
+    })
+
+    it('processes text with mixed evidence', () => {
+      expect(shouldSkipMessage('这个熱吧', 'zh-CN', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips text with only shared Han characters and a Chinese marker', () => {
+      expect(shouldSkipMessage('今天很好', 'zh-CN', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 这个學校 for zh-CN (unknown Han overrides same-script evidence)', () => {
+      // 这/个 are Simplified, 學/校 are unlisted Han → unknown overrides → translate
+      expect(shouldSkipMessage('这个學校', 'zh-CN', 'translate_other_script')).toBe(false)
+    })
+  })
+
+  describe('generic zh target', () => {
+    it('does not skip simplified text (cannot determine target script)', () => {
+      expect(shouldSkipMessage('体国长东马', 'zh', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip traditional text (cannot determine target script)', () => {
+      expect(shouldSkipMessage('體國長東馬', 'zh', 'translate_other_script')).toBe(false)
+    })
+  })
+
+  it('does not skip Latin-only text', () => {
+    expect(shouldSkipMessage('Hello', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip non-zh target', () => {
+    expect(shouldSkipMessage('体国长东马', 'en', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip mixed Latin and Han text (#46: hello 大家好)', () => {
+    expect(shouldSkipMessage('hello 大家好', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip Cyrillic mixed with Han (привет 国)', () => {
+    expect(shouldSkipMessage('привет 国', 'zh-CN', 'translate_other_script')).toBe(false)
+    expect(shouldSkipMessage('привет 国', 'zh-CN', 'skip_all_chinese')).toBe(false)
+  })
+
+  // Shared-Han Shinjitai-overlap examples in translate_other_script mode
+  // After Shinjitai removal, these are unknown/unlisted Han → must translate
+  it('processes Kanji-only Japanese 中国 for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('中国', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('processes Kanji-only Japanese 会社 for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('会社', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('processes Kanji-only Japanese 体調 for zh-TW in translate_other_script', () => {
+    expect(shouldSkipMessage('体調', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  // Unlisted Han must remain translatable in translate_other_script mode
+  it('does not skip 学校 for zh-TW in translate_other_script (学 not in curated table)', () => {
+    expect(shouldSkipMessage('学校', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+
+  it('does not skip 网络 for zh-TW in translate_other_script (网/络 not in curated table)', () => {
+    expect(shouldSkipMessage('网络', 'zh-TW', 'translate_other_script')).toBe(false)
+  })
+})
