@@ -23,7 +23,7 @@ export interface TranslatorDependencies {
 }
 
 export interface TranslatorOptions {
-  debounceMs: number
+  batchWindowMs: number
   maxBatchSize: number
 }
 
@@ -69,7 +69,7 @@ export class Translator {
       if (queue.length >= this.options.maxBatchSize) {
         this.flushImmediately(this.liveQueue.length > 0 ? 'live' : priority)
       } else if (!this.timer) {
-        this.timer = setTimeout(() => { void this.flush() }, this.options.debounceMs)
+        this.timer = setTimeout(() => { void this.flush() }, this.options.batchWindowMs)
       }
     })
   }
@@ -98,7 +98,7 @@ export class Translator {
     )
 
     if ((this.liveQueue.length > 0 || this.backlogQueue.length > 0) && !this.timer) {
-      this.timer = setTimeout(() => { void this.flush() }, this.options.debounceMs)
+      this.timer = setTimeout(() => { void this.flush() }, this.options.batchWindowMs)
     }
 
     let ownedItems = items
