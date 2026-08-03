@@ -10,6 +10,7 @@ import {
   normalizeGeminiQuotaSettings,
   type GeminiQuotaSettings,
 } from '@/background/gemini-quota'
+import type { ChineseVariantMode } from '@/shared/language-detection'
 
 export interface StorageAreaLike {
   get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>
@@ -31,6 +32,7 @@ export interface UserSettings extends FilterConfig {
   selectedModel: string
   targetLanguage: string
   displayMode: 'below' | 'hover' | 'collapse'
+  chineseVariantMode: ChineseVariantMode
   botNameBlacklist: string[]
   minTextLength: number
   translationEnabled: boolean
@@ -48,6 +50,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   selectedModel: 'deepseek-v4-flash',
   targetLanguage: 'zh-TW',
   displayMode: 'below',
+  chineseVariantMode: 'skip_all_chinese',
   botNameBlacklist: [],
   minTextLength: 2,
   translationEnabled: true,
@@ -77,6 +80,11 @@ const getDefaultStorage = (): ChromeStorageLike => chrome.storage
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+export const normalizeChineseVariantMode = (value: unknown): ChineseVariantMode =>
+  value === 'skip_all_chinese' || value === 'translate_other_script'
+    ? value
+    : DEFAULT_SETTINGS.chineseVariantMode
 
 export const normalizeGeminiQuotaProfiles = (
   value: unknown,
@@ -126,6 +134,7 @@ export const getUserSettings = async (storage = getDefaultStorage()): Promise<Us
   return {
     ...DEFAULT_SETTINGS,
     ...storedSettings,
+    chineseVariantMode: normalizeChineseVariantMode(storedSettings.chineseVariantMode),
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(storedSettings.geminiQuotaProfiles, geminiQuota),
   }
@@ -143,6 +152,7 @@ export const saveUserSettings = async (
   const profilesSource = updates.geminiQuotaProfiles ?? mergedSettings.geminiQuotaProfiles
   const nextSettings = {
     ...mergedSettings,
+    chineseVariantMode: normalizeChineseVariantMode(mergedSettings.chineseVariantMode),
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(profilesSource, geminiQuota),
   }
@@ -292,8 +302,14 @@ export const mergeSettings = (
   } = channel ?? {}
   const merged = { ...global, ...channelSettings }
   const geminiQuota = normalizeGeminiQuotaSettings(global.geminiQuota)
+  const channelVariant = (channel as Partial<UserSettings> | undefined)?.chineseVariantMode
+  const chineseVariantMode =
+    channelVariant === 'skip_all_chinese' || channelVariant === 'translate_other_script'
+      ? channelVariant
+      : global.chineseVariantMode
   return {
     ...merged,
+    chineseVariantMode,
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(global.geminiQuotaProfiles, geminiQuota),
   }

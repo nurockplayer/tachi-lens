@@ -1,5 +1,6 @@
 import { isSettingsUpdateMessage } from '@/shared/messages'
 import type { DiagnosticEvent, DiagnosticStage, SettingsUpdatePayload } from '@/shared/messages'
+import type { ChineseVariantMode } from '@/shared/language-detection'
 import {
   parseChannelFromPathname,
   TwitchMessageHandler,
@@ -149,11 +150,15 @@ const getContentSettings = async (forceRefresh = false): Promise<ContentSettings
     displayMode: isDisplayMode(merged.displayMode) ? merged.displayMode : 'below',
     translationEnabled: typeof merged.translationEnabled === 'boolean' ? merged.translationEnabled : true,
     targetLanguage: typeof merged.targetLanguage === 'string' ? merged.targetLanguage : undefined,
+    chineseVariantMode: isChineseVariantMode(merged.chineseVariantMode) ? merged.chineseVariantMode : 'skip_all_chinese',
     filterConfig,
   }
 
   return cachedSettings!
 }
+
+const isChineseVariantMode = (value: unknown): value is ChineseVariantMode =>
+  value === 'skip_all_chinese' || value === 'translate_other_script'
 
 // --- Timer-driven retry for rate-limited messages ---
 let retryTimer: ReturnType<typeof setInterval> | null = null
@@ -505,6 +510,7 @@ export const _test = {
   get activeTranslations(): number { return activeTranslations },
   set activeTranslations(value: number) { activeTranslations = value },
   get MAX_CONCURRENT(): number { return MAX_CONCURRENT_TRANSLATIONS },
+  get resolvedContentSettings(): ContentSettings | null { return cachedSettings },
   set onDispatch(fn: ((el: HTMLElement, priority: TranslationPriority) => void) | undefined) { _dispatchRecorder = fn },
 }
 export const getSettings = async (channelName?: string): Promise<RemoteContentSettings> => {

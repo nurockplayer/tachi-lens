@@ -290,6 +290,7 @@ export function App() {
       translationEnabled: updatedSettings.translationEnabled,
       displayMode: updatedSettings.displayMode,
       targetLanguage: updatedSettings.targetLanguage,
+      chineseVariantMode: updatedSettings.chineseVariantMode,
       minTextLength: updatedSettings.minTextLength,
       botNameBlacklist: updatedSettings.botNameBlacklist,
       skipEmotesOnly: updatedSettings.skipEmotesOnly,
