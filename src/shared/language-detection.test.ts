@@ -287,6 +287,27 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
     expect(shouldSkipMessage('自動車', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
+  // 的/了 are ordinary Japanese Kanji, not Chinese-only markers
+  it('does not skip kana-less Japanese 目的 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('目的', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 個人的 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('個人的', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 終了 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('終了', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 完了 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('完了', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip kana-less Japanese 了解 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('了解', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   it('does not skip Kanji-only Japanese text 会社', () => {
     expect(shouldSkipMessage('会社', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
@@ -362,9 +383,50 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
       expect(shouldSkipMessage('自動車', 'zh-TW', 'translate_other_script')).toBe(false)
     })
 
+    it('does not skip kana-less Japanese 目的 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('目的', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 個人的 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('個人的', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 終了 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('終了', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 完了 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('完了', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese 了解 for zh-TW in translate_other_script', () => {
+      expect(shouldSkipMessage('了解', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
     it('skips 今天真的很熱 for zh-TW (#46 explicit)', () => {
       // 今天真的很熱: 今/天/真/的/很 are shared, 熱 is traditional-only
       expect(shouldSkipMessage('今天真的很熱', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('skips 今天很好 for zh-TW (shared marker 很 + shared Han)', () => {
+      expect(shouldSkipMessage('今天很好', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 这个很好 for zh-TW (simplified marker 这 forces translation)', () => {
+      // 这个 = simplified script evidence → opposite-script → translate
+      expect(shouldSkipMessage('这个很好', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips 這個很好 for zh-TW (traditional marker 這 + same-script)', () => {
+      expect(shouldSkipMessage('這個很好', 'zh-TW', 'translate_other_script')).toBe(true)
+    })
+
+    it('processes 你好吗 for zh-TW (simplified marker 吗 forces translation)', () => {
+      expect(shouldSkipMessage('你好吗', 'zh-TW', 'translate_other_script')).toBe(false)
+    })
+
+    it('skips 你好嗎 for zh-TW (traditional marker 嗎 + same-script)', () => {
+      expect(shouldSkipMessage('你好嗎', 'zh-TW', 'translate_other_script')).toBe(true)
     })
 
     it('processes 今天真的很热 for zh-TW (#46 explicit)', () => {

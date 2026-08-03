@@ -35,14 +35,14 @@ const SIMPLIFIED_ONLY =
   '长东马车门开关见贝风飞发电对时乐个为书说话认识过还' +
   '这们几处么两让儿习头买卖红级纪经给组织纸线练张' +
   '奖义农动华协单罗备报边变层产场陈础传' +
-  '达带导夺队吨热'
+  '达带导夺队吨热吗'
 
 /** Characters exclusive to Traditional Chinese. */
 const TRADITIONAL_ONLY =
   '體國長東馬車門開關見貝風飛發電對時來樂個為書說話認識過還' +
   '這會當們幾處麼兩讓兒習頭買賣紅級紀經給組織紙線練張' +
   '將獎醫義農動區華協單雙號羅備寶報邊變參層產場陳礎觸傳' +
-  '達帶導點獨斷奪隊噸熱'
+  '達帶導點獨斷奪隊噸熱嗎'
 
 const SIMPLIFIED_SET = new Set(SIMPLIFIED_ONLY)
 const TRADITIONAL_SET = new Set(TRADITIONAL_ONLY)
@@ -59,7 +59,7 @@ const TRADITIONAL_SET = new Set(TRADITIONAL_ONLY)
  * KNOWN_SHARED) are classified as "unknown Han" and favor translation.
  */
 const KNOWN_SHARED =
-  '人大上山水中小日月天手工生心力口王白石田目足' +
+  '人的大上山水中小日月天手工生心力口王白石田目足' +
   '土火木水火土金木' +
   '文子父女母子母' +
   '今明早星空原海名林花音然思安心自' +
@@ -70,24 +70,26 @@ const KNOWN_SHARED =
   '能可要用' +
   '好高正新老' +
   '真' +
-  '雨'
+  '雨的了吗' +
+  '很呢吧啊'
 
 const KNOWN_SHARED_SET = new Set(KNOWN_SHARED)
 
 /**
- * Strong Chinese-language markers: function and structural characters that
- * are characteristic of Mandarin and not ordinary modern-Japanese Kanji
- * usage.
+ * Conservative Chinese-language markers.
  *
- * Simplified/Traditional glyph evidence (e.g. 紙, 時, 車) also appears
- * unchanged in Japanese, so it cannot establish that the language is
- * Chinese. A message containing a marker is confidently Chinese; script
- * evidence alone is never treated as language evidence.
+ * These structural/function characters are used as standalone Mandarin
+ * particles and are not ordinary modern-Japanese Kanji usage. 的 and 了
+ * are deliberately excluded because they occur in common kana-less
+ * Japanese words (目的, 個人的, 終了, 完了, 了解).
  *
- * 的 marks the Chinese possessive 的-particle (Japanese uses の);
- * 了/吧/啊/呢 are clause-final particles with no Japanese equivalent.
+ * The marker set spans both script variants so a marker character can
+ * also contribute Simplified/Traditional script evidence:
+ * - Simplified markers: 这, 们, 吗
+ * - Traditional markers: 這, 們, 嗎
+ * - Shared markers: 很, 呢, 吧, 啊
  */
-const CHINESE_LANGUAGE_MARKERS = '的了吗呢吧啊很'
+const CHINESE_LANGUAGE_MARKERS = '这们吗這們嗎很呢吧啊'
 const CHINESE_MARKER_SET = new Set(CHINESE_LANGUAGE_MARKERS)
 
 // ─── Unicode ranges (BMP only) ───────────────────────────────────────────────
@@ -167,9 +169,9 @@ export function classifyChineseScriptTarget(
  * and distinguishes Simplified-only vs Traditional-only vs shared Han
  * characters using the curated evidence tables.
  *
- * Chinese-language markers are checked before script-variant classification
- * so a marker character (的, 很, 了, …) is not also recorded as shared or
- * unknown Han.
+ * A marker character may also contribute script-variant evidence:
+ * 这/们/吗 are Simplified markers, 這/們/嗎 are Traditional markers, and
+ * 很/呢/吧/啊 are shared markers. Markers do not stop classification.
  */
 export function analyzeMessageScript(text: string): ScriptEvidence {
   let hasHan = false
@@ -199,7 +201,6 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       hasHan = true
       if (CHINESE_MARKER_SET.has(char)) {
         hasChineseMarker = true
-        continue
       }
       if (SIMPLIFIED_SET.has(char)) {
         hasSimplifiedOnly = true
@@ -236,10 +237,11 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
  * and Chinese variant mode.
  *
  * Chinese-language confidence comes only from CHINESE_LANGUAGE_MARKERS
- * (的, 了, 吧, 啊, 呢, 很). Simplified/Traditional glyph evidence is used
- * only to determine script direction and is never treated as proof that the
- * language is Chinese, because those glyphs also appear unchanged in modern
- * Japanese.
+ * (这/们/吗, 這/們/嗎, 很/呢/吧/啊). 的 and 了 are excluded because they
+ * occur in ordinary kana-less Japanese words (目的, 終了). Simplified/
+ * Traditional glyph evidence is used only to determine script direction and
+ * is never treated as proof that the language is Chinese, because those
+ * glyphs also appear unchanged in modern Japanese.
  *
  * Rules:
  * 1. Non-zh target families are never skipped here.
