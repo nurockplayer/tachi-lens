@@ -207,4 +207,52 @@ describe('service worker startup', () => {
       })
     })
   })
+
+  it('responds to get_quota_health with a typed quota-health result', async () => {
+    const chromeRuntime = {
+      ...createChromeRuntime(),
+      runtime: {
+        ...createChromeRuntime().runtime,
+        sendMessage: vi.fn(async () => undefined),
+      },
+      storage: {
+        session: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+        },
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+        },
+      },
+    }
+    vi.stubGlobal('chrome', chromeRuntime)
+
+    await import('./service-worker')
+
+    const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+      | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+      | undefined
+
+    if (!handler) {
+      throw new Error('Expected a message handler to be registered')
+    }
+
+    const sendResponse = vi.fn()
+    expect(handler({ type: 'get_quota_health', payload: {} }, undefined, sendResponse)).toBe(true)
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledTimes(1)
+    })
+
+    const response = sendResponse.mock.calls[0]![0] as { type: string; payload: unknown[] }
+    expect(response.type).toBe('quota_health_result')
+    expect(Array.isArray(response.payload)).toBe(true)
+    const result = response.payload[0] as { status?: string; snapshotStatus?: string; quotaKey?: string }
+    expect(result.quotaKey).toBe('default')
+    expect(result.status).toBe('healthy')
+    expect(result.snapshotStatus).toBe('missing')
+    // The payload must never contain secrets, chat text, usernames, or channels.
+    expect(JSON.stringify(response)).not.toMatch(/sk-[a-z0-9_-]+|sk-secret|private chat|@username/i)
+  })
 })

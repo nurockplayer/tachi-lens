@@ -19,6 +19,8 @@ export type MessageType =
   | 'diagnostic_event'
   | 'get_diagnostics'
   | 'diagnostics_snapshot'
+  | 'get_quota_health'
+  | 'quota_health_result'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -39,6 +41,8 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'diagnostic_event',
   'get_diagnostics',
   'diagnostics_snapshot',
+  'get_quota_health',
+  'quota_health_result',
 ]
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
@@ -92,6 +96,123 @@ export interface DiagnosticEvent {
 
 export interface DiagnosticsSnapshot {
   events: DiagnosticEvent[]
+}
+
+/**
+ * Structured, privacy-safe view of persisted Gemini quota state. One result is
+ * produced per quotaKey/model. Payloads never include API keys, request or
+ * response bodies, translation text, usernames, or channel names.
+ */
+export type QuotaHealthStatus =
+  | 'healthy'
+  | 'cooldown'
+  | 'clock_rollback'
+  | 'untrusted_migration'
+  | 'malformed_snapshot'
+  | 'unsupported_version'
+
+export type QuotaHealthDenialReason = 'rpm' | 'tpm' | 'rpd' | 'cooldown' | 'clock_rollback'
+
+export type QuotaSnapshotStatus =
+  | 'complete'
+  | 'malformed'
+  | 'unsupported_version'
+  | 'untrusted_migration'
+  | 'missing'
+
+export interface QuotaHealthResult {
+  /** Canonical quotaKey/model name (never a username or channel). */
+  quotaKey: string
+  status: QuotaHealthStatus
+  /**
+   * Present only when the status is 'cooldown' or 'clock_rollback'. When
+   * omitted, the denial reason is not attributable to a single quota check.
+   */
+  denialReason?: QuotaHealthDenialReason
+  /** Provider day id (yyyy-mm-dd, America/Los_Angeles) when trustworthy. */
+  providerDay?: string
+  snapshotVersion: number | null
+  snapshotStatus: QuotaSnapshotStatus
+  /** Rollback clock is unsafe until this wall-clock instant (ms epoch). */
+  recoveryAt?: number
+  /** Cooldown expires at this wall-clock instant (ms epoch). */
+  cooldownUntil?: number
+}
+
+export const QUOTA_HEALTH_STATUSES: readonly QuotaHealthStatus[] = [
+  'healthy',
+  'cooldown',
+  'clock_rollback',
+  'untrusted_migration',
+  'malformed_snapshot',
+  'unsupported_version',
+]
+
+const QUOTA_HEALTH_DENIAL_REASONS: readonly QuotaHealthDenialReason[] = [
+  'rpm',
+  'tpm',
+  'rpd',
+  'cooldown',
+  'clock_rollback',
+]
+
+const QUOTA_SNAPSHOT_STATUSES: readonly QuotaSnapshotStatus[] = [
+  'complete',
+  'malformed',
+  'unsupported_version',
+  'untrusted_migration',
+  'missing',
+]
+
+const isOptionalNumber = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'number' && Number.isFinite(value))
+
+export const isQuotaHealthResult = (value: unknown): value is QuotaHealthResult => {
+  if (!isRecord(value)) return false
+
+  const payload = value as Record<string, unknown>
+  return (
+    typeof payload.quotaKey === 'string' &&
+    typeof payload.status === 'string' &&
+    QUOTA_HEALTH_STATUSES.includes(payload.status as QuotaHealthStatus) &&
+    (payload.denialReason === undefined ||
+      typeof payload.denialReason === 'string' &&
+      QUOTA_HEALTH_DENIAL_REASONS.includes(payload.denialReason as QuotaHealthDenialReason)) &&
+    (payload.providerDay === undefined || typeof payload.providerDay === 'string') &&
+    (payload.snapshotVersion === null || typeof payload.snapshotVersion === 'number') &&
+    typeof payload.snapshotStatus === 'string' &&
+    QUOTA_SNAPSHOT_STATUSES.includes(payload.snapshotStatus as QuotaSnapshotStatus) &&
+    isOptionalNumber(payload.recoveryAt) &&
+    isOptionalNumber(payload.cooldownUntil)
+  )
+}
+
+export const isQuotaHealthResultMessage = (
+  value: unknown,
+): value is BaseMessage<'quota_health_result', QuotaHealthResult[]> => {
+  if (!isBaseMessage(value) || value.type !== 'quota_health_result' || !Array.isArray(value.payload)) {
+    return false
+  }
+  return value.payload.every(isQuotaHealthResult)
+}
+
+export const isGetQuotaHealthMessage = (
+  value: unknown,
+): value is BaseMessage<'get_quota_health', QuotaHealthRequest> => {
+  if (!isBaseMessage(value) || value.type !== 'get_quota_health') {
+    return false
+  }
+  if (value.payload === undefined) {
+    return true
+  }
+  if (!isRecord(value.payload)) {
+    return false
+  }
+  return value.payload.quotaKey === undefined || typeof value.payload.quotaKey === 'string'
+}
+
+export interface QuotaHealthRequest {
+  quotaKey?: string
 }
 
 const DIAGNOSTIC_STAGES: readonly DiagnosticStage[] = [
