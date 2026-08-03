@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 describe('content script entry', () => {
   beforeEach(() => {
@@ -98,6 +98,84 @@ describe('content script entry', () => {
         type: 'get_content_settings',
         payload: { channelName: 'mychannel' },
       })
+
+      vi.unstubAllGlobals()
+    })
+  })
+
+  describe('content settings Chinese variant fallback', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const setupChatObservation = (payload: Record<string, unknown>): void => {
+      const sendMessage = vi.fn(async (message: { type: string }) => {
+        if (message.type === 'get_content_settings') {
+          return { type: 'content_settings', payload }
+        }
+        if (message.type === 'translate_request') {
+          return { type: 'translate_response', payload: { messageId: 'any-id', translatedText: 'ok' } }
+        }
+        return undefined
+      })
+      vi.stubGlobal('chrome', {
+        runtime: { sendMessage, onMessage: { addListener: vi.fn(), removeListener: vi.fn() } },
+      })
+      document.body.innerHTML =
+        '<div data-test-selector="chat-scrollable-area__message-container"></div>'
+    }
+
+    const processMessageToBuildCache = async (): Promise<void> => {
+      const container = document.querySelector(
+        '[data-test-selector="chat-scrollable-area__message-container"]',
+      )!
+      const message = document.createElement('div')
+      message.className = 'chat-line__message'
+      message.innerHTML = [
+        '<span class="chat-author__display-name">viewer</span>',
+        '<span data-a-target="chat-line-message-body">你好</span>',
+      ].join('')
+      container.appendChild(message)
+
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+
+    it('falls back to the default mode when the payload omits it', async () => {
+      setupChatObservation({ translationEnabled: true, minTextLength: 1 })
+      const { _test } = await import('./twitch-entry')
+
+      await processMessageToBuildCache()
+
+      expect(_test.resolvedContentSettings?.chineseVariantMode).toBe('skip_all_chinese')
+
+      vi.unstubAllGlobals()
+    })
+
+    it('falls back to the default mode when the payload has an invalid value', async () => {
+      setupChatObservation({ translationEnabled: true, minTextLength: 1, chineseVariantMode: 'bogus-mode' })
+      const { _test } = await import('./twitch-entry')
+
+      await processMessageToBuildCache()
+
+      expect(_test.resolvedContentSettings?.chineseVariantMode).toBe('skip_all_chinese')
+
+      vi.unstubAllGlobals()
+    })
+
+    it('keeps a valid mode delivered by the service worker', async () => {
+      setupChatObservation({ translationEnabled: true, minTextLength: 1, chineseVariantMode: 'translate_other_script' })
+      const { _test } = await import('./twitch-entry')
+
+      await processMessageToBuildCache()
+
+      expect(_test.resolvedContentSettings?.chineseVariantMode).toBe('translate_other_script')
 
       vi.unstubAllGlobals()
     })

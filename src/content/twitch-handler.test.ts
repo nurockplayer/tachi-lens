@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: ContentSettings & { targetLanguage: string } = {
   displayMode: 'below',
   translationEnabled: true,
   targetLanguage: 'zh-TW',
+  chineseVariantMode: 'skip_all_chinese',
   filterConfig: {
     skipEmotesOnly: true,
     skipCheermotes: true,

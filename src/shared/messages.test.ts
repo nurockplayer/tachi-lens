@@ -110,6 +110,17 @@ describe('message protocol guards', () => {
       expect(parsed.payload.type).toBe('auth')
     })
   })
+
+  it('types a settings_updated payload with the Chinese variant mode', () => {
+    const payload: SettingsUpdatePayload = {
+      translationEnabled: true,
+      targetLanguage: 'zh-TW',
+      chineseVariantMode: 'translate_other_script',
+    }
+
+    expect(isSettingsUpdateMessage({ type: 'settings_updated', payload })).toBe(true)
+    expect(payload.chineseVariantMode).toBe('translate_other_script')
+  })
 })
 
 describe('settings_updated message', () => {

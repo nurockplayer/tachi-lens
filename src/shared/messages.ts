@@ -1,5 +1,7 @@
 // Shared message type definitions for SW ↔ CS ↔ Popup communication
 
+import type { ChineseVariantMode } from './language-detection'
+
 export type MessageType =
   | 'translate_request'
   | 'translate_response'
@@ -46,6 +48,7 @@ export type SettingsUpdatePayload = Partial<{
   translationEnabled: boolean
   displayMode: 'below' | 'hover' | 'collapse'
   targetLanguage: string
+  chineseVariantMode: ChineseVariantMode
   minTextLength: number
   botNameBlacklist: string[]
   skipEmotesOnly: boolean

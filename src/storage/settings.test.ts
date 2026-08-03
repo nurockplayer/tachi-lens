@@ -209,6 +209,50 @@ describe('settings storage', () => {
     })
   })
 
+  it('uses the default Chinese variant mode when stored settings lack the field', async () => {
+    const storage = createChromeStorage()
+    storage.local.data.userSettings = { targetLanguage: 'zh-TW' }
+
+    const settings = await getUserSettings(storage)
+
+    expect(settings.chineseVariantMode).toBe('skip_all_chinese')
+  })
+
+  it('loads a valid stored Chinese variant mode', async () => {
+    const storage = createChromeStorage()
+    storage.local.data.userSettings = { chineseVariantMode: 'translate_other_script' }
+
+    const settings = await getUserSettings(storage)
+
+    expect(settings.chineseVariantMode).toBe('translate_other_script')
+  })
+
+  it('falls back to the default for an invalid stored global Chinese variant mode', async () => {
+    const storage = createChromeStorage()
+    storage.local.data.userSettings = { chineseVariantMode: 'bogus-mode' }
+
+    const settings = await getUserSettings(storage)
+
+    expect(settings.chineseVariantMode).toBe('skip_all_chinese')
+  })
+
+  it('persists a global Chinese variant mode update', async () => {
+    const storage = createChromeStorage()
+
+    await saveUserSettings({ chineseVariantMode: 'translate_other_script' }, storage)
+
+    expect(storage.local.data.userSettings).toMatchObject({ chineseVariantMode: 'translate_other_script' })
+  })
+
+  it('falls back to the default when persisting an invalid global Chinese variant mode', async () => {
+    const storage = createChromeStorage()
+
+    const settings = await saveUserSettings({ chineseVariantMode: 'bogus-mode' as never }, storage)
+
+    expect(settings.chineseVariantMode).toBe('skip_all_chinese')
+    expect(storage.local.data.userSettings).toMatchObject({ chineseVariantMode: 'skip_all_chinese' })
+  })
+
   it('persists user settings only to local storage', async () => {
     const storage = createChromeStorage()
 
@@ -450,6 +494,30 @@ describe('settings storage', () => {
       })
 
       expect(result.geminiQuotaProfiles['gemini-2.5-flash']!.requestsPerMinute).toBe(5)
+    })
+
+    it('lets a valid channel override replace the global Chinese variant mode', () => {
+      const global = { ...DEFAULT_SETTINGS, chineseVariantMode: 'skip_all_chinese' as const }
+
+      const result = mergeSettings(global, { chineseVariantMode: 'translate_other_script' })
+
+      expect(result.chineseVariantMode).toBe('translate_other_script')
+    })
+
+    it('ignores an invalid channel Chinese variant override and inherits the global value', () => {
+      const global = { ...DEFAULT_SETTINGS, chineseVariantMode: 'skip_all_chinese' as const }
+
+      const result = mergeSettings(global, { chineseVariantMode: 'bogus-mode' as never })
+
+      expect(result.chineseVariantMode).toBe('skip_all_chinese')
+    })
+
+    it('keeps the global Chinese variant mode when the channel has no override', () => {
+      const global = { ...DEFAULT_SETTINGS, chineseVariantMode: 'translate_other_script' as const }
+
+      const result = mergeSettings(global, { targetLanguage: 'ja' })
+
+      expect(result.chineseVariantMode).toBe('translate_other_script')
     })
   })
 })

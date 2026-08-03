@@ -185,6 +185,35 @@ describe('MessageRouter', () => {
         payload: { translationEnabled: true, targetLanguage: 'ja' },
       })
     })
+
+    it('delivers the Chinese variant mode in the content_settings response', async () => {
+      const getContentSettings = vi.fn(async () => ({
+        translationEnabled: true,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'translate_other_script',
+      }))
+      const { router } = makeRouter({ getContentSettings })
+      const sendResponse = vi.fn()
+
+      router.handleMessage(
+        { type: 'get_content_settings', payload: { channelName: 'mychannel' } },
+        undefined,
+        sendResponse,
+      )
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledTimes(1)
+      })
+
+      expect(sendResponse.mock.calls[0]![0]).toEqual({
+        type: 'content_settings',
+        payload: {
+          translationEnabled: true,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'translate_other_script',
+        },
+      })
+    })
   })
 
   describe('validate_key', () => {

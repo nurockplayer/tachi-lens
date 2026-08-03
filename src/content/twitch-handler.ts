@@ -1,5 +1,6 @@
 import type { DiagnosticStage, ErrorNotification, MessageType, TranslationResult } from '@/shared/messages'
 import { isSlashMe, isLinksOnly, isNumbersOnly, type FilterConfig } from './message-filter'
+import type { ChineseVariantMode } from '@/shared/language-detection'
 import {
   safeRuntimeSendMessage,
   type RuntimeMessageResult,
@@ -24,6 +25,7 @@ export interface ContentSettings {
   displayMode: DisplayMode
   translationEnabled: boolean
   targetLanguage?: string
+  chineseVariantMode: ChineseVariantMode
   filterConfig: FilterConfig
 }
 
