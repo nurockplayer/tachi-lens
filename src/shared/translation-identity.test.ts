@@ -40,7 +40,8 @@ describe('buildTranslationIdentity', () => {
 
   it('is a stable string with a stable shape', () => {
     const key = buildTranslationIdentity(BASE)
-    expect(key).toBe('Hello\u0000zh-TW\u0000deepseek\u0000deepseek-v4-flash\u0000\u00001')
+    // Length-prefixed: `${len}#${value}` per dimension, joined with '|'.
+    expect(key).toBe('5#Hello|5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#1')
   })
 
   describe('isolation dimensions', () => {
@@ -81,9 +82,11 @@ describe('buildTranslationIdentity', () => {
   })
 
   describe('source text normalization', () => {
-    it('trims leading and trailing whitespace', () => {
+    it('preserves leading and trailing whitespace as distinct identities', () => {
+      expect(buildTranslationIdentity({ ...BASE, text: ' Hello ' }))
+        .not.toBe(buildTranslationIdentity({ ...BASE, text: 'Hello' }))
       expect(buildTranslationIdentity({ ...BASE, text: '  Hello  ' }))
-        .toBe(buildTranslationIdentity(BASE))
+        .not.toBe(buildTranslationIdentity({ ...BASE, text: 'Hello' }))
     })
 
     it('does not collapse internal whitespace or change case', () => {
@@ -91,6 +94,52 @@ describe('buildTranslationIdentity', () => {
         .not.toBe(buildTranslationIdentity({ ...BASE, text: 'Hello World' }))
       expect(buildTranslationIdentity({ ...BASE, text: 'hello' }))
         .not.toBe(buildTranslationIdentity(BASE))
+    })
+  })
+
+  describe('length-prefixed collision safety', () => {
+    it('uses the verbatim text in the identity so it matches the provider input', () => {
+      expect(buildTranslationIdentity({ ...BASE, text: 'Hello' }))
+        .toBe('5#Hello|5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#1')
+      expect(buildTranslationIdentity({ ...BASE, text: ' Hello ' }))
+        .toBe('7# Hello |5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#1')
+    })
+
+    it('keeps leading/trailing whitespace in the provider text and the identity identical', () => {
+      const padded = '  Hello  '
+      // The identity encodes the exact string that the translator sends to
+      // the provider: no trimming anywhere.
+      expect(buildTranslationIdentity({ ...BASE, text: padded }))
+        .toBe(buildTranslationIdentity({ ...BASE, text: padded }))
+      expect(buildTranslationIdentity({ ...BASE, text: padded }))
+        .not.toBe(buildTranslationIdentity({ ...BASE, text: padded.trim() }))
+    })
+
+    it('cannot collide when a value contains the field separator or length marker', () => {
+      // '|' and '#' are the encoding separators; the length prefix must keep
+      // them from blurring field boundaries.
+      expect(buildTranslationIdentity({ ...BASE, text: 'a|b' }))
+        .not.toBe(buildTranslationIdentity({ ...BASE, text: 'a', sourceLang: 'b' }))
+      expect(buildTranslationIdentity({ ...BASE, text: 'a#b' }))
+        .not.toBe(buildTranslationIdentity({ ...BASE, text: 'a', sourceLang: 'b' }))
+    })
+
+    it('cannot collide across the model and sourceLang dimensions', () => {
+      // With a raw separator join, a value ending in '|' followed by the next
+      // dimension is indistinguishable from an embedded '|' in that value:
+      // model:'x|yz' (sourceLang absent) and model:'x', sourceLang:'yz' both
+      // produce the run 'x|yz'. The length prefix keeps them distinct.
+      const a = buildTranslationIdentity({ ...BASE, model: 'x|yz' })
+      const b = buildTranslationIdentity({ ...BASE, model: 'x', sourceLang: 'yz' })
+      expect(a).not.toBe(b)
+      expect(a).toBe('5#Hello|5#zh-TW|8#deepseek|4#x|yz|0#|1#1')
+      expect(b).toBe('5#Hello|5#zh-TW|8#deepseek|1#x|2#yz|1#1')
+    })
+
+    it('cannot collide when the model contains the NUL character', () => {
+      const withNul = buildTranslationIdentity({ ...BASE, model: 'a\u0000b' })
+      const without = buildTranslationIdentity({ ...BASE, model: 'a', sourceLang: 'b' })
+      expect(withNul).not.toBe(without)
     })
   })
 })
