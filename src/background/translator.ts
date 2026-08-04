@@ -31,6 +31,7 @@ interface PendingItem {
   request: TranslationRequest
   resolve: (result: TranslationResult) => void
   completion: Promise<TranslationResult>
+  enqueuedAt: number
 }
 
 const DEEPSEEK_FALLBACK_PROVIDER: ProviderId = 'deepseek'
@@ -66,12 +67,12 @@ export class Translator {
       }
       const priority = request.priority ?? 'live'
       const queue = priority === 'live' ? this.liveQueue : this.backlogQueue
-      queue.push({ request, resolve: settle, completion })
+      queue.push({ request, resolve: settle, completion, enqueuedAt: this.now() })
 
       if (queue.length >= this.options.maxBatchSize) {
         this.flushImmediately(this.liveQueue.length > 0 ? 'live' : priority)
       } else if (!this.timer) {
-        this.timer = setTimeout(() => { this.flushImmediately() }, this.options.batchWindowMs)
+        this.scheduleTimer()
       }
     })
   }
@@ -111,8 +112,29 @@ export class Translator {
     }
 
     if (remaining > 0 && !this.timer) {
-      this.timer = setTimeout(() => { this.flushImmediately() }, this.options.batchWindowMs)
+      this.scheduleTimer()
     }
+  }
+
+  private scheduleTimer(): void {
+    const deadline = this.nextBatchDeadline()
+    if (deadline === undefined) return
+    const delay = Math.max(0, deadline - this.now())
+    this.timer = setTimeout(() => { this.flushImmediately() }, delay)
+  }
+
+  private nextBatchDeadline(): number | undefined {
+    const liveOldest = this.liveQueue[0]
+    const backlogOldest = this.backlogQueue[0]
+    const oldest = !liveOldest ? backlogOldest
+      : !backlogOldest ? liveOldest
+      : liveOldest.enqueuedAt <= backlogOldest.enqueuedAt ? liveOldest : backlogOldest
+    if (!oldest) return undefined
+    return oldest.enqueuedAt + this.options.batchWindowMs
+  }
+
+  private now(): number {
+    return Date.now()
   }
 
   private async flush(priority?: 'live' | 'backlog'): Promise<void> {

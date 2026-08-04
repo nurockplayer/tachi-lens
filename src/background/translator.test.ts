@@ -144,8 +144,7 @@ describe('Translator', () => {
       expect(provider.translateBatch).toHaveBeenCalledTimes(1)
     })
 
-    it('anchors the batch window to the first queued message', async () => {
-      const provider = createMockProvider()
+    it('anchors the batch window to the first queued message', async () => {      const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
         requests.map((r) => ({ id: r.id, translatedText: `T-${r.text}` })),
       )
@@ -165,6 +164,126 @@ describe('Translator', () => {
       expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['msg1', 'msg2'])
       expect(result1.translatedText).toBe('T-one')
       expect(result2.translatedText).toBe('T-two')
+    })
+
+    it('processes a partial batch immediately after the active batch settles when its deadline expired', async () => {
+      let releaseFirst!: () => void
+      const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve })
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        if (requests[0]?.id === 'first-0') await firstHeld
+        return requests.map((r) => ({ id: r.id, translatedText: `T-${r.id}` }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      // First full batch starts immediately (10 items).
+      const first = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `first-${i}`, text: `text${i}` }),
+      )
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+
+      // A partial batch joins while the first batch is still in flight.
+      const partial = translator.translate({ messageId: 'partial', text: 'late' })
+      // The partial batch's 300 ms window elapses while the first batch is held.
+      await vi.advanceTimersByTimeAsync(300)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+
+      // Releasing the first batch immediately triggers the expired partial batch.
+      releaseFirst()
+      await expect(Promise.all(first)).resolves.toHaveLength(10)
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(2))
+      await expect(partial).resolves.toEqual({ messageId: 'partial', translatedText: 'T-partial' })
+      expect(vi.mocked(provider.translateBatch).mock.calls[1]![0].map(({ id }) => id)).toEqual(['partial'])
+    })
+
+    it('waits only the remaining time when a partial batch deadline has not expired', async () => {
+      let releaseFirst!: () => void
+      const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve })
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        if (requests[0]?.id === 'first-0') await firstHeld
+        return requests.map((r) => ({ id: r.id, translatedText: `T-${r.id}` }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      const first = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `first-${i}`, text: `text${i}` }),
+      )
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+
+      // The partial batch arrives 100 ms into the first batch's flight.
+      const partial = translator.translate({ messageId: 'partial', text: 'late' })
+      // Only 100 ms of its 300 ms window have passed when the first batch settles.
+      await vi.advanceTimersByTimeAsync(100)
+      releaseFirst()
+      await expect(Promise.all(first)).resolves.toHaveLength(10)
+
+      // After the active batch settles, the partial batch waits the remaining 200 ms.
+      await vi.advanceTimersByTimeAsync(199)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(partial).resolves.toEqual({ messageId: 'partial', translatedText: 'T-partial' })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
+    })
+
+    it('re-anchors the timer to the new oldest item after the oldest is removed', async () => {
+      let releaseFirst!: () => void
+      const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve })
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        if (requests[0]?.id === 'msg0') await firstHeld
+        return requests.map((r) => ({ id: r.id, translatedText: `T-${r.id}` }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      // First full batch starts immediately (10 items) and is held in flight.
+      const first = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+
+      // The late item joins while the first batch is in flight. Its timer must
+      // anchor to its own enqueue time, not to a fresh window after the batch.
+      await vi.advanceTimersByTimeAsync(100)
+      const late = translator.translate({ messageId: 'late', text: 'late' })
+      await vi.advanceTimersByTimeAsync(200)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+
+      releaseFirst()
+      await expect(Promise.all(first)).resolves.toHaveLength(10)
+      await vi.advanceTimersByTimeAsync(0)
+
+      // The late item was enqueued at t=100, so its deadline is t=400. It must
+      // NOT receive a fresh 300 ms window after the first batch completes.
+      await vi.advanceTimersByTimeAsync(99)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(late).resolves.toEqual({ messageId: 'late', translatedText: 'T-late' })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not select the same work twice when a timer and full-batch signal coincide', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((r) => ({ id: r.id, translatedText: `T-${r.id}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      // Fill the queue to 10 so the last request triggers an immediate flush.
+      const pending = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      // The flush clears the timer before the 300 ms deadline can also fire.
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(300)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+
+      await expect(Promise.all(pending)).resolves.toHaveLength(10)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
     })
 
     it('batches multiple requests within the same batch window', async () => {
