@@ -257,6 +257,74 @@ describe('service worker startup', () => {
     expect(JSON.stringify(response)).not.toMatch(/sk-[a-z0-9_-]+|sk-secret|private chat|@username/i)
   })
 
+  it('resets quota accounting for reset_quota_health and returns a typed result', async () => {
+    const wallNow = Date.now()
+    const chromeRuntime = {
+      ...createChromeRuntime(),
+      runtime: {
+        ...createChromeRuntime().runtime,
+        sendMessage: vi.fn(async () => undefined),
+      },
+      storage: {
+        session: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+        },
+        local: {
+          get: vi.fn(async () => ({
+            geminiQuotaUsage: {
+              quotaVersion: 99,
+              wallHighWaterMark: wallNow,
+              clockTrusted: false,
+              buckets: {
+                default: {
+                  reservations: [],
+                  cooldownUntil: wallNow + 60_000,
+                  providerDay: '2099-01-01',
+                  requestsToday: 200,
+                },
+              },
+            },
+          })),
+          set: vi.fn(async () => undefined),
+        },
+      },
+    }
+    vi.stubGlobal('chrome', chromeRuntime)
+
+    await import('./service-worker')
+
+    const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+      | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+      | undefined
+
+    if (!handler) {
+      throw new Error('Expected a message handler to be registered')
+    }
+
+    const sendResponse = vi.fn()
+    expect(handler({ type: 'reset_quota_health', payload: { quotaKey: 'default' } }, undefined, sendResponse))
+      .toBe(true)
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledTimes(1)
+    })
+
+    const response = sendResponse.mock.calls[0]![0] as {
+      type: string
+      payload: { ok: boolean; resetKeys: string[] }
+    }
+    expect(response.type).toBe('quota_health_reset_result')
+    expect(response.payload.ok).toBe(true)
+    expect(response.payload.resetKeys).toEqual(['default'])
+    // The reset writes a clean, empty quota accounting snapshot.
+    expect(chromeRuntime.storage.local.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        geminiQuotaUsage: expect.objectContaining({ quotaVersion: 3, buckets: {} }),
+      }),
+    )
+  })
+
   it('reports a requested model with no exact bucket as inheriting the legacy baseline cooldown', async () => {
     const wallNow = Date.now()
     const chromeRuntime = {

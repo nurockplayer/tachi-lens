@@ -520,6 +520,43 @@ export class GeminiQuotaStore {
     })
   }
 
+  /**
+   * Reset the persisted Gemini quota accounting snapshot back to a clean
+   * baseline so normal reservation behavior resumes.
+   *
+   * Integrity states (untrusted migration, malformed snapshots, unsupported
+   * versions) and clock-rollback accounting are snapshot-level, so clearing
+   * the full quota accounting snapshot is the smallest unit that can repair
+   * them. Only the quota accounting keys are rewritten; API keys, settings,
+   * cache, and channel settings live under different storage keys and are
+   * never touched. Returns the quota keys that were reset.
+   */
+  async resetQuotaAccounting(quotaKey?: string): Promise<string[]> {
+    return this.exclusively(async () => {
+      await this.load()
+      const time = this.observeClock()
+      const normalized = typeof quotaKey === 'string' && quotaKey.trim()
+        ? quotaKey.trim()
+        : undefined
+      const affected = normalized
+        ? [normalized]
+        : Array.from(this.buckets!.keys())
+
+      this.buckets = new Map()
+      this.legacyBaseline = undefined
+      this.wallHighWaterMark = time.wallNow
+      this.clockTrusted = true
+      this.safeHighWaterMark = true
+      // Persist a clean canonical snapshot so the next reservation starts from
+      // a healthy, empty baseline and the previous fail-closed integrity state
+      // cannot be resurrected on reload.
+      await this.persist()
+      this.initializeRuntimeClock(time.wallNow, time.monotonicNow)
+
+      return affected.length > 0 ? affected : ['default']
+    })
+  }
+
   private toBucketDiagnostic(bucket: QuotaBucketState): QuotaBucketDiagnosticState {
     return {
       providerDay: bucket.providerDay,

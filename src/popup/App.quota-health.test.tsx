@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { QuotaHealthResult } from '@/shared/messages'
 import { App } from './App'
 
@@ -60,6 +60,9 @@ const renderWithQuotaHealth = (payload: QuotaHealthResult[]) => {
   sendMessageMock.mockImplementation(async (message: { type: string }) => {
     if (message.type === 'get_quota_health') {
       return { type: 'quota_health_result', payload }
+    }
+    if (message.type === 'reset_quota_health') {
+      return { type: 'quota_health_reset_result', payload: { ok: true, resetKeys: ['default'] } }
     }
     if (message.type === 'get_diagnostics') {
       return { type: 'diagnostics_snapshot', payload: { events: [] } }
@@ -202,5 +205,44 @@ describe('Popup Gemini quota health', () => {
       expect(type).not.toMatch(mutationPattern)
     }
     expect(getSendMessageTypes()).toContain('get_quota_health')
+  })
+
+  it('offers a repair action for integrity statuses but not for healthy or cooldown', async () => {
+    renderWithQuotaHealth([
+      healthyResult,
+      cooldownResult,
+      clockRollbackResult,
+      untrustedMigrationResult,
+      malformedResult,
+      unsupportedResult,
+    ])
+
+    await screen.findByText(/gemini-2\.5-flash：時鐘回撥/)
+    const repairButtons = screen.getAllByRole('button', { name: /修復|重設|repair|reset/i })
+    // clock_rollback, untrusted_migration, malformed_snapshot, unsupported_version.
+    expect(repairButtons).toHaveLength(4)
+  })
+
+  it('requires a second confirmation click before sending the reset mutation', async () => {
+    renderWithQuotaHealth([clockRollbackResult])
+
+    const button = await screen.findByRole('button', { name: '修復配額資料' })
+
+    // First click arms the confirmation and sends nothing.
+    fireEvent.click(button)
+    expect(screen.getByRole('button', { name: '確認修復？' })).toBeTruthy()
+    expect(getSendMessageTypes()).not.toContain('reset_quota_health')
+
+    // Second click sends the reset and refreshes diagnostics.
+    fireEvent.click(screen.getByRole('button', { name: '確認修復？' }))
+    await waitFor(() => expect(getSendMessageTypes()).toContain('reset_quota_health'))
+  })
+
+  it('keeps the quota state unchanged when the confirmation is not completed', async () => {
+    renderWithQuotaHealth([clockRollbackResult])
+
+    await screen.findByRole('button', { name: '修復配額資料' })
+    // No click at all: only read-only messages are issued.
+    expect(getSendMessageTypes()).not.toContain('reset_quota_health')
   })
 })

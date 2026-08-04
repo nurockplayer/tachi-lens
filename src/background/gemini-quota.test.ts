@@ -775,6 +775,88 @@ describe('GeminiQuotaStore', () => {
     await expect(store.getUsage()).resolves.toMatchObject({ requestsToday: 200 })
   })
 
+  it('resetQuotaAccounting clears the persisted quota snapshot and restores healthy reservation', async () => {
+    const storage = createStorage()
+    const now = Date.UTC(2026, 6, 13, 12, 0, 0)
+    Object.assign(storage.local, {
+      quotaVersion: 99,
+      wallHighWaterMark: now,
+      clockTrusted: false,
+      buckets: {
+        default: {
+          reservations: [],
+          cooldownUntil: now + 60_000,
+          providerDay: '2099-01-01',
+          requestsToday: 200,
+        },
+      },
+    })
+    const store = new GeminiQuotaStore(storage, () => now)
+
+    // The unsupported version snapshot is fail-closed before repair.
+    const before = collectQuotaHealthResults(await store.getDiagnosticState())[0]!
+    expect(before.status).toBe('unsupported_version')
+
+    const resetKeys = await store.resetQuotaAccounting('default')
+
+    expect(resetKeys).toEqual(['default'])
+    // Quota accounting is rewritten as a clean, empty baseline snapshot.
+    expect(storage.local.buckets).toEqual({})
+
+    // Diagnostics now report a clean, healthy state.
+    const after = collectQuotaHealthResults(await store.getDiagnosticState())[0]!
+    expect(after.status).toBe('healthy')
+
+    // Normal reservation behavior resumes from a clean baseline.
+    const permissive = {
+      ...profile,
+      requestsPerMinute: 100,
+      inputTokensPerMinute: 100_000,
+      requestsPerDay: 100,
+    }
+    await expect(store.reserve(permissive, 1)).resolves.toMatchObject({ accepted: true })
+    await expect(store.getUsage()).resolves.toMatchObject({ rollingRequests: 1, requestsToday: 1 })
+  })
+
+  it('resetQuotaAccounting preserves unrelated persisted extension data', async () => {
+    const storage = createStorage()
+    const now = Date.UTC(2026, 6, 13, 12, 0, 0)
+    Object.assign(storage.local, {
+      quotaVersion: 3,
+      wallHighWaterMark: now,
+      clockTrusted: true,
+      buckets: {
+        default: {
+          reservations: [{ id: 'r1', at: now, inputTokens: 10 }],
+          cooldownUntil: 0,
+          providerDay: '2026-07-13',
+          requestsToday: 1,
+        },
+      },
+      // Unrelated keys that must survive a quota repair untouched.
+      apiKeys: { gemini: 'sk-secret' },
+      settings: { targetLanguage: 'zh-TW' },
+      channelSettings: { twitch_channel: { enabled: true } },
+    })
+    Object.assign(storage.session, {
+      quotaVersion: 3,
+      reservations: [{ id: 'r1', at: now, inputTokens: 10 }],
+      sessionMarker: 'keep-me',
+    })
+    const store = new GeminiQuotaStore(storage, () => now)
+
+    await store.resetQuotaAccounting()
+
+    // Quota accounting is rewritten as a clean empty baseline snapshot.
+    expect(storage.local.buckets).toEqual({})
+    expect(storage.local.quotaVersion).toBe(3)
+    // Unrelated persisted keys survive the repair untouched.
+    expect(storage.local.apiKeys).toEqual({ gemini: 'sk-secret' })
+    expect(storage.local.settings).toEqual({ targetLanguage: 'zh-TW' })
+    expect(storage.local.channelSettings).toEqual({ twitch_channel: { enabled: true } })
+    expect(storage.session.sessionMarker).toBe('keep-me')
+  })
+
   it('resets RPD only for a valid canonical day that is provably in the past', async () => {
     const storage = createStorage()
     const now = Date.UTC(2026, 6, 13, 12, 0, 0)

@@ -84,6 +84,8 @@ export type MessageKey =
   | 'quotaHealthCooldownUntil'
   | 'quotaHealthRecoveryAt'
   | 'quotaHealthDeepSeekOverflow'
+  | 'quotaHealthRepair'
+  | 'quotaHealthRepairConfirm'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -163,6 +165,8 @@ export const MESSAGE_KEYS: readonly string[] = [
   'quotaHealthCooldownUntil',
   'quotaHealthRecoveryAt',
   'quotaHealthDeepSeekOverflow',
+  'quotaHealthRepair',
+  'quotaHealthRepairConfirm',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -243,6 +247,8 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   quotaHealthCooldownUntil: '冷卻結束',
   quotaHealthRecoveryAt: '自動恢復時間',
   quotaHealthDeepSeekOverflow: 'Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。',
+  quotaHealthRepair: '修復配額資料',
+  quotaHealthRepairConfirm: '確認修復？',
 }
 
 /**
