@@ -43,6 +43,8 @@ export class Translator {
   private timer: ReturnType<typeof setTimeout> | null = null
   private consecutiveLiveBatches = 0
   private inFlightTranslations = new Map<string, Promise<TranslationResult>>()
+  private activeBatch = false
+  private flushRequested = false
 
   constructor(
     private deps: TranslatorDependencies,
@@ -69,18 +71,48 @@ export class Translator {
       if (queue.length >= this.options.maxBatchSize) {
         this.flushImmediately(this.liveQueue.length > 0 ? 'live' : priority)
       } else if (!this.timer) {
-        this.timer = setTimeout(() => { void this.flush() }, this.options.batchWindowMs)
+        this.timer = setTimeout(() => { this.flushImmediately() }, this.options.batchWindowMs)
       }
     })
   }
 
-  private flushImmediately(priority: 'live' | 'backlog'): void {
+  private flushImmediately(priority?: 'live' | 'backlog'): void {
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
     }
 
-    void this.flush(priority)
+    if (this.activeBatch) {
+      this.flushRequested = true
+      return
+    }
+
+    this.flushRequested = false
+    this.activeBatch = true
+    void this.flush(priority).finally(() => {
+      this.activeBatch = false
+      this.drainAfterActiveBatch()
+    })
+  }
+
+  private drainAfterActiveBatch(): void {
+    if (this.flushRequested) {
+      this.flushRequested = false
+      queueMicrotask(() => { this.flushImmediately() })
+      return
+    }
+
+    const remaining = this.liveQueue.length + this.backlogQueue.length
+
+    if (this.liveQueue.length >= this.options.maxBatchSize ||
+        this.backlogQueue.length >= this.options.maxBatchSize) {
+      queueMicrotask(() => { this.flushImmediately() })
+      return
+    }
+
+    if (remaining > 0 && !this.timer) {
+      this.timer = setTimeout(() => { this.flushImmediately() }, this.options.batchWindowMs)
+    }
   }
 
   private async flush(priority?: 'live' | 'backlog'): Promise<void> {
@@ -96,10 +128,6 @@ export class Translator {
       selectedPriority,
       this.backlogQueue.length > 0,
     )
-
-    if ((this.liveQueue.length > 0 || this.backlogQueue.length > 0) && !this.timer) {
-      this.timer = setTimeout(() => { void this.flush() }, this.options.batchWindowMs)
-    }
 
     let ownedItems = items
     try {

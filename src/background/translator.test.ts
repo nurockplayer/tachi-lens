@@ -259,7 +259,7 @@ describe('Translator', () => {
         }))
       }
 
-      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(4))
+      await vi.waitFor(() => expect(vi.mocked(provider.translateBatch).mock.calls.length).toBeGreaterThanOrEqual(4))
       const firstFourBatches = vi.mocked(provider.translateBatch).mock.calls
         .slice(0, 4)
         .map(([requests]) => requests.map((request) => request.id))
@@ -273,6 +273,18 @@ describe('Translator', () => {
 
       await vi.advanceTimersByTimeAsync(300)
       await expect(Promise.all(pending)).resolves.toHaveLength(9)
+
+      // Single-flight: once the backlog batch settles, the remaining live work
+      // is dispatched immediately without waiting for a fresh batch window.
+      expect(vi.mocked(provider.translateBatch).mock.calls
+        .map(([requests]) => requests.map((request) => request.id)))
+        .toEqual([
+          ['live-0', 'live-1'],
+          ['live-2', 'live-3'],
+          ['live-4', 'live-5'],
+          ['backlog'],
+          ['live-6', 'live-7'],
+        ])
     })
 
     it('services scheduler backlog after bounded live work releases provider capacity', async () => {
@@ -307,7 +319,7 @@ describe('Translator', () => {
       expect(callOrder.indexOf('backlog')).toBeLessThanOrEqual(4)
     })
 
-    it('bounds selected-DeepSeek batches with the shared scheduler capacity', async () => {
+    it('processes selected-DeepSeek batches sequentially under single-flight', async () => {
       let release!: () => void
       const held = new Promise<void>((resolve) => { release = resolve })
       const provider = createMockProvider('deepseek')
@@ -320,8 +332,11 @@ describe('Translator', () => {
       translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const pending = ['a', 'b', 'c'].map((id) => translator.translate({ messageId: id, text: id }))
-      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(2))
-      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+
+      // Single-flight: a later batch must not start while the first is pending.
+      await vi.advanceTimersByTimeAsync(300)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
 
       release()
       await expect(Promise.all(pending)).resolves.toHaveLength(3)
@@ -483,7 +498,7 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
 
-    it('overflows smaller backlog work while a live Gemini batch can still wait for quota', async () => {
+    it('queues backlog work behind a live Gemini batch waiting for quota under single-flight', async () => {
       let now = Date.UTC(2026, 6, 14, 12)
       const session: Record<string, unknown> = {}
       const local: Record<string, unknown> = {}
@@ -545,10 +560,9 @@ describe('Translator', () => {
       const backlog = translator.translate({ messageId: 'backlog', text: 'old', priority: 'backlog' })
       await vi.advanceTimersByTimeAsync(300)
 
-      // The backlog runs Gemini because its quotaKey (gemini-2.5-pro) is distinct
-      // from the live waiter's (gemini-2.5-flash), so it is not blocked.
-      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
-      expect(vi.mocked(gemini.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['backlog'])
+      // Single-flight: the backlog must wait for the active live batch instead of
+      // running Gemini (or overflowing to DeepSeek) while it is pending.
+      expect(gemini.translateBatch).not.toHaveBeenCalled()
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
 
       now += 500
@@ -559,8 +573,9 @@ describe('Translator', () => {
         { messageId: 'live-2', translatedText: 'g-live-2' },
       ])
       await expect(backlog).resolves.toEqual({ messageId: 'backlog', translatedText: 'g-backlog' })
-      expect(vi.mocked(gemini.translateBatch).mock.calls[0]![0].map(({ id }) => id))
-        .toEqual(['backlog'])
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(gemini.translateBatch).mock.calls[1]![0].map(({ id }) => id)).toEqual(['backlog'])
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
     it('keeps Gemini quota and cooldown state independent for each selected model', async () => {
@@ -685,14 +700,21 @@ describe('Translator', () => {
         text: id,
         priority: 'backlog',
       }))
-      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
-
-      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
       expect(vi.mocked(gemini.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['a', 'b'])
-      expect(vi.mocked(deepseek.translateBatch).mock.calls[0]![0].map(({ id }) => id)).toEqual(['c', 'd'])
+
+      // Single-flight: the remaining backlog may not overflow to DeepSeek while
+      // the first full Gemini batch is still pending.
+      await vi.advanceTimersByTimeAsync(300)
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
 
       release()
       await expect(Promise.all(pending)).resolves.toHaveLength(4)
+
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(gemini.translateBatch).mock.calls[1]![0].map(({ id }) => id)).toEqual(['c', 'd'])
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
     it('isolates Gemini per-quotaKey across different models', async () => {
@@ -728,11 +750,17 @@ describe('Translator', () => {
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
       selectedModel = 'gemini-2.5-pro'
       const pro = translator.translate({ messageId: 'pro', text: 'two', priority: 'backlog' })
-      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(2))
+      await vi.advanceTimersByTimeAsync(300)
 
-      expect(deepseek.translateBatch).not.toHaveBeenCalled()
+      // Single-flight: the second model's batch must wait for the first batch to settle.
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
+
       release()
       await expect(Promise.all([flash, pro])).resolves.toHaveLength(2)
+
+      // After the first batch settles, the second model is served by Gemini.
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(2)
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
     it('does not let another model bypass saturated Gemini provider capacity', async () => {
@@ -772,12 +800,17 @@ describe('Translator', () => {
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
       selectedModel = 'gemini-2.5-pro'
       const pro = translator.translate({ messageId: 'pro', text: 'three', priority: 'live' })
-      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(2))
+      await vi.advanceTimersByTimeAsync(1_000)
 
+      // Single-flight: the second model's live batch must wait for the held batch,
+      // not overflow to DeepSeek while the first batch is pending.
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
 
       releaseFlash()
       await expect(Promise.all([flashHolder, pro])).resolves.toHaveLength(2)
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(2)
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
     it('rechecks live priority when backlog quota denial persistence finishes', async () => {
@@ -835,9 +868,101 @@ describe('Translator', () => {
       releaseFirstWrite()
 
       await expect(Promise.all([backlog, live])).resolves.toHaveLength(2)
+      // Single-flight FIFO: the backlog entered the queue first, so it is
+      // dispatched first; the live request is processed as soon as the backlog
+      // batch settles (no fresh batch window is required).
       expect(vi.mocked(deepseek.translateBatch).mock.calls.map(([requests]) => requests[0]!.id))
-        .toEqual(['live', 'backlog'])
+        .toEqual(['backlog', 'live'])
       expect(gemini.translateBatch).not.toHaveBeenCalled()
+    })
+
+    it('never runs more than one provider batch concurrently (single-flight)', async () => {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => { release = resolve })
+      const provider = createMockProvider('deepseek')
+      let concurrent = 0
+      let maxConcurrent = 0
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        concurrent++
+        maxConcurrent = Math.max(maxConcurrent, concurrent)
+        await held
+        concurrent--
+        return requests.map((request) => ({ id: request.id, translatedText: request.id }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
+
+      const pending = Array.from({ length: 6 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(300)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(maxConcurrent).toBe(1)
+
+      release()
+      await expect(Promise.all(pending)).resolves.toHaveLength(6)
+      expect(maxConcurrent).toBe(1)
+    })
+
+    it('processes 20 queued messages as two full FIFO batches of 10 under single-flight', async () => {
+      const provider = createMockProvider('deepseek')
+      let concurrent = 0
+      let maxConcurrent = 0
+      let release!: () => void
+      const held = new Promise<void>((resolve) => { release = resolve })
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        concurrent++
+        maxConcurrent = Math.max(maxConcurrent, concurrent)
+        if (requests.some((request) => request.id === 'msg9')) await held
+        concurrent--
+        return requests.map((request) => ({ id: request.id, translatedText: `T-${request.id}` }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      const pending = Array.from({ length: 20 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      await vi.waitFor(() => expect(provider.translateBatch).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${i}`))
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+
+      release()
+      await expect(Promise.all(pending)).resolves.toHaveLength(20)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(provider.translateBatch).mock.calls[1]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${10 + i}`))
+      expect(maxConcurrent).toBe(1)
+    })
+
+    it('processes 30 queued messages as three full FIFO batches of 10 under single-flight', async () => {
+      const provider = createMockProvider('deepseek')
+      let concurrent = 0
+      let maxConcurrent = 0
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        concurrent++
+        maxConcurrent = Math.max(maxConcurrent, concurrent)
+        await Promise.resolve()
+        concurrent--
+        return requests.map((request) => ({ id: request.id, translatedText: `T-${request.id}` }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      const pending = Array.from({ length: 30 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      await expect(Promise.all(pending)).resolves.toHaveLength(30)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(3)
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${i}`))
+      expect(vi.mocked(provider.translateBatch).mock.calls[1]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${10 + i}`))
+      expect(vi.mocked(provider.translateBatch).mock.calls[2]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${20 + i}`))
+      expect(maxConcurrent).toBe(1)
     })
   })
 
@@ -1009,9 +1134,16 @@ describe('Translator', () => {
       const english = translator.translate({ messageId: 'english', text: 'same', sourceLang: 'en' })
       const japanese = translator.translate({ messageId: 'japanese', text: 'same', sourceLang: 'ja' })
 
-      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
+
+      // Single-flight: the second source-language request waits for the first
+      // batch, but must still produce a separate provider call (no coalescing
+      // across different source languages).
+      await vi.advanceTimersByTimeAsync(300)
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
       release()
 
+      await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(2))
       await expect(Promise.all([english, japanese])).resolves.toEqual([
         { messageId: 'english', translatedText: 'en' },
         { messageId: 'japanese', translatedText: 'ja' },
@@ -1019,7 +1151,7 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
-    it('does not coalesce live work behind an identical hung backlog translation', async () => {
+    it('does not overflow a live batch while a backlog batch is pending under single-flight', async () => {
       let releaseBacklog!: () => void
       const backlogHeld = new Promise<void>((resolve) => { releaseBacklog = resolve })
       const gemini = createMockProvider('gemini')
@@ -1044,19 +1176,19 @@ describe('Translator', () => {
       const backlog = translator.translate({ messageId: 'backlog', text: 'same', priority: 'backlog' })
       await vi.waitFor(() => expect(gemini.translateBatch).toHaveBeenCalledTimes(1))
 
-      let liveSettled = false
-      const live = translator.translate({ messageId: 'live', text: 'same', priority: 'live' }).then((result) => {
-        liveSettled = true
-        return result
-      })
+      const live = translator.translate({ messageId: 'live', text: 'same', priority: 'live' })
       await vi.advanceTimersByTimeAsync(1_000)
 
-      expect(liveSettled).toBe(true)
-      await expect(live).resolves.toEqual({ messageId: 'live', translatedText: 'live-overflow' })
-      expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
+      // Single-flight: the live batch must not overflow to DeepSeek while the
+      // backlog batch is still pending.
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
 
       releaseBacklog()
-      await expect(backlog).resolves.toEqual({ messageId: 'backlog', translatedText: 'backlog-result' })
+      const [liveResult, backlogResult] = await Promise.all([live, backlog])
+      expect(backlogResult).toEqual({ messageId: 'backlog', translatedText: 'backlog-result' })
+      expect(liveResult).toEqual({ messageId: 'live', translatedText: 'backlog-result' })
+      expect(gemini.translateBatch).toHaveBeenCalledTimes(1)
+      expect(deepseek.translateBatch).not.toHaveBeenCalled()
     })
 
     it('coalesces backlog work behind an identical in-flight live translation', async () => {
@@ -1656,23 +1788,25 @@ describe('Translator', () => {
 
       const first = translator.translate({ messageId: 'held-1', text: 'one' })
       const second = translator.translate({ messageId: 'held-2', text: 'two' })
-      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
 
       selectedProvider = 'gemini'
-      let cachedSettled = false
-      const cached = translator.translate({ messageId: 'cached', text: 'cached' }).then((result) => {
-        cachedSettled = true
-        return result
-      })
+      const cached = translator.translate({ messageId: 'cached', text: 'cached' })
       await vi.advanceTimersByTimeAsync(0)
 
-      expect(cachedSettled).toBe(true)
-      await expect(cached).resolves.toEqual({ messageId: 'cached', translatedText: '快取翻譯' })
+      // Single-flight: the cached request waits for the active batch; it must
+      // not probe the provider while work is in flight.
       expect(gemini.translateBatch).not.toHaveBeenCalled()
-      expect(deepseek.translateBatch).toHaveBeenCalledTimes(2)
+      expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
 
       release()
       await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(300)
+
+      // The cached request resolves from cache without any provider call.
+      await expect(cached).resolves.toEqual({ messageId: 'cached', translatedText: '快取翻譯' })
+      expect(gemini.translateBatch).not.toHaveBeenCalled()
+      expect(deepseek.translateBatch).toHaveBeenCalledTimes(2)
     })
 
     it('honors DeepSeek cooldown on scheduler overflow without probing again', async () => {
@@ -1727,35 +1861,33 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
 
-    it('does not let a concurrent DeepSeek success erase a newer 429 cooldown', async () => {
+    it('does not let a subsequent batch erase a recorded 429 cooldown', async () => {
       let finishFirst!: (results: Array<{ id: string; error: string; status: number; retryAfterMs: number }>) => void
-      let finishSecond!: (results: Array<{ id: string; translatedText: string }>) => void
       const firstResponse = new Promise<Array<{ id: string; error: string; status: number; retryAfterMs: number }>>((resolve) => {
         finishFirst = resolve
-      })
-      const secondResponse = new Promise<Array<{ id: string; translatedText: string }>>((resolve) => {
-        finishSecond = resolve
       })
       const deepseek = createMockProvider('deepseek')
       vi.mocked(deepseek.translateBatch)
         .mockImplementationOnce(() => firstResponse)
-        .mockImplementationOnce(() => secondResponse)
       deps.getProvider = vi.fn(() => deepseek)
       deps.quotaScheduler = createQuotaScheduler(2)
       translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 1 })
 
       const first = translator.translate({ messageId: 'first', text: 'one' })
       const second = translator.translate({ messageId: 'second', text: 'two' })
-      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(deepseek.translateBatch).toHaveBeenCalledTimes(1))
       finishFirst([{ id: 'first', error: 'limited', status: 429, retryAfterMs: 10_000 }])
       await expect(first).resolves.toMatchObject({ error: { type: 'rate_limited' } })
-      finishSecond([{ id: 'second', translatedText: 'done' }])
-      await expect(second).resolves.toMatchObject({ translatedText: 'done' })
+
+      // Single-flight: the queued second batch runs after the first settles and
+      // is short-circuited by the cooldown the first batch recorded.
+      await vi.advanceTimersByTimeAsync(300)
+      await expect(second).resolves.toMatchObject({ error: { type: 'rate_limited' } })
 
       const third = translator.translate({ messageId: 'third', text: 'three' })
       await vi.advanceTimersByTimeAsync(300)
       await expect(third).resolves.toMatchObject({ error: { type: 'rate_limited' } })
-      expect(deepseek.translateBatch).toHaveBeenCalledTimes(2)
+      expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
 
     it('keeps the Gemini 429 actionable when no DeepSeek key is configured', async () => {
