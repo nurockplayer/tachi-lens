@@ -11,8 +11,16 @@ import {
 import type { UserSettings } from '@/storage/settings'
 import type { GeminiQuotaSettings } from '@/background/gemini-quota'
 import { t } from '@/shared/i18n'
-import { isDiagnosticEventMessage } from '@/shared/messages'
-import type { DiagnosticEvent, DiagnosticStage, ErrorNotification, SettingsUpdatePayload } from '@/shared/messages'
+import { isDiagnosticEventMessage, isQuotaHealthResultMessage } from '@/shared/messages'
+import type {
+  DiagnosticEvent,
+  DiagnosticStage,
+  ErrorNotification,
+  QuotaHealthDenialReason,
+  QuotaHealthResult,
+  QuotaHealthStatus,
+  SettingsUpdatePayload,
+} from '@/shared/messages'
 import type { FilterConfig } from '@/content/message-filter'
 
 const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
@@ -41,6 +49,67 @@ const GEMINI_QUOTA_FIELDS: Array<{
   { key: 'liveMaxWaitMs', labelKey: 'geminiQuotaLiveWait', min: 1, max: 60_000 },
   { key: 'maxConcurrency', labelKey: 'geminiQuotaConcurrency', min: 1, max: 10 },
 ]
+
+/**
+ * Read-only presentation metadata for each Gemini quota health status. No
+ * status offers any repair/reset action; integrity failures only explain that
+ * Gemini is disabled to protect quota correctness.
+ */
+const QUOTA_HEALTH_STATUS_META: Record<QuotaHealthStatus, {
+  labelKey: Parameters<typeof t>[0]
+  descKey: Parameters<typeof t>[0]
+  color: string
+}> = {
+  healthy: {
+    labelKey: 'quotaHealthStatusHealthy',
+    descKey: 'quotaHealthDescHealthy',
+    color: '#2e7d32',
+  },
+  cooldown: {
+    labelKey: 'quotaHealthStatusCooldown',
+    descKey: 'quotaHealthDescCooldown',
+    color: '#b26a00',
+  },
+  clock_rollback: {
+    labelKey: 'quotaHealthStatusClockRollback',
+    descKey: 'quotaHealthDescClockRollback',
+    color: '#c0392b',
+  },
+  untrusted_migration: {
+    labelKey: 'quotaHealthStatusUntrustedMigration',
+    descKey: 'quotaHealthDescUntrustedMigration',
+    color: '#c0392b',
+  },
+  malformed_snapshot: {
+    labelKey: 'quotaHealthStatusMalformedSnapshot',
+    descKey: 'quotaHealthDescMalformedSnapshot',
+    color: '#c0392b',
+  },
+  unsupported_version: {
+    labelKey: 'quotaHealthStatusUnsupportedVersion',
+    descKey: 'quotaHealthDescUnsupportedVersion',
+    color: '#c0392b',
+  },
+}
+
+const QUOTA_HEALTH_DENIAL_LABELS: Record<QuotaHealthDenialReason, Parameters<typeof t>[0]> = {
+  rpm: 'quotaHealthDenialRpm',
+  tpm: 'quotaHealthDenialTpm',
+  rpd: 'quotaHealthDenialRpd',
+  cooldown: 'quotaHealthDenialCooldown',
+  clock_rollback: 'quotaHealthDenialClockRollback',
+}
+
+/** Which statuses represent an integrity failure that fail-closes Gemini. */
+const INTEGRITY_STATUSES: ReadonlySet<QuotaHealthStatus> = new Set([
+  'clock_rollback',
+  'untrusted_migration',
+  'malformed_snapshot',
+  'unsupported_version',
+])
+
+/** Formats an epoch-ms timestamp into a localized wall-clock string. */
+const formatInstant = (epochMs: number): string => new Date(epochMs).toLocaleString()
 
 export const extractChannelFromUrl = (url: string): string | undefined => {
   try {
@@ -112,6 +181,7 @@ export function App() {
   const [useChannelSettings, setUseChannelSettings] = useState(false)
   const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
   const [diagnostics, setDiagnostics] = useState<DiagnosticEvent[]>([])
+  const [quotaHealth, setQuotaHealth] = useState<QuotaHealthResult[]>([])
   const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
 
   const providers = listProviderMetadata()
@@ -141,6 +211,21 @@ export function App() {
       }
     }
     void loadDiagnostics()
+
+    const loadQuotaHealth = async (): Promise<void> => {
+      try {
+        const response = (await chrome.runtime.sendMessage({
+          type: 'get_quota_health',
+          payload: {},
+        })) as unknown
+        if (!cancelled && isQuotaHealthResultMessage(response)) {
+          setQuotaHealth(response.payload)
+        }
+      } catch {
+        // The service worker may be starting. The Popup shows nothing until data arrives.
+      }
+    }
+    void loadQuotaHealth()
 
     // Load API key previews for all providers
     for (const p of providers) {
@@ -730,6 +815,65 @@ export function App() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Gemini 配額健康狀態 */}
+      {quotaHealth.length > 0 && (
+        <section style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.75rem' }}>
+          <h2 style={{ fontSize: '0.9rem', margin: '0 0 0.3rem', color: '#333' }}>
+            {t('quotaHealthSection')}
+          </h2>
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            {quotaHealth.map((result) => {
+              const meta = QUOTA_HEALTH_STATUS_META[result.status]
+              const integrity = INTEGRITY_STATUSES.has(result.status)
+              return (
+                <div
+                  key={result.quotaKey}
+                  style={{
+                    padding: '0.4rem 0.5rem',
+                    border: `1px solid ${meta.color}`,
+                    borderRadius: '4px',
+                    fontSize: '0.8rem',
+                    color: '#333',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, color: meta.color }}>
+                    {`${result.quotaKey}：${t(meta.labelKey)}`}
+                  </div>
+                  <div style={{ marginTop: '0.15rem', color: '#555', lineHeight: 1.4 }}>
+                    {t(meta.descKey)}
+                  </div>
+                  {result.denialReason && (
+                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                      {t('quotaHealthDenialPrefix')}：{t(QUOTA_HEALTH_DENIAL_LABELS[result.denialReason])}
+                    </div>
+                  )}
+                  {result.providerDay && (
+                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                      {t('quotaHealthProviderDay')}：{result.providerDay}
+                    </div>
+                  )}
+                  {result.cooldownUntil !== undefined && (
+                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                      {t('quotaHealthCooldownUntil')}：{formatInstant(result.cooldownUntil)}
+                    </div>
+                  )}
+                  {result.recoveryAt !== undefined && (
+                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                      {t('quotaHealthRecoveryAt')}：{formatInstant(result.recoveryAt)}
+                    </div>
+                  )}
+                  {integrity && (
+                    <div style={{ marginTop: '0.3rem', color: '#2e7d32', fontSize: '0.78rem' }}>
+                      {t('quotaHealthDeepSeekOverflow')}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
       )}
 
       <section style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.75rem' }}>
