@@ -61,6 +61,29 @@ export type MessageKey =
   | 'geminiQuotaRpdSafety'
   | 'geminiQuotaLiveWait'
   | 'geminiQuotaConcurrency'
+  | 'quotaHealthSection'
+  | 'quotaHealthStatusHealthy'
+  | 'quotaHealthStatusCooldown'
+  | 'quotaHealthStatusClockRollback'
+  | 'quotaHealthStatusUntrustedMigration'
+  | 'quotaHealthStatusMalformedSnapshot'
+  | 'quotaHealthStatusUnsupportedVersion'
+  | 'quotaHealthDescHealthy'
+  | 'quotaHealthDescCooldown'
+  | 'quotaHealthDescClockRollback'
+  | 'quotaHealthDescUntrustedMigration'
+  | 'quotaHealthDescMalformedSnapshot'
+  | 'quotaHealthDescUnsupportedVersion'
+  | 'quotaHealthDenialPrefix'
+  | 'quotaHealthDenialRpm'
+  | 'quotaHealthDenialTpm'
+  | 'quotaHealthDenialRpd'
+  | 'quotaHealthDenialCooldown'
+  | 'quotaHealthDenialClockRollback'
+  | 'quotaHealthProviderDay'
+  | 'quotaHealthCooldownUntil'
+  | 'quotaHealthRecoveryAt'
+  | 'quotaHealthDeepSeekOverflow'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -117,6 +140,29 @@ export const MESSAGE_KEYS: readonly string[] = [
   'geminiQuotaRpdSafety',
   'geminiQuotaLiveWait',
   'geminiQuotaConcurrency',
+  'quotaHealthSection',
+  'quotaHealthStatusHealthy',
+  'quotaHealthStatusCooldown',
+  'quotaHealthStatusClockRollback',
+  'quotaHealthStatusUntrustedMigration',
+  'quotaHealthStatusMalformedSnapshot',
+  'quotaHealthStatusUnsupportedVersion',
+  'quotaHealthDescHealthy',
+  'quotaHealthDescCooldown',
+  'quotaHealthDescClockRollback',
+  'quotaHealthDescUntrustedMigration',
+  'quotaHealthDescMalformedSnapshot',
+  'quotaHealthDescUnsupportedVersion',
+  'quotaHealthDenialPrefix',
+  'quotaHealthDenialRpm',
+  'quotaHealthDenialTpm',
+  'quotaHealthDenialRpd',
+  'quotaHealthDenialCooldown',
+  'quotaHealthDenialClockRollback',
+  'quotaHealthProviderDay',
+  'quotaHealthCooldownUntil',
+  'quotaHealthRecoveryAt',
+  'quotaHealthDeepSeekOverflow',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -174,6 +220,29 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   geminiQuotaRpdSafety: 'RPD 安全比例 (%)',
   geminiQuotaLiveWait: '即時訊息最長等待 (ms)',
   geminiQuotaConcurrency: 'Gemini 同時請求上限',
+  quotaHealthSection: 'Gemini 配額健康狀態',
+  quotaHealthStatusHealthy: '正常',
+  quotaHealthStatusCooldown: '冷卻中',
+  quotaHealthStatusClockRollback: '時鐘回撥',
+  quotaHealthStatusUntrustedMigration: '不可信的遷移',
+  quotaHealthStatusMalformedSnapshot: '資料異常',
+  quotaHealthStatusUnsupportedVersion: '不支援的版本',
+  quotaHealthDescHealthy: 'Gemini 配額運作正常。',
+  quotaHealthDescCooldown: 'Gemini 正在冷卻，暫停送出請求以保護配額。',
+  quotaHealthDescClockRollback: '偵測到時鐘回撥，Gemini 已暫停以保護配額正確性。',
+  quotaHealthDescUntrustedMigration: '偵測到不可信的資料遷移，Gemini 已停用以保護配額正確性。',
+  quotaHealthDescMalformedSnapshot: '偵測到損壞的配額資料，Gemini 已停用以保護配額正確性。',
+  quotaHealthDescUnsupportedVersion: '偵測到不支援的配額資料版本，Gemini 已停用以保護配額正確性。',
+  quotaHealthDenialPrefix: '拒絕原因',
+  quotaHealthDenialRpm: '每分鐘請求上限 (RPM)',
+  quotaHealthDenialTpm: '每分鐘輸入 Token 上限 (TPM)',
+  quotaHealthDenialRpd: '每日請求上限 (RPD)',
+  quotaHealthDenialCooldown: '冷卻中',
+  quotaHealthDenialClockRollback: '時鐘回撥',
+  quotaHealthProviderDay: '目前配額日',
+  quotaHealthCooldownUntil: '冷卻結束',
+  quotaHealthRecoveryAt: '自動恢復時間',
+  quotaHealthDeepSeekOverflow: 'Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。',
 }
 
 /**
