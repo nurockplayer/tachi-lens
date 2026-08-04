@@ -75,5 +75,7 @@
   "quotaHealthProviderDay": { "message": "目前配額日" },
   "quotaHealthCooldownUntil": { "message": "冷卻結束" },
   "quotaHealthRecoveryAt": { "message": "自動恢復時間" },
-  "quotaHealthDeepSeekOverflow": { "message": "Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。" }
+  "quotaHealthDeepSeekOverflow": { "message": "Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。" },
+  "quotaHealthRepair": { "message": "修復配額資料" },
+  "quotaHealthRepairConfirm": { "message": "確認修復？" }
 }

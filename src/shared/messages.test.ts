@@ -4,8 +4,10 @@ import {
   isContentSettingsRequestMessage,
   isErrorNotificationMessage,
   isGetQuotaHealthMessage,
+  isQuotaHealthResetResultMessage,
   isQuotaHealthResult,
   isQuotaHealthResultMessage,
+  isResetQuotaHealthMessage,
   isSettingsUpdateMessage,
   isTranslationRequestMessage,
   serializeMessage,
@@ -279,5 +281,42 @@ describe('quota_health messages', () => {
     expect(parsed.payload).toHaveLength(1)
     expect(parsed.payload[0]!.status).toBe('clock_rollback')
     expect(JSON.stringify(parsed)).not.toContain('secret')
+  })
+
+  it('narrows reset_quota_health requests with and without a quotaKey', () => {
+    expect(isResetQuotaHealthMessage({ type: 'reset_quota_health', payload: {} })).toBe(true)
+    expect(isResetQuotaHealthMessage({
+      type: 'reset_quota_health',
+      payload: { quotaKey: 'gemini-2.5-flash' },
+    })).toBe(true)
+    expect(isResetQuotaHealthMessage({ type: 'reset_quota_health', payload: { quotaKey: 123 } })).toBe(false)
+    expect(isResetQuotaHealthMessage({ type: 'get_quota_health', payload: {} })).toBe(false)
+  })
+
+  it('accepts a successful quota-health reset result and preserves the fields', () => {
+    const result = { ok: true, resetKeys: ['gemini-2.5-flash'] }
+    expect(isQuotaHealthResetResultMessage({
+      type: 'quota_health_reset_result',
+      payload: result,
+    })).toBe(true)
+    expect(isQuotaHealthResetResultMessage({
+      type: 'quota_health_reset_result',
+      payload: { ok: false, resetKeys: [], error: 'reset failed' },
+    })).toBe(true)
+  })
+
+  it('rejects malformed quota-health reset results', () => {
+    expect(isQuotaHealthResetResultMessage({
+      type: 'quota_health_reset_result',
+      payload: { ok: 'yes', resetKeys: [] },
+    })).toBe(false)
+    expect(isQuotaHealthResetResultMessage({
+      type: 'quota_health_reset_result',
+      payload: { ok: true, resetKeys: 'default' },
+    })).toBe(false)
+    expect(isQuotaHealthResetResultMessage({
+      type: 'quota_health_reset_result',
+      payload: { ok: true, resetKeys: [123] },
+    })).toBe(false)
   })
 })

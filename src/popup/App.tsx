@@ -11,7 +11,7 @@ import {
 import type { UserSettings } from '@/storage/settings'
 import type { GeminiQuotaSettings } from '@/background/gemini-quota'
 import { t } from '@/shared/i18n'
-import { isDiagnosticEventMessage, isQuotaHealthResultMessage } from '@/shared/messages'
+import { isDiagnosticEventMessage, isQuotaHealthResetResultMessage, isQuotaHealthResultMessage } from '@/shared/messages'
 import type {
   DiagnosticEvent,
   DiagnosticStage,
@@ -51,9 +51,9 @@ const GEMINI_QUOTA_FIELDS: Array<{
 ]
 
 /**
- * Read-only presentation metadata for each Gemini quota health status. No
- * status offers any repair/reset action; integrity failures only explain that
- * Gemini is disabled to protect quota correctness.
+ * Read-only presentation metadata for each Gemini quota health status. Only
+ * integrity failures expose an explicit, confirmed repair action; healthy and
+ * ordinary cooldown states are never presented as requiring repair.
  */
 const QUOTA_HEALTH_STATUS_META: Record<QuotaHealthStatus, {
   labelKey: Parameters<typeof t>[0]
@@ -107,6 +107,9 @@ const INTEGRITY_STATUSES: ReadonlySet<QuotaHealthStatus> = new Set([
   'malformed_snapshot',
   'unsupported_version',
 ])
+
+/** Integrity statuses that offer an explicit, confirmed repair action. */
+const REPAIRABLE_STATUSES: ReadonlySet<QuotaHealthStatus> = INTEGRITY_STATUSES
 
 /** Formats an epoch-ms timestamp into a localized wall-clock string. */
 const formatInstant = (epochMs: number): string => new Date(epochMs).toLocaleString()
@@ -186,6 +189,43 @@ export function App() {
 
   const providers = listProviderMetadata()
 
+  /** Refreshes the quota-health panel from the Service Worker. */
+  const refreshQuotaHealth = useCallback(async (): Promise<void> => {
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: 'get_quota_health',
+        payload: {},
+      })) as unknown
+      if (isQuotaHealthResultMessage(response)) {
+        setQuotaHealth(response.payload)
+      }
+    } catch {
+      // The service worker may be starting. The Popup shows nothing until data arrives.
+    }
+  }, [])
+
+  /** Two-step confirmed repair: first click arms, second click executes. */
+  const [confirmingReset, setConfirmingReset] = useState<Record<string, boolean>>({})
+
+  const handleResetQuota = useCallback(async (quotaKey: string): Promise<void> => {
+    if (!confirmingReset[quotaKey]) {
+      setConfirmingReset((previous) => ({ ...previous, [quotaKey]: true }))
+      return
+    }
+    setConfirmingReset((previous) => ({ ...previous, [quotaKey]: false }))
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: 'reset_quota_health',
+        payload: { quotaKey },
+      })) as unknown
+      if (isQuotaHealthResetResultMessage(response) && response.payload.ok) {
+        await refreshQuotaHealth()
+      }
+    } catch {
+      // The service worker may be restarting; the next refresh shows the state.
+    }
+  }, [confirmingReset, refreshQuotaHealth])
+
   useEffect(() => {
     let cancelled = false
 
@@ -211,21 +251,7 @@ export function App() {
       }
     }
     void loadDiagnostics()
-
-    const loadQuotaHealth = async (): Promise<void> => {
-      try {
-        const response = (await chrome.runtime.sendMessage({
-          type: 'get_quota_health',
-          payload: {},
-        })) as unknown
-        if (!cancelled && isQuotaHealthResultMessage(response)) {
-          setQuotaHealth(response.payload)
-        }
-      } catch {
-        // The service worker may be starting. The Popup shows nothing until data arrives.
-      }
-    }
-    void loadQuotaHealth()
+    void refreshQuotaHealth()
 
     // Load API key previews for all providers
     for (const p of providers) {
@@ -868,6 +894,26 @@ export function App() {
                     <div style={{ marginTop: '0.3rem', color: '#2e7d32', fontSize: '0.78rem' }}>
                       {t('quotaHealthDeepSeekOverflow')}
                     </div>
+                  )}
+                  {REPAIRABLE_STATUSES.has(result.status) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleResetQuota(result.quotaKey)}
+                      style={{
+                        marginTop: '0.35rem',
+                        padding: '0.2rem 0.5rem',
+                        fontSize: '0.75rem',
+                        border: '1px solid #c0392b',
+                        borderRadius: '4px',
+                        background: confirmingReset[result.quotaKey] ? '#c0392b' : 'transparent',
+                        color: confirmingReset[result.quotaKey] ? '#fff' : '#c0392b',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {confirmingReset[result.quotaKey]
+                        ? t('quotaHealthRepairConfirm')
+                        : t('quotaHealthRepair')}
+                    </button>
                   )}
                 </div>
               )

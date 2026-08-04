@@ -12,7 +12,7 @@ import {
   saveApiKey,
   saveUserSettings,
 } from '@/storage/settings'
-import { isBaseMessage, isDiagnosticEventMessage, isGetQuotaHealthMessage } from '@/shared/messages'
+import { isBaseMessage, isDiagnosticEventMessage, isGetQuotaHealthMessage, isResetQuotaHealthMessage } from '@/shared/messages'
 import type { DiagnosticEvent, SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { createSystemClock } from './clock'
@@ -166,6 +166,24 @@ const handleMessage = (
   if (isBaseMessage(message) && message.type === 'settings_updated') {
     void broadcastUpdate(message.payload as SettingsUpdatePayload)
     return false
+  }
+
+  // Explicit, confirmed repair action scoped to Gemini quota accounting state.
+  if (isResetQuotaHealthMessage(message)) {
+    const quotaKey = message.payload?.quotaKey
+    void geminiQuotaStore.resetQuotaAccounting(quotaKey).then((resetKeys) => {
+      sendResponse({ type: 'quota_health_reset_result', payload: { ok: true, resetKeys } })
+    }).catch((error) => {
+      sendResponse({
+        type: 'quota_health_reset_result',
+        payload: {
+          ok: false,
+          resetKeys: [],
+          error: error instanceof Error ? error.message : 'Quota repair failed',
+        },
+      })
+    })
+    return true
   }
 
   return router.handleMessage(message, sender, sendResponse)

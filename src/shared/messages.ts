@@ -23,6 +23,8 @@ export type MessageType =
   | 'diagnostics_snapshot'
   | 'get_quota_health'
   | 'quota_health_result'
+  | 'reset_quota_health'
+  | 'quota_health_reset_result'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -45,6 +47,8 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'diagnostics_snapshot',
   'get_quota_health',
   'quota_health_result',
+  'reset_quota_health',
+  'quota_health_reset_result',
 ]
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
@@ -216,6 +220,52 @@ export const isGetQuotaHealthMessage = (
 
 export interface QuotaHealthRequest {
   quotaKey?: string
+}
+
+/**
+ * Explicit repair request for persisted Gemini quota accounting state. Only the
+ * quota accounting snapshot is affected; API keys, settings, cache, and
+ * channel settings are stored under different keys and are never touched.
+ */
+export interface QuotaHealthResetRequest {
+  quotaKey?: string
+}
+
+export interface QuotaHealthResetResult {
+  ok: boolean
+  /** Quota accounting entries that were reset (informational). */
+  resetKeys: string[]
+  error?: string
+}
+
+export const isResetQuotaHealthMessage = (
+  value: unknown,
+): value is BaseMessage<'reset_quota_health', QuotaHealthResetRequest> => {
+  if (!isBaseMessage(value) || value.type !== 'reset_quota_health') {
+    return false
+  }
+  if (value.payload === undefined) {
+    return true
+  }
+  if (!isRecord(value.payload)) {
+    return false
+  }
+  return value.payload.quotaKey === undefined || typeof value.payload.quotaKey === 'string'
+}
+
+export const isQuotaHealthResetResultMessage = (
+  value: unknown,
+): value is BaseMessage<'quota_health_reset_result', QuotaHealthResetResult> => {
+  if (!isBaseMessage(value) || value.type !== 'quota_health_reset_result' || !isRecord(value.payload)) {
+    return false
+  }
+  const payload = value.payload as Record<string, unknown>
+  return (
+    typeof payload.ok === 'boolean' &&
+    Array.isArray(payload.resetKeys) &&
+    payload.resetKeys.every((key) => typeof key === 'string') &&
+    (payload.error === undefined || typeof payload.error === 'string')
+  )
 }
 
 const DIAGNOSTIC_STAGES: readonly DiagnosticStage[] = [
