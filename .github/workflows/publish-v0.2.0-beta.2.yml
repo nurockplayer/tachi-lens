@@ -85,7 +85,7 @@ jobs:
       - name: Create immutable release tag
         run: |
           git fetch --tags --force
-          existing_sha="$(git rev-parse "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
+          existing_sha="$(git rev-parse --verify "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
 
           if [[ -n "$existing_sha" && "$existing_sha" != "$GITHUB_SHA" ]]; then
             echo "Tag ${TAG} already points to ${existing_sha}, expected ${GITHUB_SHA}." >&2
