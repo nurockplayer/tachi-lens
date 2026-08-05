@@ -1,0 +1,116 @@
+name: Publish v0.2.0-beta.2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - manifest.json
+      - docs/releases/v0.2.0-beta.2.md
+      - .github/workflows/publish-v0.2.0-beta.2.yml
+
+concurrency:
+  group: publish-v0.2.0-beta.2
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'nurockplayer/tachi-lens'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG: v0.2.0-beta.2
+      VERSION: 0.2.0-beta.2
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Validate release metadata
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const expected = process.env.VERSION
+          const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'))
+          const manifestDisplayVersion = manifest.version_name ?? manifest.version
+
+          if (packageJson.version !== expected) {
+            throw new Error(
+              `Expected package.json version ${expected}, got ${packageJson.version}`,
+            )
+          }
+          if (manifestDisplayVersion !== expected) {
+            throw new Error(
+              `Expected manifest display version ${expected}, got ${manifestDisplayVersion}`,
+            )
+          }
+          if (!fs.existsSync(`docs/releases/v${expected}.md`)) {
+            throw new Error(`Missing release notes for v${expected}`)
+          }
+          NODE
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run packaged-extension E2E
+        run: pnpm test:e2e
+
+      - name: Package extension
+        run: |
+          cd dist
+          zip -r ../tachi-lens.zip .
+
+      - name: Create immutable release tag
+        run: |
+          git fetch --tags --force
+          existing_sha="$(git rev-parse "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
+
+          if [[ -n "$existing_sha" && "$existing_sha" != "$GITHUB_SHA" ]]; then
+            echo "Tag ${TAG} already points to ${existing_sha}, expected ${GITHUB_SHA}." >&2
+            exit 1
+          fi
+
+          if [[ -z "$existing_sha" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" "$GITHUB_SHA" -m "tachi-lens ${TAG}"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; leaving it unchanged."
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --verify-tag \
+            --prerelease \
+            --title "tachi-lens $TAG" \
+            --notes-file "docs/releases/${TAG}.md" \
+            tachi-lens.zip
