@@ -67,3 +67,66 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 - Broad scan、diff grouping、log summary 與 test draft 優先交給 DeepSeek worker；controller 必須重讀引用檔案並驗證重要 claim。
 - Controller 負責實際 edit、test、security/architecture judgment、commit/push/PR 與最終使用者結論。
 - Worker/外部模型不得負責 destructive command、public state change 或最終 approval。
+
+## Automated review validation
+
+本節規範 Controller 如何判定 PR 上的 automated review（CodeRabbit、chatgpt-codex-connector 等 bot）是否真的執行過，避免把「沒有實際執行審查」的 bot 通知誤判為有效 review 或 review finding。
+
+### Repository reference
+
+CodeRabbit auto reviews are currently disabled in this repository.
+A successful CodeRabbit check may represent a skipped/no-op execution and is
+not evidence that a code review occurred.
+Codex quota-exhausted notifications are not reviews or findings.
+
+此 reference 只描述目前狀態，不得取代下列一般判斷邏輯。即使未來 CodeRabbit 重新啟用，仍必須檢查是否真的產生 review。
+
+### VALID REVIEW
+
+只有同時符合以下條件，才視為有效 review：
+
+- 實際產生具體 code finding、inline review comment、unresolved review thread 或正式 review verdict。
+- 審查對應 PR 當前 exact head SHA。
+- 沒有 quota exhausted、disabled、skipped、cancelled、timed out 或其他明確未執行狀態。
+
+### NOT A REVIEW
+
+以下情況一律視為「審查未執行」，不是 review finding：
+
+- Codex quota exhausted／額度用盡。
+- CodeRabbit review skipped。
+- Auto reviews disabled。
+- Cancelled、timed out 或其他 bot 明確表示未執行審查。
+- `SUCCESS` check 實際上是 skip／no-op。
+- 只有 issue-level bot 通知，沒有 finding、inline comment、review thread 或正式 verdict。
+
+`NOT A REVIEW` 一律不得：
+
+- 算作 reviewer。
+- 算作 `APPROVE`。
+- 算作 blocking finding。
+- 觸發 code modification、address-comments 或 resolve-thread。
+
+PR 已 merged 後才收到此類通知時，判定為 no-op：不得修改程式、回覆 thread 或改動 PR。判斷必須以「review 是否實際執行、是否存在 findings」為主，不得只以 bot 名稱作為唯一依據，也不得硬編碼特定 PR 編號。
+
+### Merge gate
+
+Merge gate 必須分開判定：
+
+- Build／test／lint 等 CI checks 是否成功。
+- 是否存在有效 reviewer verdict。
+- 是否存在 unresolved review threads。
+- reviewer verdict 是否對應當前 exact head SHA。
+- automated review 是否真的執行。
+
+Automated-review check 的 `SUCCESS` 不得自行等同有效 `APPROVE`。若 automated review 未執行，但已有符合政策的獨立 reviewer 正式 `APPROVE`，不得因此阻擋 merge；報告中必須如實標示 automated review 未執行。
+
+### 狀態輸出
+
+報告中 automated review 狀態使用下列格式，不得把 skipped check 寫成 `SUCCESS`（除非確實取得有效 review 內容）：
+
+```text
+CodeRabbit: SKIPPED / NOT A REVIEW
+Codex review: NOT RUN — QUOTA EXHAUSTED
+Independent reviewer: APPROVE
+```
