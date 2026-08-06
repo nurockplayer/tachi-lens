@@ -55,15 +55,36 @@ test.describe('Translation display modes', () => {
       expect(events.some((e) => e.stage === 'chat_container_ready')).toBe(true)
     }).toPass({ timeout: 15_000 })
 
-    // Append one chat message through the real MutationObserver path
+    // Append one chat message through the real MutationObserver path.
+    // In collapse mode, pre-set a non-empty inline display value on the
+    // message body so the test can verify the exact restore contract
+    // (issue #86) rather than an indistinguishable '' default.
     await page.evaluate(
-      ({ text, username }: { text: string; username: string }) => {
-        return (window as unknown as Record<string, unknown>).appendChatMessage(
+      ({
+        text,
+        username,
+        display,
+      }: {
+        text: string
+        username: string
+        display: string | null
+      }) => {
+        const message = (window as unknown as Record<string, unknown>).appendChatMessage(
           text,
           username,
-        )
+        ) as HTMLElement
+        if (display) {
+          const body = message.querySelector(
+            '[data-a-target="chat-line-message-body"]',
+          ) as HTMLElement
+          body.style.display = display
+        }
       },
-      { text: MESSAGE_TEXT, username: 'e2e_user' },
+      {
+        text: MESSAGE_TEXT,
+        username: 'e2e_user',
+        display: displayMode === 'collapse' ? 'inline-block' : null,
+      },
     )
 
     return { page, calls }
@@ -239,9 +260,12 @@ test.describe('Translation display modes', () => {
       await expect(translated).toBeVisible()
       await expect(translated).toHaveText(TRANSLATED_TEXT)
 
-      // --- Assert original message body is hidden after translation injection ---
+      // --- Assert translated element is a descendant of the same message root ---
       const message = page.locator('.chat-line__message').last()
       const messageBody = message.locator('[data-a-target="chat-line-message-body"]')
+      await expect(message.locator('[data-tachi-lens-translated]')).toHaveCount(1)
+
+      // --- Assert original message body is hidden after translation injection ---
       await expect(messageBody).not.toBeVisible()
 
       // --- Assert clicking the translated element reveals the original body ---
@@ -263,7 +287,7 @@ test.describe('Translation display modes', () => {
       const originalDisplay = await messageBody.evaluate(
         (el) => (el as HTMLElement).style.display,
       )
-      expect(originalDisplay).toBe('')
+      expect(originalDisplay).toBe('inline-block')
 
       // --- Assert message root is marked processed ---
       await expect(message).toHaveAttribute('data-tachi-lens-processed', 'true')
