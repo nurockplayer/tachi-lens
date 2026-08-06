@@ -13,6 +13,7 @@ import {
 } from './gemini-quota'
 import { QuotaScheduler } from './quota-scheduler'
 import { type TranslatorDependencies, Translator } from './translator'
+import type { TranslationResult } from '@/shared/messages'
 
 const cacheKey = (
   text: string,
@@ -1083,6 +1084,34 @@ describe('Translator', () => {
         .toEqual(Array.from({ length: 10 }, (_, i) => `msg${20 + i}`))
       expect(maxConcurrent).toBe(1)
     })
+
+    it('processes 25 queued messages as FIFO batches of at most 10 under single-flight', async () => {
+      const provider = createMockProvider('deepseek')
+      let concurrent = 0
+      let maxConcurrent = 0
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) => {
+        concurrent++
+        maxConcurrent = Math.max(maxConcurrent, concurrent)
+        await Promise.resolve()
+        concurrent--
+        return requests.map((request) => ({ id: request.id, translatedText: `T-${request.id}` }))
+      })
+      deps.getProvider = vi.fn(() => provider)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 10 })
+
+      const pending = Array.from({ length: 25 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }),
+      )
+      await expect(Promise.all(pending)).resolves.toHaveLength(25)
+      expect(provider.translateBatch).toHaveBeenCalledTimes(3)
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${i}`))
+      expect(vi.mocked(provider.translateBatch).mock.calls[1]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 10 }, (_, i) => `msg${10 + i}`))
+      expect(vi.mocked(provider.translateBatch).mock.calls[2]![0].map(({ id }) => id))
+        .toEqual(Array.from({ length: 5 }, (_, i) => `msg${20 + i}`))
+      expect(maxConcurrent).toBe(1)
+    })
   })
 
   describe('cache integration', () => {
@@ -1437,6 +1466,195 @@ describe('Translator', () => {
         error: { type: 'network', message: 'settings unavailable' },
       })
       expect(settlements).toBe(1)
+    })
+
+    it('settles every item in a full batch when getSettings throws', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      deps.getSettings = vi.fn(async () => { throw new Error('settings storage failed') })
+
+      const settlements = new Map<string, number>()
+      const pending = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }).then((value) => {
+          settlements.set(value.messageId, (settlements.get(value.messageId) ?? 0) + 1)
+          return value
+        }),
+      )
+
+      const results = await Promise.all(pending)
+
+      results.forEach((result, index) => {
+        expect(result.messageId).toBe(`msg${index}`)
+        expect(result.error).toEqual({
+          type: 'network',
+          message: 'settings storage failed',
+        })
+      })
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+      results.forEach((result) => expect(settlements.get(result.messageId)).toBe(1))
+    })
+
+    it('settles every item when a dependency throws after a partial cache hit', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      deps.cache.set(cacheKey('cached', 'deepseek', 'deepseek-v4-flash'), {
+        id: 'cached-id',
+        translatedText: '快取結果',
+      })
+      deps.getApiKey = vi.fn(async () => { throw new Error('key storage failed') })
+
+      const settlements = new Map<string, number>()
+      const pending = [
+        translator.translate({ messageId: 'cached', text: 'cached' }).then((value) => {
+          settlements.set(value.messageId, (settlements.get(value.messageId) ?? 0) + 1)
+          return value
+        }),
+        ...Array.from({ length: 9 }, (_, i) =>
+          translator.translate({ messageId: `msg${i}`, text: `text${i}` }).then((value) => {
+            settlements.set(value.messageId, (settlements.get(value.messageId) ?? 0) + 1)
+            return value
+          }),
+        ),
+      ]
+
+      const results = await Promise.all(pending)
+
+      expect(results.find((result) => result.messageId === 'cached')).toEqual({
+        messageId: 'cached',
+        translatedText: '快取結果',
+      })
+      const uncached = results.filter((result) => result.messageId !== 'cached')
+      uncached.forEach((result) => {
+        expect(result.error).toEqual({ type: 'network', message: 'key storage failed' })
+      })
+      results.forEach((result) => expect(settlements.get(result.messageId)).toBe(1))
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+    })
+
+    it('settles every uncached item with a network error when cache.set throws', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((request) => ({ id: request.id, translatedText: `T-${request.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+      vi.spyOn(deps.cache, 'set').mockImplementation(() => { throw new Error('cache write failed') })
+
+      const settlements = new Map<string, number>()
+      const pending = Array.from({ length: 5 }, (_, i) =>
+        translator.translate({ messageId: `msg${i}`, text: `text${i}` }).then((value) => {
+          settlements.set(value.messageId, (settlements.get(value.messageId) ?? 0) + 1)
+          return value
+        }),
+      )
+
+      // The partial batch's 300ms window elapses, then the batch flushes and
+      // the cache write throws.
+      await vi.advanceTimersByTimeAsync(300)
+      const results = await Promise.all(pending)
+
+      results.forEach((result, index) => {
+        expect(result.messageId).toBe(`msg${index}`)
+        expect(result.error).toEqual({ type: 'network', message: 'cache write failed' })
+      })
+      results.forEach((result) => expect(settlements.get(result.messageId)).toBe(1))
+    })
+
+    it('continues draining later batches after an earlier batch throws', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      let settingsCalls = 0
+      deps.getSettings = vi.fn(async () => {
+        settingsCalls++
+        if (settingsCalls === 1) throw new Error('transient storage failure')
+        return {
+          selectedProvider: 'deepseek' as ProviderId,
+          selectedModel: 'deepseek-v4-flash',
+          targetLanguage: 'zh-TW',
+        }
+      })
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((request) => ({ id: request.id, translatedText: `T-${request.id}` })),
+      )
+
+      const first = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `first-${i}`, text: `text${i}` }),
+      )
+      await vi.waitFor(() => expect(deps.getSettings).toHaveBeenCalledTimes(1))
+      const firstResults = await Promise.all(first)
+      firstResults.forEach((result, index) => {
+        expect(result.messageId).toBe(`first-${index}`)
+        expect(result.error).toEqual({ type: 'network', message: 'transient storage failure' })
+      })
+
+      const second = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `second-${i}`, text: `text${i}` }),
+      )
+      const secondResults = await Promise.all(second)
+      secondResults.forEach((result, index) => {
+        expect(result.messageId).toBe(`second-${index}`)
+        expect(result.translatedText).toBe(`T-second-${index}`)
+      })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(provider.translateBatch).toHaveBeenCalledWith(
+        Array.from({ length: 10 }, (_, i) => ({ id: `second-${i}`, text: `text${i}`, sourceLang: undefined })),
+        'test-api-key',
+        'deepseek-v4-flash',
+        'zh-TW',
+      )
+    })
+
+    it('leaves no pending Promise in mixed success, provider failure, and dependency-throw batches', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      let getApiKeyCalls = 0
+      const key = deps.getApiKey = vi.fn(async () => {
+        getApiKeyCalls++
+        if (getApiKeyCalls === 1) throw new Error('key storage unavailable')
+        return 'test-api-key'
+      })
+      vi.mocked(provider.translateBatch)
+        .mockRejectedValueOnce(new Error('provider network failure'))
+        .mockImplementation(async (requests) =>
+          requests.map((request) => ({ id: request.id, translatedText: `T-${request.id}` })),
+        )
+
+      const settlements = new Map<string, number>()
+      const track = (value: TranslationResult): TranslationResult => {
+        settlements.set(value.messageId, (settlements.get(value.messageId) ?? 0) + 1)
+        return value
+      }
+      const first = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `dep-${i}`, text: `text${i}` }).then(track),
+      )
+      await vi.waitFor(() => expect(key).toHaveBeenCalledTimes(1))
+      const firstResults = await Promise.all(first)
+      firstResults.forEach((result, index) => {
+        expect(result.messageId).toBe(`dep-${index}`)
+        expect(result.error).toEqual({ type: 'network', message: 'key storage unavailable' })
+      })
+
+      const second = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `prov-${i}`, text: `text${i}` }).then(track),
+      )
+      const secondResults = await Promise.all(second)
+      secondResults.forEach((result, index) => {
+        expect(result.messageId).toBe(`prov-${index}`)
+        expect(result.error).toEqual({ type: 'network', message: 'provider network failure' })
+      })
+
+      const third = Array.from({ length: 10 }, (_, i) =>
+        translator.translate({ messageId: `ok-${i}`, text: `text${i}` }).then(track),
+      )
+      const thirdResults = await Promise.all(third)
+      thirdResults.forEach((result, index) => {
+        expect(result.messageId).toBe(`ok-${index}`)
+        expect(result.translatedText).toBe(`T-ok-${index}`)
+      })
+
+      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
+      firstResults.forEach((result) => expect(settlements.get(result.messageId)).toBe(1))
+      secondResults.forEach((result) => expect(settlements.get(result.messageId)).toBe(1))
+      thirdResults.forEach((result) => expect(settlements.get(result.messageId)).toBe(1))
     })
 
     it('returns an actionable auth error when Gemini and DeepSeek keys are both missing', async () => {
