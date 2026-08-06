@@ -327,14 +327,57 @@ interface QueuedTranslation {
   element: HTMLElement
   priority: TranslationPriority
 }
+
 const translationQueue: QueuedTranslation[] = []
 const MAX_CONCURRENT_TRANSLATIONS = 10
 const MAX_CONSECUTIVE_LIVE = 3
+/**
+ * Upper bound on pending translation work queued in the Content Script.
+ *
+ * Enforced on every enqueue. When capacity is exceeded, obsolete entries
+ * (elements no longer connected, or already processed) are removed first;
+ * if still over capacity, the oldest remaining entry is dropped so newer,
+ * still-relevant messages win. The value comfortably holds one full debounce
+ * flush (MAX_PENDING = 50) plus headroom while draining is paused by a
+ * provider cooldown, so normal bursts are not trimmed.
+ */
+const MAX_QUEUED_TRANSLATIONS = 60
 let activeTranslations = 0
 let retryNotBefore = 0
 let consecutiveLiveDequeues = 0
 // _test hook: record dispatched items. Set before drainTranslationQueue.
 let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
+
+const isObsolete = (entry: QueuedTranslation): boolean =>
+  !entry.element.isConnected || handler.isAlreadyProcessed(entry.element)
+
+/**
+ * Enforce MAX_QUEUED_TRANSLATIONS after an enqueue (the only insertion point).
+ *
+ * Runs even while draining is paused by a provider cooldown, so pending work
+ * cannot grow without bound. Obsolete entries (disconnected or already
+ * processed) are removed first; if still over capacity, the oldest remaining
+ * entry is dropped so newer, still-relevant work is not starved by stale
+ * queued messages. Every dropped entry releases its WeakSet bookkeeping and
+ * never creates a Promise, timer, retry marker, or in-flight slot.
+ */
+const trimTranslationQueue = (): void => {
+  const firstObsolete = translationQueue.findIndex(isObsolete)
+  if (firstObsolete >= 0) {
+    for (let index = translationQueue.length - 1; index >= 0; index--) {
+      if (isObsolete(translationQueue[index]!)) {
+        queuedForTranslation.delete(translationQueue[index]!.element)
+        translationQueue.splice(index, 1)
+      }
+    }
+  }
+
+  while (translationQueue.length > MAX_QUEUED_TRANSLATIONS) {
+    const dropped = translationQueue.shift()!
+    queuedForTranslation.delete(dropped.element)
+    debugLog('translation queue overflow: dropped oldest pending work')
+  }
+}
 
 const enqueueTranslation = (
   element: HTMLElement,
@@ -349,6 +392,7 @@ const enqueueTranslation = (
     : -1
   if (firstBacklogIndex >= 0) translationQueue.splice(firstBacklogIndex, 0, queued)
   else translationQueue.push(queued)
+  trimTranslationQueue()
   drainTranslationQueue()
 }
 
@@ -505,11 +549,18 @@ export const _test = {
   enqueueTranslation,
   drainTranslationQueue,
   get translationQueueLength(): number { return translationQueue.length },
+  get translationQueueSnapshot(): Array<{ text: string; isConnected: boolean }> {
+    return translationQueue.map((entry) => ({
+      text: entry.element.textContent ?? '',
+      isConnected: entry.element.isConnected,
+    }))
+  },
   get consecutiveLiveDequeues(): number { return consecutiveLiveDequeues },
   set consecutiveLiveDequeues(value: number) { consecutiveLiveDequeues = value },
   get activeTranslations(): number { return activeTranslations },
   set activeTranslations(value: number) { activeTranslations = value },
   get MAX_CONCURRENT(): number { return MAX_CONCURRENT_TRANSLATIONS },
+  get MAX_QUEUED(): number { return MAX_QUEUED_TRANSLATIONS },
   get resolvedContentSettings(): ContentSettings | null { return cachedSettings },
   set onDispatch(fn: ((el: HTMLElement, priority: TranslationPriority) => void) | undefined) { _dispatchRecorder = fn },
 }
