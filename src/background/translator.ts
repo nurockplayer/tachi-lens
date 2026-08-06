@@ -112,7 +112,11 @@ export class Translator {
     }
 
     if (remaining > 0 && !this.timer) {
-      this.scheduleTimer()
+      // The remaining items have no pending batch-window timer (they were
+      // enqueued while earlier full batches were already flushing). They are a
+      // burst tail, not a fresh partial batch, so drain them immediately to
+      // avoid leaving their Promises pending on a timer that may never fire.
+      queueMicrotask(() => { this.flushImmediately() })
     }
   }
 
@@ -155,33 +159,6 @@ export class Translator {
     try {
 
     const settings = await this.deps.getSettings()
-    const apiKey = await this.deps.getApiKey(settings.selectedProvider)
-
-    const schedulerManaged = Boolean(this.deps.quotaScheduler) &&
-      (settings.selectedProvider === 'gemini' || settings.selectedProvider === 'deepseek')
-
-    if (!apiKey && !(schedulerManaged && settings.selectedProvider === 'deepseek')) {
-      this.resolveAll(items, {
-        type: 'auth',
-        status: 401,
-        message: 'No API key configured',
-      } as ProviderError)
-
-      return
-    }
-
-    const provider = this.deps.getProvider(settings.selectedProvider)
-
-    if (!provider && !schedulerManaged) {
-      this.resolveAll(items, {
-        type: 'bad_request',
-        status: 400,
-        message: `Provider "${settings.selectedProvider}" not found`,
-      } as ProviderError)
-
-      return
-    }
-
     const { selectedModel: model, targetLanguage: targetLang } = settings
 
     const uncached: PendingItem[] = []
@@ -224,6 +201,33 @@ export class Translator {
 
     ownedItems = uncached
     if (uncached.length === 0) return
+
+    const apiKey = await this.deps.getApiKey(settings.selectedProvider)
+
+    const schedulerManaged = Boolean(this.deps.quotaScheduler) &&
+      (settings.selectedProvider === 'gemini' || settings.selectedProvider === 'deepseek')
+
+    if (!apiKey && !(schedulerManaged && settings.selectedProvider === 'deepseek')) {
+      this.resolveAll(uncached, {
+        type: 'auth',
+        status: 401,
+        message: 'No API key configured',
+      } as ProviderError)
+
+      return
+    }
+
+    const provider = this.deps.getProvider(settings.selectedProvider)
+
+    if (!provider && !schedulerManaged) {
+      this.resolveAll(uncached, {
+        type: 'bad_request',
+        status: 400,
+        message: `Provider "${settings.selectedProvider}" not found`,
+      } as ProviderError)
+
+      return
+    }
 
     if (schedulerManaged && this.deps.quotaScheduler) {
       const selectedGemini = settings.selectedProvider === 'gemini'
