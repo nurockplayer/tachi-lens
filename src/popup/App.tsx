@@ -11,6 +11,8 @@ import {
 import type { UserSettings } from '@/storage/settings'
 import type { GeminiQuotaSettings } from '@/background/gemini-quota'
 import { t } from '@/shared/i18n'
+import { normalizeLocale } from '@/shared/language-detection'
+import type { ChineseVariantMode } from '@/shared/language-detection'
 import { isDiagnosticEventMessage, isQuotaHealthResetResultMessage, isQuotaHealthResultMessage } from '@/shared/messages'
 import type {
   DiagnosticEvent,
@@ -33,6 +35,16 @@ const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[
   { key: 'skipNumbersOnly', labelKey: 'skipNumbersOnly' },
   { key: 'skipSystemMessages', labelKey: 'skipSystemMessages' },
 ]
+
+const CHINESE_VARIANT_OPTIONS: Array<{
+  value: ChineseVariantMode
+  labelKey: Parameters<typeof t>[0]
+}> = [
+  { value: 'skip_all_chinese', labelKey: 'chineseVariantSkipAllChinese' },
+  { value: 'translate_other_script', labelKey: 'chineseVariantTranslateOtherScript' },
+]
+
+const isChineseTarget = (targetLanguage: string): boolean => normalizeLocale(targetLanguage) === 'zh'
 
 const GEMINI_QUOTA_FIELDS: Array<{
   key: keyof GeminiQuotaSettings
@@ -691,6 +703,43 @@ export function App() {
           <option value='th'>ภาษาไทย</option>
         </select>
       </div>
+
+      {/* 中文訊息處理 */}
+      {isChineseTarget(settings.targetLanguage) && (
+        <fieldset
+          style={{
+            margin: '0 0 0.75rem',
+            padding: '0.65rem',
+            border: '1px solid #d8d8d8',
+            borderRadius: '4px',
+          }}
+        >
+          <legend style={{ padding: '0 0.25rem', fontSize: '0.85rem', fontWeight: 600 }}>
+            {t('chineseVariantSection')}
+          </legend>
+          {CHINESE_VARIANT_OPTIONS.map(({ value, labelKey }) => (
+            <label
+              key={value}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                marginBottom: '0.3rem',
+                fontSize: '0.82rem',
+              }}
+            >
+              <input
+                type='radio'
+                name='chinese-variant-mode'
+                value={value}
+                checked={settings.chineseVariantMode === value}
+                onChange={() => updateSetting('chineseVariantMode', value)}
+              />
+              {t(labelKey)}
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       {/* 顯示模式 */}
       <div style={{ marginBottom: '0.75rem' }}>
