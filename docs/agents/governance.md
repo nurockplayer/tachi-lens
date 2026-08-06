@@ -15,6 +15,7 @@ applies_when: Claude Code and Codex both work in tachi-lens
 - **Scope pollution guard**：GitHub Issue 是 source of truth；額外需求另開 Issue/PR；research/plan 不自動成為 implementation requirement。
 - **Traceable problem reporting**：技術障礙、重要權衡與 workaround 記錄在相關 Issue/PR。
 - **Controller verification**：worker 只提供 evidence/draft，controller 重讀本地檔案並負責最終風險判斷。
+- **GSD planning-only workflow**：GSD yolo mode 只控制 planning convenience 與 phase auto-advance，不授權跳過 issue scope、validation、security review 或 `/codex:review`。完整責任邊界見 [`docs/agents/gsd-workflow.md`](gsd-workflow.md)。
 
 ## Rejected for this repository
 
