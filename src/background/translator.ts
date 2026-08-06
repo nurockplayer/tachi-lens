@@ -38,6 +38,16 @@ const DEEPSEEK_FALLBACK_PROVIDER: ProviderId = 'deepseek'
 const DEEPSEEK_FALLBACK_MODEL = 'deepseek-v4-flash'
 const tokenEstimator = new CharacterTokenEstimator()
 
+/**
+ * Only a non-empty, non-whitespace translatedText is a usable translation.
+ *
+ * Empty, whitespace-only, or missing translations are not settled as success
+ * and are never cached; the Content Script keeps such messages retryable so a
+ * later provider attempt can still succeed (issue #129).
+ */
+const hasUsableTranslation = (result: BatchItemResult): boolean =>
+  typeof result.translatedText === 'string' && result.translatedText.trim().length > 0
+
 export class Translator {
   private liveQueue: PendingItem[] = []
   private backlogQueue: PendingItem[] = []
@@ -256,7 +266,7 @@ export class Translator {
         const result = scheduled.results.find((entry) => entry.id === item.request.messageId)
         const providerId = scheduled.providers.get(item.request.messageId) ?? 'gemini'
         const resultModel = providerId === 'deepseek' ? deepseekModel : model
-        if (providerId === 'gemini' && result?.translatedText !== undefined) {
+        if (providerId === 'gemini' && result && hasUsableTranslation(result)) {
           this.deps.cache.set(this.deps.cache.buildKey(
             item.request.text,
             targetLang,
@@ -475,7 +485,7 @@ export class Translator {
         errorType: 'invalid_response' as const,
       }
       results.set(request.id, result)
-      if (result.translatedText !== undefined) {
+      if (hasUsableTranslation(result)) {
         this.deps.cache.set(this.deps.cache.buildKey(
           request.text,
           targetLang,
@@ -591,7 +601,7 @@ export class Translator {
       const result = batchResults.find((entry) => entry.id === item.request.messageId)
 
       if (result) {
-        if (cacheResults && result.translatedText !== undefined) {
+        if (cacheResults && hasUsableTranslation(result)) {
           const cacheKey = this.deps.cache.buildKey(
             item.request.text,
             targetLang,
@@ -623,8 +633,17 @@ export class Translator {
     messageId: string,
     batchResult: BatchItemResult,
   ): TranslationResult {
-    if (batchResult.translatedText !== undefined) {
+    // Only a non-empty, non-whitespace translation is a success. An empty or
+    // whitespace-only translatedText is an invalid response so the Content
+    // Script keeps the message retryable instead of settling it as done (#129).
+    if (hasUsableTranslation(batchResult)) {
       return { messageId, translatedText: batchResult.translatedText }
+    }
+    if (typeof batchResult.translatedText === 'string') {
+      return {
+        messageId,
+        error: { type: 'invalid_response', message: 'Provider returned an empty translation' },
+      }
     }
 
     const errorMsg = batchResult.error ?? 'Unknown error'

@@ -55,6 +55,26 @@ const debugLog = (msg: string, ...args: unknown[]): void => {
   console.debug('[tachi-lens]', msg, ...args)
 }
 
+/**
+ * Number of invalid provider responses (empty / whitespace / missing
+ * translation) tolerated before a message settles terminally.
+ *
+ * The first two invalid responses leave the element retryable so a later
+ * provider attempt can still succeed. The third settles the element with a
+ * single error node and a single notification (#129).
+ */
+const MAX_INVALID_RESPONSE_RETRIES = 3
+
+/**
+ * In-memory, per-element invalid-response retry budget.
+ *
+ * Keyed by the element; the stored value is the identity of the text that
+ * accrued the failures. When Twitch recycles a DOM element for different
+ * text, the budget restarts. Nothing here is persisted to storage and no
+ * timer is created.
+ */
+const invalidResponseRetries = new WeakMap<HTMLElement, { text: string; count: number }>()
+
 // Broader selector to find the message text area in any known Twitch variant
 const CHAT_MESSAGE_TEXT_AREA =
   '[data-a-target="chat-line-message-body"], [class*="chat-line__message-body"], [data-a-target="chat-message-text"]'
@@ -280,6 +300,7 @@ export class TwitchMessageHandler {
       const result = response.payload
 
       if (result.translatedText) {
+        invalidResponseRetries.delete(element)
         this.diagnosticReporter?.('translation_received')
         this.injectTranslation(element, result.translatedText, settings.displayMode)
         this.setProcessed(element, text)
@@ -288,6 +309,25 @@ export class TwitchMessageHandler {
         debugLog('translateAndInject: rate limited, leaving retryable', { messageId })
         this.diagnosticReporter?.('translation_failed')
         return { retryAfterMs: result.error.retryAfterMs }
+      } else if (result.error?.type === 'invalid_response') {
+        debugLog('translateAndInject: invalid response, tracking retries', { messageId })
+        this.diagnosticReporter?.('translation_failed')
+
+        const current = invalidResponseRetries.get(element)
+        // A recycled element with different text restarts the budget.
+        const count = current && current.text === text ? current.count + 1 : 1
+        invalidResponseRetries.set(element, { text, count })
+
+        if (count < MAX_INVALID_RESPONSE_RETRIES) {
+          // Leave the message retryable; the existing retry scan picks it up.
+          return {}
+        }
+
+        // Terminal after the third invalid response: settle with a single
+        // error node and a single notification.
+        this.setProcessed(element, text)
+        this.injectError(element, result.error)
+        invalidResponseRetries.delete(element)
       } else {
         debugLog('translateAndInject: error', { messageId, error: result.error })
         this.diagnosticReporter?.('translation_failed')

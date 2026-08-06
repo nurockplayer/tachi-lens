@@ -56,23 +56,29 @@ export const parseTranslationResponse = (
     return requests.map((r) => ({ id: r.id, error: 'Unexpected response format' }))
   }
 
-  // Build lookup from model output, accepting only string translatedText
+  // Build lookup from model output, accepting only non-empty translatedText
   const translatedByRequestId = new Map<string, string | undefined>()
   for (const item of parsed) {
     const record = item as Record<string, unknown>
     const itemId = String(record.id ?? '')
     const textField = record.translated_text ?? record.translatedText
-    translatedByRequestId.set(itemId, typeof textField === 'string' ? textField : undefined)
+    // Only a non-empty, non-whitespace string is a usable translation.
+    // Empty, whitespace-only, or non-string values are treated as missing so
+    // the caller can keep the message retryable instead of settling it as done.
+    translatedByRequestId.set(
+      itemId,
+      typeof textField === 'string' && textField.trim().length > 0 ? textField : undefined,
+    )
   }
 
   // Map over every requested ID — unmatched items get an error
   return requests.map((r) => {
     if (!translatedByRequestId.has(r.id)) {
-      return { id: r.id, error: 'Missing translation for this message' }
+      return { id: r.id, error: 'Missing translation for this message', errorType: 'invalid_response' }
     }
     const translatedText = translatedByRequestId.get(r.id)
     return translatedText !== undefined
       ? { id: r.id, translatedText }
-      : { id: r.id }
+      : { id: r.id, error: 'Invalid translation for this message', errorType: 'invalid_response' }
   })
 }
