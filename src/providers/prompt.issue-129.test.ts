@@ -57,6 +57,29 @@ describe('parseTranslationResponse — issue #129 invalid translation contract',
     expect(result[1]!.errorType).toBe('invalid_response')
   })
 
+  it('treats a JSON parse failure as an invalid response for every requested id', () => {
+    const result = parseTranslationResponse(
+      'not json',
+      [{ id: 'm1' }, { id: 'm2' }],
+    )
+    expect(result).toHaveLength(2)
+    for (const item of result) {
+      expect(item.translatedText).toBeUndefined()
+      expect(item.error).toBe('Failed to parse translation response')
+      expect(item.errorType).toBe('invalid_response')
+    }
+  })
+
+  it('treats a non-array parsed result as an invalid response for every requested id', () => {
+    const result = parseTranslationResponse(
+      '{"id":"m1"}',
+      [{ id: 'm1' }],
+    )
+    expect(result[0]!.translatedText).toBeUndefined()
+    expect(result[0]!.error).toBe('Unexpected response format')
+    expect(result[0]!.errorType).toBe('invalid_response')
+  })
+
   it('preserves valid non-empty translations unchanged', () => {
     const result = parseTranslationResponse(
       '[{"id":"m1","translated_text":"こんにちは"}]',

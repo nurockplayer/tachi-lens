@@ -299,7 +299,16 @@ export class TwitchMessageHandler {
 
       const result = response.payload
 
-      if (result.translatedText) {
+      // Only a non-empty, non-whitespace translatedText is a usable success.
+      // A whitespace-only or empty string is not injected and follows the
+      // bounded invalid-response retry path instead (#129).
+      const hasUsableResult =
+        typeof result.translatedText === 'string' && result.translatedText.trim().length > 0
+      const isInvalidTranslation =
+        result.error?.type === 'invalid_response' ||
+        (typeof result.translatedText === 'string' && !hasUsableResult)
+
+      if (hasUsableResult && typeof result.translatedText === 'string') {
         invalidResponseRetries.delete(element)
         this.diagnosticReporter?.('translation_received')
         this.injectTranslation(element, result.translatedText, settings.displayMode)
@@ -309,7 +318,7 @@ export class TwitchMessageHandler {
         debugLog('translateAndInject: rate limited, leaving retryable', { messageId })
         this.diagnosticReporter?.('translation_failed')
         return { retryAfterMs: result.error.retryAfterMs }
-      } else if (result.error?.type === 'invalid_response') {
+      } else if (isInvalidTranslation) {
         debugLog('translateAndInject: invalid response, tracking retries', { messageId })
         this.diagnosticReporter?.('translation_failed')
 

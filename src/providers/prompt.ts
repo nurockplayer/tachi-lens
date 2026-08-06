@@ -49,11 +49,19 @@ export const parseTranslationResponse = (
   try {
     parsed = JSON.parse(cleaned)
   } catch {
-    return requests.map((r) => ({ id: r.id, error: 'Failed to parse translation response' }))
+    return requests.map((r) => ({
+      id: r.id,
+      error: 'Failed to parse translation response',
+      errorType: 'invalid_response' as const,
+    }))
   }
 
   if (!Array.isArray(parsed)) {
-    return requests.map((r) => ({ id: r.id, error: 'Unexpected response format' }))
+    return requests.map((r) => ({
+      id: r.id,
+      error: 'Unexpected response format',
+      errorType: 'invalid_response' as const,
+    }))
   }
 
   // Build lookup from model output, accepting only non-empty translatedText

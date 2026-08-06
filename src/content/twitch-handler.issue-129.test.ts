@@ -162,6 +162,67 @@ describe('TwitchMessageHandler — issue #129 invalid response retry contract', 
     expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
   })
 
+  it('keeps the element unprocessed after a parse-failure invalid_response', async () => {
+    // Simulates a JSON parse failure surfacing through the Translator as an
+    // invalid_response with no translatedText.
+    sendMessageMock.mockResolvedValue({
+      type: 'translate_response',
+      payload: {
+        messageId: 'any-id',
+        error: { type: 'invalid_response', message: 'Failed to parse translation response' },
+      },
+    })
+    const el = createMessageElement('こんにちは')
+
+    await handler.translateAndInject(el, DEFAULT_SETTINGS)
+
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+    expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the element retryable for three parse-failure responses, settling on the third', async () => {
+    sendMessageMock.mockResolvedValue({
+      type: 'translate_response',
+      payload: {
+        messageId: 'any-id',
+        error: { type: 'invalid_response', message: 'Failed to parse translation response' },
+      },
+    })
+    const el = createMessageElement('こんにちは')
+
+    await handler.translateAndInject(el, DEFAULT_SETTINGS)
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+
+    await handler.translateAndInject(el, DEFAULT_SETTINGS)
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+
+    await handler.translateAndInject(el, DEFAULT_SETTINGS)
+    expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    expect(el.querySelectorAll('[data-tachi-lens-translated]')).toHaveLength(1)
+    const notifications = sendMessageMock.mock.calls.filter(([message]) =>
+      (message as { type: string }).type === 'error_notification',
+    )
+    expect(notifications).toHaveLength(1)
+  })
+
+  it('does not inject a whitespace-only runtime translation as a success', async () => {
+    // A runtime payload whose translatedText is whitespace-only must NOT be
+    // treated as a valid translation and injected; it must go through the
+    // bounded invalid-response retry path.
+    sendMessageMock.mockResolvedValue({
+      type: 'translate_response',
+      payload: { messageId: 'any-id', translatedText: '   ' },
+    })
+    const el = createMessageElement('こんにちは')
+
+    await handler.translateAndInject(el, DEFAULT_SETTINGS)
+
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+    expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps rate-limit behavior unchanged (retryable, no processed flag)', async () => {
     sendMessageMock.mockResolvedValue({
       type: 'translate_response',

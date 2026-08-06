@@ -127,6 +127,34 @@ describe('Translator — issue #129 empty/missing translation handling', () => {
     expect(deps.cache.has(cacheKey('おはよう', 'deepseek', 'deepseek-v4-flash'))).toBe(false)
   })
 
+  it('maps a provider result that failed JSON parsing to an invalid_response', async () => {
+    // Simulates what prompt.ts produces for a JSON parse failure: the
+    // BatchItemResult carries errorType 'invalid_response' and no translatedText.
+    const provider = createMockProvider()
+    vi.mocked(provider.translateBatch).mockResolvedValue([
+      { id: 'msg1', error: 'Failed to parse translation response', errorType: 'invalid_response' },
+    ])
+    deps.getProvider = vi.fn(() => provider)
+
+    const result = await translate('こんにちは')
+
+    expect(result.translatedText).toBeUndefined()
+    expect(result.error?.type).toBe('invalid_response')
+  })
+
+  it('maps a provider result with an unexpected top-level format to an invalid_response', async () => {
+    const provider = createMockProvider()
+    vi.mocked(provider.translateBatch).mockResolvedValue([
+      { id: 'msg1', error: 'Unexpected response format', errorType: 'invalid_response' },
+    ])
+    deps.getProvider = vi.fn(() => provider)
+
+    const result = await translate('こんにちは')
+
+    expect(result.translatedText).toBeUndefined()
+    expect(result.error?.type).toBe('invalid_response')
+  })
+
   it('keeps a valid translation result unchanged', async () => {
     const provider = createMockProvider()
     vi.mocked(provider.translateBatch).mockResolvedValue([
