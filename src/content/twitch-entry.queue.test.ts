@@ -287,4 +287,182 @@ describe('content script translation queue', () => {
     )).toHaveLength(20)
   })
 
+  describe('queue capacity and overflow bound', () => {
+    it('never exceeds the named queue bound under burst input', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+
+      // Saturate all concurrency slots so drainTranslationQueue does not dequeue.
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+
+      const total = mod._test.MAX_QUEUED + 20
+      for (let index = 0; index < total; index++) {
+        const element = document.createElement('div')
+        element.textContent = `burst-${index}`
+        document.body.appendChild(element)
+        mod._test.enqueueTranslation(element, 'live')
+      }
+
+      expect(mod._test.translationQueueLength).toBe(mod._test.MAX_QUEUED)
+
+      // Overflow drops the oldest pending work first; the newest work survives.
+      const snapshot = mod._test.translationQueueSnapshot
+      expect(snapshot).toHaveLength(mod._test.MAX_QUEUED)
+      expect(snapshot[0]!.text).toBe(`burst-${total - mod._test.MAX_QUEUED}`)
+      expect(snapshot[snapshot.length - 1]!.text).toBe(`burst-${total - 1}`)
+
+      // Dropped work never reached dispatch (no translate_request was sent).
+      expect(sendMessage.mock.calls.filter(([message]) =>
+        (message as { type: string }).type === 'translate_request',
+      )).toHaveLength(0)
+    })
+
+    it('removes obsolete entries before dropping the oldest pending work on overflow', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+
+      // Fill to capacity with connected elements.
+      for (let index = 0; index < mod._test.MAX_QUEUED; index++) {
+        const element = document.createElement('div')
+        element.textContent = `fill-${index}`
+        document.body.appendChild(element)
+        mod._test.enqueueTranslation(element, 'live')
+      }
+      expect(mod._test.translationQueueLength).toBe(mod._test.MAX_QUEUED)
+
+      // A disconnected element is obsolete: it is removed before any oldest drop.
+      const disconnected = document.createElement('div')
+      disconnected.textContent = 'disconnected'
+      mod._test.enqueueTranslation(disconnected, 'live')
+
+      const newest = document.createElement('div')
+      newest.textContent = 'newest'
+      document.body.appendChild(newest)
+      mod._test.enqueueTranslation(newest, 'live')
+
+      expect(mod._test.translationQueueLength).toBe(mod._test.MAX_QUEUED)
+
+      const snapshot = mod._test.translationQueueSnapshot
+      // Obsolete entry removed first...
+      expect(snapshot.some((entry) => entry.text === 'disconnected')).toBe(false)
+      // ...then the oldest connected entry (fill-0) was dropped; newest kept.
+      expect(snapshot).toHaveLength(mod._test.MAX_QUEUED)
+      expect(snapshot[0]!.text).toBe('fill-1')
+      expect(snapshot[snapshot.length - 1]!.text).toBe('newest')
+    })
+
+    it('skips disconnected elements immediately before translation dispatch', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+
+      // Keep the work queued by saturating the slots, then disconnect it.
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+      const element = document.createElement('div')
+      element.textContent = 'will-disconnect'
+      document.body.appendChild(element)
+      mod._test.enqueueTranslation(element, 'live')
+      expect(mod._test.translationQueueLength).toBe(1)
+
+      element.remove()
+
+      // Free a slot and drain: the disconnected element is skipped, no request sent.
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT - 1
+      mod._test.drainTranslationQueue()
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(sendMessage.mock.calls.filter(([message]) =>
+        (message as { type: string }).type === 'translate_request',
+      )).toHaveLength(0)
+      expect(mod._test.translationQueueLength).toBe(0)
+    })
+
+    it('keeps the queue bounded while draining is paused by a provider cooldown', async () => {
+      sendMessage.mockImplementation((message: { type: string }) => {
+        if (message.type === 'get_content_settings') {
+          return Promise.resolve({
+            type: 'content_settings',
+            payload: { translationEnabled: true, minTextLength: 1 },
+          })
+        }
+        if (message.type === 'translate_request') {
+          return Promise.resolve({
+            type: 'translate_response',
+            payload: {
+              messageId: 'any-id',
+              error: { type: 'rate_limited', retryAfterMs: 30_000, message: 'Rate limited' },
+            },
+          })
+        }
+        return Promise.resolve(undefined)
+      })
+
+      const mod = await import('./twitch-entry')
+      const container = document.querySelector(
+        '[data-test-selector="chat-scrollable-area__message-container"]',
+      )!
+
+      // First message triggers the provider cooldown (retryNotBefore is set).
+      appendMessage(container, 'first')
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(300)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(sendMessage.mock.calls.filter(([message]) =>
+        (message as { type: string }).type === 'translate_request',
+      )).toHaveLength(1)
+
+      // Burst arrives while draining is paused: the queue must stay bounded and
+      // must not trigger a retry storm (only the initial request was dispatched).
+      const total = mod._test.MAX_QUEUED + 15
+      for (let index = 0; index < total; index++) {
+        const element = document.createElement('div')
+        element.textContent = `cooldown-${index}`
+        document.body.appendChild(element)
+        mod._test.enqueueTranslation(element, 'live')
+      }
+
+      expect(mod._test.translationQueueLength).toBe(mod._test.MAX_QUEUED)
+      expect(sendMessage.mock.calls.filter(([message]) =>
+        (message as { type: string }).type === 'translate_request',
+      )).toHaveLength(1)
+    })
+
+    it('releases bookkeeping for dropped work and leaves no queue entry behind', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+
+      const elements: HTMLElement[] = []
+      for (let index = 0; index < mod._test.MAX_QUEUED; index++) {
+        const element = document.createElement('div')
+        element.textContent = `cleanup-${index}`
+        document.body.appendChild(element)
+        elements.push(element)
+        mod._test.enqueueTranslation(element, 'live')
+      }
+
+      // Overflow drops the oldest entry (cleanup-0).
+      const newest = document.createElement('div')
+      newest.textContent = 'after-overflow'
+      document.body.appendChild(newest)
+      mod._test.enqueueTranslation(newest, 'live')
+
+      const snapshot = mod._test.translationQueueSnapshot
+      expect(snapshot.some((entry) => entry.text === 'cleanup-0')).toBe(false)
+      expect(snapshot.some((entry) => entry.text === 'after-overflow')).toBe(true)
+
+      // The dropped element is not stuck in the queuedForTranslation WeakSet:
+      // re-enqueueing it succeeds, proving the bookkeeping was released.
+      mod._test.enqueueTranslation(elements[0]!, 'live')
+      expect(mod._test.translationQueueSnapshot.some((entry) => entry.text === 'cleanup-0')).toBe(true)
+
+      // No dropped work was dispatched and no translate_request leaked.
+      expect(sendMessage.mock.calls.filter(([message]) =>
+        (message as { type: string }).type === 'translate_request',
+      )).toHaveLength(0)
+    })
+  })
 })
