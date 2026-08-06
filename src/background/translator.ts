@@ -172,6 +172,13 @@ export class Translator {
     const { selectedModel: model, targetLanguage: targetLang } = settings
 
     const uncached: PendingItem[] = []
+    // Flush-local deduplication (#56): requests sharing a canonical identity
+    // within this flush are grouped under the first request for that identity.
+    // Only the group leader becomes a provider item; every follower shares the
+    // leader's completion and fans the outcome out to its own messageId. This
+    // is distinct from the in-flight registry below, which coalesces identical
+    // work across separate flushes (owned by #58).
+    const flushLeaders = new Map<string, PendingItem>()
 
     for (const item of items) {
       const cacheKey = this.deps.cache.buildKey(
@@ -186,26 +193,40 @@ export class Translator {
 
       if (cached) {
         item.resolve(this.toTranslationResult(item.request.messageId, cached))
+        continue
+      }
+
+      // A duplicate within this flush follows its group leader. The leader is
+      // registered below after the same-flush and in-flight lookups miss, so
+      // the first request with a given identity always leads its group.
+      const flushLeader = flushLeaders.get(cacheKey)
+      if (flushLeader) {
+        void flushLeader.completion.then((result) => item.resolve({
+          ...result,
+          messageId: item.request.messageId,
+        }))
+        continue
+      }
+
+      // Backlog may safely share a live leader because the live request has
+      // the tighter deadline. Live work must never inherit backlog latency.
+      const inFlight = selectedPriority === 'backlog'
+        ? this.inFlightTranslations.get(`live:${cacheKey}`) ?? this.inFlightTranslations.get(inFlightKey)
+        : this.inFlightTranslations.get(inFlightKey)
+      if (inFlight) {
+        void inFlight.then((result) => item.resolve({
+          ...result,
+          messageId: item.request.messageId,
+        }))
       } else {
-        // Backlog may safely share a live leader because the live request has
-        // the tighter deadline. Live work must never inherit backlog latency.
-        const inFlight = selectedPriority === 'backlog'
-          ? this.inFlightTranslations.get(`live:${cacheKey}`) ?? this.inFlightTranslations.get(inFlightKey)
-          : this.inFlightTranslations.get(inFlightKey)
-        if (inFlight) {
-          void inFlight.then((result) => item.resolve({
-            ...result,
-            messageId: item.request.messageId,
-          }))
-        } else {
-          this.inFlightTranslations.set(inFlightKey, item.completion)
-          void item.completion.then(() => {
-            if (this.inFlightTranslations.get(inFlightKey) === item.completion) {
-              this.inFlightTranslations.delete(inFlightKey)
-            }
-          })
-          uncached.push(item)
-        }
+        this.inFlightTranslations.set(inFlightKey, item.completion)
+        void item.completion.then(() => {
+          if (this.inFlightTranslations.get(inFlightKey) === item.completion) {
+            this.inFlightTranslations.delete(inFlightKey)
+          }
+        })
+        flushLeaders.set(cacheKey, item)
+        uncached.push(item)
       }
     }
 
