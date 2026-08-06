@@ -51,6 +51,9 @@ export type MessageKey =
   | 'skipLinksOnly'
   | 'skipNumbersOnly'
   | 'skipSystemMessages'
+  | 'chineseVariantSection'
+  | 'chineseVariantSkipAllChinese'
+  | 'chineseVariantTranslateOtherScript'
   | 'geminiQuotaSection'
   | 'geminiQuotaHelp'
   | 'geminiQuotaRpm'
@@ -132,6 +135,9 @@ export const MESSAGE_KEYS: readonly string[] = [
   'skipLinksOnly',
   'skipNumbersOnly',
   'skipSystemMessages',
+  'chineseVariantSection',
+  'chineseVariantSkipAllChinese',
+  'chineseVariantTranslateOtherScript',
   'geminiQuotaSection',
   'geminiQuotaHelp',
   'geminiQuotaRpm',
@@ -214,6 +220,9 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   skipLinksOnly: '略過純連結',
   skipNumbersOnly: '略過純數字',
   skipSystemMessages: '略過系統訊息',
+  chineseVariantSection: '中文訊息處理',
+  chineseVariantSkipAllChinese: '簡體、繁體都不翻譯',
+  chineseVariantTranslateOtherScript: '將另一種中文字體轉換成目標字體',
   geminiQuotaSection: 'Gemini 模型配額',
   geminiQuotaHelp: '請填入 Google AI Studio 顯示的目前模型限制；安全比例會保留使用緩衝。',
   geminiQuotaRpm: '每分鐘請求上限 (RPM)',
