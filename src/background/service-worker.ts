@@ -13,7 +13,7 @@ import {
   saveUserSettings,
 } from '@/storage/settings'
 import { isBaseMessage, isDiagnosticEventMessage, isGetQuotaHealthMessage, isResetQuotaHealthMessage } from '@/shared/messages'
-import type { DiagnosticEvent, SettingsUpdatePayload } from '@/shared/messages'
+import type { DiagnosticEvent, DiagnosticStage, SettingsUpdatePayload } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { createSystemClock } from './clock'
 import { createMessageRouter } from './message-router'
@@ -55,6 +55,13 @@ const translator = new Translator(
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
     getProvider: (providerId) => getProvider(providerId),
     quotaScheduler,
+    // Batch dedup and in-flight coalescing report privacy-safe counter stages
+    // into the same bounded diagnostic pipeline used by content-script drops.
+    // The callback runs only during flushes (after module init), so referencing
+    // `recordDiagnostic` here is safe.
+    reportDiagnosticCount: (stage) => {
+      recordDiagnostic({ id: `counter-${Date.now()}-${stage}`, stage, timestamp: Date.now() })
+    },
   },
   { batchWindowMs: 300, maxBatchSize: 10 },
 )
@@ -77,6 +84,27 @@ const router = createMessageRouter({
 
 const DIAGNOSTIC_STORAGE_KEY = 'translationDiagnostics'
 const MAX_DIAGNOSTICS = 20
+
+/**
+ * Counter-style stages are aggregated in the Service Worker into bounded
+ * counter events instead of being forwarded per message. Each counter event
+ * carries only a positive aggregate `count` — never chat text, usernames,
+ * channel names, provider bodies, or translation output.
+ */
+const DIAGNOSTIC_COUNTER_STAGES: readonly DiagnosticStage[] = [
+  'batch_dedup_removed',
+  'in_flight_coalesced',
+  'queue_overflow_drop',
+  'queue_obsolete_drop',
+]
+
+const isCounterStage = (stage: DiagnosticStage): boolean => DIAGNOSTIC_COUNTER_STAGES.includes(stage)
+
+// Accumulated, unbroadcast counter deltas. Because every counter stage reports
+// at least once (an empty report flushes and resets), the tally can never grow
+// without bound while it is paused.
+const pendingDiagnosticCounts = new Map<DiagnosticStage, number>()
+
 let diagnostics: DiagnosticEvent[] = []
 
 const sanitizeDiagnosticEvent = (event: DiagnosticEvent): DiagnosticEvent => {
@@ -94,6 +122,15 @@ const persistDiagnostics = (): void => {
 }
 
 const recordDiagnostic = (event: DiagnosticEvent): void => {
+  // Counter-style stages accumulate in the Service Worker and are reported as
+  // a single bounded aggregate event. This keeps high-frequency dedup / queue
+  // drop traffic out of storage and off the Popup's runtime message stream.
+  if (isCounterStage(event.stage)) {
+    const delta = typeof event.count === 'number' && event.count > 0 ? event.count : 1
+    pendingDiagnosticCounts.set(event.stage, (pendingDiagnosticCounts.get(event.stage) ?? 0) + delta)
+    return
+  }
+
   const safeEvent = sanitizeDiagnosticEvent(event)
   diagnostics = [safeEvent, ...diagnostics.filter((entry) => entry.id !== safeEvent.id)].slice(0, MAX_DIAGNOSTICS)
   persistDiagnostics()
@@ -104,7 +141,29 @@ const recordDiagnostic = (event: DiagnosticEvent): void => {
   }).catch(() => undefined)
 }
 
+const flushPendingDiagnosticCounts = (): void => {
+  if (pendingDiagnosticCounts.size === 0) return
+
+  const snapshot = [...pendingDiagnosticCounts]
+  pendingDiagnosticCounts.clear()
+  const events: DiagnosticEvent[] = snapshot.map(([stage, count]) => ({
+    id: `counter-${Date.now()}-${stage}`,
+    stage,
+    timestamp: Date.now(),
+    count,
+  }))
+  diagnostics = [...events, ...diagnostics].slice(0, MAX_DIAGNOSTICS)
+  persistDiagnostics()
+
+  void chrome.runtime.sendMessage?.({
+    type: 'diagnostics_snapshot',
+    payload: { events },
+  }).catch(() => undefined)
+}
+
 const getDiagnostics = async (): Promise<DiagnosticEvent[]> => {
+  flushPendingDiagnosticCounts()
+
   if (diagnostics.length > 0) return diagnostics
 
   const sessionStorage = chrome.storage?.session

@@ -465,4 +465,90 @@ describe('content script translation queue', () => {
       )).toHaveLength(0)
     })
   })
+
+  describe('privacy-safe drop diagnostics (#60)', () => {
+    const diagnosticCount = (stage: string): number =>
+      sendMessage.mock.calls.filter(([message]) =>
+        (message as { type?: string; payload?: { stage?: string } }).type === 'diagnostic_event'
+          && (message as { payload?: { stage?: string } }).payload?.stage === stage,
+      ).length
+
+    it('emits a counter event for every queue-overflow drop, never message content', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+
+      const total = mod._test.MAX_QUEUED + 5
+      for (let index = 0; index < total; index++) {
+        const element = document.createElement('div')
+        element.textContent = `overflow-${index}`
+        document.body.appendChild(element)
+        mod._test.enqueueTranslation(element, 'live')
+      }
+
+      // 5 entries past MAX_QUEUED were dropped as overflow.
+      expect(diagnosticCount('queue_overflow_drop')).toBe(5)
+      // The events are privacy-safe: no chat text, username, channel, or
+      // provider body is attached.
+      for (const call of sendMessage.mock.calls) {
+        const message = call[0] as { type?: string; payload?: Record<string, unknown> }
+        if (message.type !== 'diagnostic_event') continue
+        expect(message.payload?.detail).toBeUndefined()
+      }
+      expect(JSON.stringify(sendMessage.mock.calls)).not.toContain('overflow-')
+    })
+
+    it('emits a counter event for obsolete work removed before overflow', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+
+      // Fill to capacity with connected elements.
+      for (let index = 0; index < mod._test.MAX_QUEUED; index++) {
+        const element = document.createElement('div')
+        element.textContent = `fill-${index}`
+        document.body.appendChild(element)
+        mod._test.enqueueTranslation(element, 'live')
+      }
+
+      // A disconnected element is obsolete: it is removed before any overflow.
+      const disconnected = document.createElement('div')
+      disconnected.textContent = 'obsolete-work'
+      mod._test.enqueueTranslation(disconnected, 'live')
+
+      const newest = document.createElement('div')
+      newest.textContent = 'newest'
+      document.body.appendChild(newest)
+      mod._test.enqueueTranslation(newest, 'live')
+
+      expect(diagnosticCount('queue_obsolete_drop')).toBe(1)
+      expect(diagnosticCount('queue_overflow_drop')).toBe(1)
+      expect(JSON.stringify(sendMessage.mock.calls)).not.toContain('obsolete-work')
+    })
+
+    it('emits a counter event when a disconnected element is skipped at dispatch', async () => {
+      const mod = await import('./twitch-entry')
+      sendMessage.mockReset()
+
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+      const element = document.createElement('div')
+      element.textContent = 'will-disconnect'
+      document.body.appendChild(element)
+      mod._test.enqueueTranslation(element, 'live')
+      expect(mod._test.translationQueueLength).toBe(1)
+
+      element.remove()
+
+      mod._test.activeTranslations = mod._test.MAX_CONCURRENT - 1
+      mod._test.drainTranslationQueue()
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(diagnosticCount('queue_obsolete_drop')).toBe(1)
+      // No translate_request was sent for the skipped work.
+      expect(sendMessage.mock.calls.filter(([message]) =>
+        (message as { type: string }).type === 'translate_request',
+      )).toHaveLength(0)
+    })
+  })
 })
