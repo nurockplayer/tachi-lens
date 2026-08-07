@@ -13,7 +13,8 @@
     "test:e2e:canary": "pnpm build && playwright test --config=playwright.canary.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "check:agent-docs": "node scripts/check-agent-doc-sync.mjs"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.0",

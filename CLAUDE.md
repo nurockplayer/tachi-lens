@@ -39,6 +39,7 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 - 使用 pnpm；保留 `pnpm-lock.yaml`，不得新增其他 lockfile 或 package-manager lifecycle enforcement script。
 - TypeScript 維持 strict；測試與 source colocate，bug fix 先新增會失敗的 regression test。
 - React 只用於 Popup；Content Script 保持原生 TypeScript/DOM。
+- frontend page 設計或 redesign 前先使用 `design-taste-frontend`；Popup 等密集產品 UI 以既有 design system 與 task ergonomics 為優先。
 - 不提交 `dist/`、`.omc` session/state noise、release zip 或其他 generated artifact。
 
 ## Maintenance policy
@@ -67,6 +68,7 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 - Broad scan、diff grouping、log summary 與 test draft 優先交給 DeepSeek worker；controller 必須重讀引用檔案並驗證重要 claim。
 - Controller 負責實際 edit、test、security/architecture judgment、commit/push/PR 與最終使用者結論。
 - Worker/外部模型不得負責 destructive command、public state change 或最終 approval。
+- GSD yolo mode 只控制 planning convenience 與 phase auto-advance，不得授權跳過 issue scope、delivery gates 或 public-state-change 授權；見 `docs/agents/gsd-workflow.md`。
 
 ## Automated review validation
 
