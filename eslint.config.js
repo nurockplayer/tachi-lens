@@ -66,6 +66,18 @@ export default tseslint.config(
       'react-hooks/preserve-manual-memoization': 'off',
     },
   },
+  // Playwright requires the `context` fixture to be declared with Playwright's
+  // object-destructuring form (`async ({}, use)`) for it to receive the base
+  // `context` fixture. The empty pattern is intentional — the fixture value is
+  // unused because the extension launches its own persistent context. This is
+  // the narrowest exception for that single platform-required fixture.
+  {
+    name: 'tachi-lens/e2e-extension-fixture-empty-pattern',
+    files: ['e2e/fixtures/extension.ts'],
+    rules: {
+      'no-empty-pattern': 'off',
+    },
+  },
   // Node globals for maintained scripts, E2E tests, config files, and the root
   // documentation-contract test that reads the rule documents from disk.
   {

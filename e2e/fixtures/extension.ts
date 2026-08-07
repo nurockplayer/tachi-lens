@@ -26,7 +26,7 @@ export const test = base.extend<{
   extensionId: string
   collectedErrors: ExtensionError[]
 }>({
-  context: async (_fixtures, use) => {
+  context: async ({}, use) => {
     const manifestPath = path.join(DIST_DIR, 'manifest.json')
     if (!fs.existsSync(manifestPath)) {
       throw new Error(
