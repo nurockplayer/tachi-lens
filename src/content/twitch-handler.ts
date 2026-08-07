@@ -1,6 +1,6 @@
 import type { DiagnosticStage, ErrorNotification, MessageType, TranslationResult } from '@/shared/messages'
 import { isSlashMe, isLinksOnly, isNumbersOnly, type FilterConfig } from './message-filter'
-import type { ChineseVariantMode } from '@/shared/language-detection'
+import { shouldSkipMessage, type ChineseVariantMode } from '@/shared/language-detection'
 import {
   safeRuntimeSendMessage,
   type RuntimeMessageResult,
@@ -164,6 +164,15 @@ export class TwitchMessageHandler {
     }
     if (text.length < settings.minTextLength) {
       debugLog('shouldTranslate: too short', { text, len: text.length, min: settings.minTextLength })
+      return false
+    }
+    // High-confidence target-language skip (#55). When the target language is
+    // Chinese and the message is confidently already in the target language,
+    // skip it before any translate_request reaches the Service Worker. The
+    // shared detector only skips on high confidence; mixed-language,
+    // uncertain, or non-target messages fall through to the normal flow.
+    if (settings.targetLanguage && shouldSkipMessage(text, settings.targetLanguage, settings.chineseVariantMode)) {
+      debugLog('shouldTranslate: target-language skip', { text, target: settings.targetLanguage, mode: settings.chineseVariantMode })
       return false
     }
     // Text-based filters (no DOM access needed)

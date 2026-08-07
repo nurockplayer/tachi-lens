@@ -244,6 +244,106 @@ describe('TwitchMessageHandler', () => {
       expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
     })
 
+    describe('target-language skip (#55)', () => {
+      it('skips Traditional Chinese text for a zh-TW target in skip_all_chinese mode', () => {
+        const el = createMessageElement({ text: '這個很熱', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-TW',
+            chineseVariantMode: 'skip_all_chinese',
+          }),
+        ).toBe(false)
+      })
+
+      it('skips Simplified Chinese text for a zh-TW target in skip_all_chinese mode', () => {
+        const el = createMessageElement({ text: '这个很热', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-TW',
+            chineseVariantMode: 'skip_all_chinese',
+          }),
+        ).toBe(false)
+      })
+
+      it('skips Simplified Chinese text for a zh-CN target in skip_all_chinese mode', () => {
+        const el = createMessageElement({ text: '这个很热', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-CN',
+            chineseVariantMode: 'skip_all_chinese',
+          }),
+        ).toBe(false)
+      })
+
+      it('sends Simplified Chinese text for a zh-TW target in translate_other_script mode', () => {
+        const el = createMessageElement({ text: '这个很热', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-TW',
+            chineseVariantMode: 'translate_other_script',
+          }),
+        ).toBe(true)
+      })
+
+      it('sends Traditional Chinese text for a zh-CN target in translate_other_script mode (inverse behavior)', () => {
+        const el = createMessageElement({ text: '這個很熱', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-CN',
+            chineseVariantMode: 'translate_other_script',
+          }),
+        ).toBe(true)
+      })
+
+      it('skips Traditional Chinese text for a zh-CN target in skip_all_chinese mode', () => {
+        const el = createMessageElement({ text: '這個很熱', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-CN',
+            chineseVariantMode: 'skip_all_chinese',
+          }),
+        ).toBe(false)
+      })
+
+      it('does not skip Japanese text with Kana for a zh-TW target', () => {
+        const el = createMessageElement({ text: '今天は暑い', username: 'user' })
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('does not skip Korean text for a zh-CN target', () => {
+        const el = createMessageElement({ text: '안녕하세요', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, {
+            ...DEFAULT_SETTINGS,
+            targetLanguage: 'zh-CN',
+          }),
+        ).toBe(true)
+      })
+
+      it('does not skip mixed Latin and Han text (hello 大家好)', () => {
+        const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('does not skip non-Chinese text for a zh target', () => {
+        const el = createMessageElement({ text: 'Hello world', username: 'user' })
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('does not skip Chinese text when no targetLanguage is configured', () => {
+        const el = createMessageElement({ text: '这个很热', username: 'user' })
+        expect(
+          handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: undefined }),
+        ).toBe(true)
+      })
+    })
+
     describe('skipEmotesOnly with CJK text (issue #37)', () => {
       const createElementWithBadge = (bodyText: string): HTMLElement => {
         const el = document.createElement('div')
@@ -283,8 +383,8 @@ describe('TwitchMessageHandler', () => {
         expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
       })
 
-      it('Simplified Chinese with numbers (这女生不知道有没有100) should translate', () => {
-        const el = createElementWithBadge('这女生不知道有没有100')
+      it('Japanese text with numbers should translate (not emote-only)', () => {
+        const el = createElementWithBadge('もう100回見た')
         expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
       })
 
@@ -588,6 +688,70 @@ describe('TwitchMessageHandler', () => {
 
       expect(sendMessageMock).not.toHaveBeenCalled()
       expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+
+    it('does not send translate_request for a same-target-language message and marks it processed', async () => {
+      const el = createMessageElement({ text: '这个很热', username: 'user' })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+
+    it('does not send translate_request for same-script text in translate_other_script mode', async () => {
+      const el = createMessageElement({ text: '這個很熱', username: 'user' })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'translate_other_script',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+
+    it('sends translate_request for Simplified Chinese text against a zh-TW translate_other_script target', async () => {
+      const el = createMessageElement({ text: '这个很热', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '好熱' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'translate_other_script',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      const callArg = sendMessageMock.mock.calls[0]![0] as Record<string, unknown>
+      expect(callArg.type).toBe('translate_request')
+      expect((callArg.payload as Record<string, unknown>).text).toBe('这个很热')
+    })
+
+    it('sends translate_request for mixed Simplified/Traditional text against a zh-TW translate_other_script target', async () => {
+      const el = createMessageElement({ text: '这个熱吧', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '好熱' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'translate_other_script',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
     })
   })
 
