@@ -44,4 +44,41 @@ describe('Popup diagnostics', () => {
     expect(await screen.findByRole('heading', { name: '診斷' })).toBeTruthy()
     expect(screen.getByText('翻譯已顯示於聊天室')).toBeTruthy()
   })
+
+  it('renders a privacy-safe counter event as a stage label and aggregate count', async () => {
+    const counterEvent = {
+      id: 'c1',
+      stage: 'queue_overflow_drop',
+      timestamp: 1_700_000_000_000,
+      count: 7,
+    }
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+        },
+      },
+      runtime: {
+        sendMessage: vi.fn(async (message: { type: string }) => {
+          if (message.type === 'get_diagnostics') {
+            return { type: 'diagnostics_snapshot', payload: { events: [counterEvent] } }
+          }
+          if (message.type === 'get_api_key_preview') {
+            return { type: 'api_key_preview', payload: { preview: '' } }
+          }
+          return undefined
+        }),
+        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      tabs: { query: vi.fn(async () => []) },
+    })
+
+    render(<App />)
+
+    // The counter stage label is shown, and the aggregate count is rendered
+    // as the detail — never chat text, usernames, or provider bodies.
+    expect(await screen.findByRole('heading', { name: '診斷' })).toBeTruthy()
+    expect(screen.getByText('佇列溢位已丟棄')).toBeTruthy()
+    expect(screen.getByText('：7')).toBeTruthy()
+  })
 })

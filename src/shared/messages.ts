@@ -92,6 +92,13 @@ export type DiagnosticStage =
   | 'translation_received'
   | 'translation_failed'
   | 'translation_injected'
+  // Privacy-safe aggregate counters (#60): deduplication and queue-backpressure
+  // drops. These stages carry only a `count` — never chat text, usernames,
+  // channel names, provider request/response bodies, or translation output.
+  | 'batch_dedup_removed'
+  | 'in_flight_coalesced'
+  | 'queue_overflow_drop'
+  | 'queue_obsolete_drop'
 
 /** A privacy-safe lifecycle event. It never includes chat text, usernames, or API keys. */
 export interface DiagnosticEvent {
@@ -99,6 +106,12 @@ export interface DiagnosticEvent {
   stage: DiagnosticStage
   timestamp: number
   detail?: string
+  /**
+   * Aggregate count for counter-style stages (batch_dedup_removed,
+   * in_flight_coalesced, queue_overflow_drop, queue_obsolete_drop). Carries the
+   * number of drops accumulated between reports; never message content.
+   */
+  count?: number
 }
 
 export interface DiagnosticsSnapshot {
@@ -278,7 +291,21 @@ const DIAGNOSTIC_STAGES: readonly DiagnosticStage[] = [
   'translation_received',
   'translation_failed',
   'translation_injected',
+  'batch_dedup_removed',
+  'in_flight_coalesced',
+  'queue_overflow_drop',
+  'queue_obsolete_drop',
 ]
+
+const DIAGNOSTIC_COUNT_STAGES: readonly DiagnosticStage[] = [
+  'batch_dedup_removed',
+  'in_flight_coalesced',
+  'queue_overflow_drop',
+  'queue_obsolete_drop',
+]
+
+const isOptionalCount = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'number' && Number.isInteger(value) && value >= 0)
 
 export interface ContentSettingsRequest {
   channelName?: string
@@ -356,7 +383,14 @@ export const isDiagnosticEventMessage = (
     typeof payload.stage === 'string' &&
     DIAGNOSTIC_STAGES.includes(payload.stage as DiagnosticStage) &&
     typeof payload.timestamp === 'number' &&
-    (payload.detail === undefined || typeof payload.detail === 'string')
+    (payload.detail === undefined || typeof payload.detail === 'string') &&
+    // `count` is only valid on counter-style stages and must be a bounded
+    // non-negative integer when present. Counter stages may never carry a
+    // `detail` — that channel is reserved for message-bearing content, so
+    // rejecting it at the protocol boundary is a privacy defense.
+    (DIAGNOSTIC_COUNT_STAGES.includes(payload.stage as DiagnosticStage)
+      ? payload.detail === undefined && isOptionalCount(payload.count)
+      : payload.count === undefined)
   )
 }
 

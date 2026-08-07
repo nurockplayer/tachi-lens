@@ -66,6 +66,28 @@ export const reportDiagnostic = (stage: DiagnosticStage, detail?: string): void 
   })
 }
 
+/**
+ * Counter-style stages emitted for queue/dedup backpressure. One call per
+ * drop/removal; the event carries only the stage — never chat text, usernames,
+ * channel names, provider bodies, or translation output. The Service Worker
+ * aggregates these into a single bounded counter event, so per-drop traffic is
+ * never persisted individually nor broadcast to the Popup (#60).
+ */
+export const reportDiagnosticCount = (stage: DiagnosticStage): void => {
+  if (stopped) return
+
+  const timestamp = Date.now()
+  const payload: DiagnosticEvent = {
+    id: `diagnostic-${timestamp}-${diagnosticCounter++}`,
+    stage,
+    timestamp,
+  }
+
+  void runtimeMessageSender<void>({ type: 'diagnostic_event', payload }).catch((error: unknown) => {
+    console.error('[tachi-lens] diagnostic runtime message failed', error)
+  })
+}
+
 let handler = new TwitchMessageHandler(undefined, reportDiagnostic, runtimeMessageSender)
 let currentSelectors: PageSelectors = getSelectorsForPage('channel')
 
@@ -368,6 +390,7 @@ const trimTranslationQueue = (): void => {
       if (isObsolete(translationQueue[index]!)) {
         queuedForTranslation.delete(translationQueue[index]!.element)
         translationQueue.splice(index, 1)
+        reportDiagnosticCount('queue_obsolete_drop')
       }
     }
   }
@@ -375,7 +398,7 @@ const trimTranslationQueue = (): void => {
   while (translationQueue.length > MAX_QUEUED_TRANSLATIONS) {
     const dropped = translationQueue.shift()!
     queuedForTranslation.delete(dropped.element)
-    debugLog('translation queue overflow: dropped oldest pending work')
+    reportDiagnosticCount('queue_overflow_drop')
   }
 }
 
@@ -420,7 +443,10 @@ const drainTranslationQueue = (): void => {
 
     queuedForTranslation.delete(element)
 
-    if (!element.isConnected || handler.isAlreadyProcessed(element)) continue
+    if (!element.isConnected || handler.isAlreadyProcessed(element)) {
+      reportDiagnosticCount('queue_obsolete_drop')
+      continue
+    }
 
     _dispatchRecorder?.(element, priority)
     activeTranslations++

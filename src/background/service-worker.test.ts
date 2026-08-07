@@ -209,6 +209,113 @@ describe('service worker startup', () => {
     })
   })
 
+  describe('privacy-safe counter aggregation (#60)', () => {
+    const setup = async () => {
+      const diagnosticsStorage = vi.fn(async (_value: unknown) => undefined)
+      const sendMessage = vi.fn(async (_message: unknown) => undefined)
+      const chromeRuntime = {
+        ...createChromeRuntime(),
+        runtime: {
+          ...createChromeRuntime().runtime,
+          sendMessage,
+        },
+        storage: {
+          session: {
+            get: vi.fn(async () => ({})),
+            set: diagnosticsStorage,
+          },
+        },
+      }
+      vi.stubGlobal('chrome', chromeRuntime)
+
+      await import('./service-worker')
+
+      const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+        | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+        | undefined
+      if (!handler) throw new Error('Expected a message handler to be registered')
+      return { diagnosticsStorage, sendMessage, handler }
+    }
+
+    const sendCounterEvent = (handler: (message: unknown, _s: unknown, r: (response: unknown) => void) => boolean, stage: string, count = 1) => {
+      handler({ type: 'diagnostic_event', payload: { id: `c-${stage}-${Date.now()}`, stage, timestamp: Date.now(), count } }, undefined, vi.fn())
+    }
+
+    const getDiagnosticsSnapshot = async (handler: (message: unknown, _s: unknown, r: (response: unknown) => void) => boolean) => {
+      const sendResponse = vi.fn()
+      expect(handler({ type: 'get_diagnostics', payload: {} }, undefined, sendResponse)).toBe(true)
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(1))
+      const response = sendResponse.mock.calls[0]![0] as { type: string; payload: { events: Array<Record<string, unknown>> } }
+      return response.payload.events
+    }
+
+    it('does not persist or broadcast counter events individually', async () => {
+      const { diagnosticsStorage, sendMessage, handler } = await setup()
+
+      // Counter events are privacy-safe aggregate signals. Each is just a
+      // stage + count; even a burst must not spam storage or the Popup.
+      for (const stage of ['batch_dedup_removed', 'queue_overflow_drop', 'queue_obsolete_drop', 'in_flight_coalesced']) {
+        sendCounterEvent(handler, stage)
+      }
+
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(diagnosticsStorage).not.toHaveBeenCalled()
+      expect(sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('aggregates repeated counter events into one bounded count on get_diagnostics', async () => {
+      const { diagnosticsStorage, sendMessage, handler } = await setup()
+
+      // 7 overflow drops accumulate into a single bounded event.
+      for (let i = 0; i < 7; i++) sendCounterEvent(handler, 'queue_overflow_drop')
+
+      const events = await getDiagnosticsSnapshot(handler)
+
+      const overflow = events.find((event) => event.stage === 'queue_overflow_drop')
+      expect(overflow).toBeDefined()
+      expect(overflow?.count).toBe(7)
+      expect(events).toHaveLength(1)
+      expect(diagnosticsStorage).toHaveBeenCalledWith(expect.objectContaining({ translationDiagnostics: expect.any(Array) }))
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect((sendMessage.mock.calls[0]![0] as { payload: { events: Array<Record<string, unknown>> } }).payload.events).toHaveLength(1)
+    })
+
+    it('counters never carry chat text, usernames, channel names, or provider bodies', async () => {
+      const { handler } = await setup()
+
+      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop']) {
+        sendCounterEvent(handler, stage)
+      }
+      const events = await getDiagnosticsSnapshot(handler)
+
+      const serialized = JSON.stringify(events)
+      expect(serialized).not.toMatch(/private chat|@viewer|somechannel|sk-[a-z0-9_-]+|quota exhausted|你好/i)
+      // Every counter event carries only stage, count, id, timestamp.
+      for (const event of events) {
+        expect(Object.keys(event).sort()).toEqual(['count', 'id', 'stage', 'timestamp'])
+      }
+    })
+
+    it('keeps the diagnostics store bounded when many counter and lifecycle events arrive', async () => {
+      const { diagnosticsStorage, handler } = await setup()
+
+      // 100 counter events collapse to 4 aggregated events; mixed with
+      // lifecycle events the store stays at MAX_DIAGNOSTICS (20).
+      for (let i = 0; i < 100; i++) sendCounterEvent(handler, 'queue_overflow_drop')
+      for (let i = 0; i < 40; i++) {
+        handler({ type: 'diagnostic_event', payload: { id: `d-${i}`, stage: 'message_detected', timestamp: Date.now() + i } }, undefined, vi.fn())
+      }
+
+      const events = await getDiagnosticsSnapshot(handler)
+      expect(events.length).toBeLessThanOrEqual(20)
+      expect(diagnosticsStorage).toHaveBeenCalled()
+      const stored = diagnosticsStorage.mock.calls[diagnosticsStorage.mock.calls.length - 1]?.[0] as { translationDiagnostics: Array<Record<string, unknown>> }
+      expect(stored.translationDiagnostics.length).toBeLessThanOrEqual(20)
+    })
+  })
+
   it('responds to get_quota_health with a typed quota-health result', async () => {
     const chromeRuntime = {
       ...createChromeRuntime(),

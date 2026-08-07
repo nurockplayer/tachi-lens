@@ -1,6 +1,6 @@
 import type { BatchItemResult, ProviderId, TranslationProvider } from '@/providers/types'
 import { buildTranslationPrompt } from '@/providers/prompt'
-import type { ProviderError, TranslationRequest, TranslationResult } from '@/shared/messages'
+import type { DiagnosticStage, ProviderError, TranslationRequest, TranslationResult } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { type RateLimiter } from './rate-limiter'
 import { CharacterTokenEstimator, type GeminiQuotaSettings } from './gemini-quota'
@@ -20,6 +20,14 @@ export interface TranslatorDependencies {
   getApiKey: (providerId: ProviderId) => Promise<string | undefined>
   getProvider: (providerId: ProviderId) => TranslationProvider | undefined
   quotaScheduler?: QuotaScheduler
+  /**
+   * Optional privacy-safe aggregate counter for deduplication/coalescing work.
+   * Called once per removed/coalesced request with a counter stage only — the
+   * payload never includes chat text, usernames, provider bodies, or
+   * translation output (#60). Wired from the Service Worker into the existing
+   * diagnostic pipeline; absent in unit tests.
+   */
+  reportDiagnosticCount?: (stage: DiagnosticStage) => void
 }
 
 export interface TranslatorOptions {
@@ -201,6 +209,7 @@ export class Translator {
       // the first request with a given identity always leads its group.
       const flushLeader = flushLeaders.get(cacheKey)
       if (flushLeader) {
+        this.deps.reportDiagnosticCount?.('batch_dedup_removed')
         void flushLeader.completion.then((result) => item.resolve({
           ...result,
           messageId: item.request.messageId,
@@ -214,6 +223,7 @@ export class Translator {
         ? this.inFlightTranslations.get(`live:${cacheKey}`) ?? this.inFlightTranslations.get(inFlightKey)
         : this.inFlightTranslations.get(inFlightKey)
       if (inFlight) {
+        this.deps.reportDiagnosticCount?.('in_flight_coalesced')
         void inFlight.then((result) => item.resolve({
           ...result,
           messageId: item.request.messageId,

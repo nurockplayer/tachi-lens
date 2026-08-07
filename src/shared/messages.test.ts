@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isBaseMessage,
   isContentSettingsRequestMessage,
+  isDiagnosticEventMessage,
   isErrorNotificationMessage,
   isGetQuotaHealthMessage,
   isQuotaHealthResetResultMessage,
@@ -34,6 +35,55 @@ describe('message protocol guards', () => {
       payload: { id: 'd1', stage: 'message_detected', timestamp: 1000 },
     })).toBe(true)
     expect(isBaseMessage({ type: 'get_diagnostics', payload: {} })).toBe(true)
+  })
+
+  describe('privacy-safe counter diagnostic stages (#60)', () => {
+    it('accepts a counter event with a bounded non-negative count', () => {
+      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop']) {
+        expect(isDiagnosticEventMessage({
+          type: 'diagnostic_event',
+          payload: { id: 'd1', stage, timestamp: 1000, count: 3 },
+        })).toBe(true)
+      }
+    })
+
+    it('accepts a counter event with no count (aggregated in the Service Worker)', () => {
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 'd1', stage: 'queue_overflow_drop', timestamp: 1000 },
+      })).toBe(true)
+    })
+
+    it('rejects counter events that carry a detail string', () => {
+      // `detail` is reserved for message-bearing content; counter stages must
+      // never carry it, otherwise chat text could slip through as a detail.
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 'd1', stage: 'queue_overflow_drop', timestamp: 1000, detail: 'Private chat text' },
+      })).toBe(false)
+    })
+
+    it('rejects counter events with a negative or fractional count', () => {
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 'd1', stage: 'batch_dedup_removed', timestamp: 1000, count: -1 },
+      })).toBe(false)
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 'd1', stage: 'in_flight_coalesced', timestamp: 1000, count: 1.5 },
+      })).toBe(false)
+    })
+
+    it('rejects count on non-counter stages and unknown stages', () => {
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 'd1', stage: 'message_detected', timestamp: 1000, count: 3 },
+      })).toBe(false)
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 'd1', stage: 'not_a_stage', timestamp: 1000 },
+      })).toBe(false)
+    })
   })
 
   it('narrows translate_request messages to serializable text payloads', () => {

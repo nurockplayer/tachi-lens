@@ -177,7 +177,19 @@ const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
   translation_received: '收到翻譯結果',
   translation_failed: '翻譯失敗',
   translation_injected: '翻譯已顯示於聊天室',
+  // Privacy-safe aggregate counters (#60). Shown as a single bounded event with
+  // a count; never message content, usernames, channel names, or provider data.
+  batch_dedup_removed: '同批重複請求已去重',
+  in_flight_coalesced: '同內容進行中請求已合併',
+  queue_overflow_drop: '佇列溢位已丟棄',
+  queue_obsolete_drop: '佇列過時項目已丟棄',
 }
+
+const isCountStage = (stage: DiagnosticStage): boolean =>
+  stage === 'batch_dedup_removed'
+  || stage === 'in_flight_coalesced'
+  || stage === 'queue_overflow_drop'
+  || stage === 'queue_obsolete_drop'
 
 const mergeDiagnostics = (current: DiagnosticEvent[], incoming: DiagnosticEvent[]): DiagnosticEvent[] => {
   const byId = new Map(current.map((event) => [event.id, event]))
@@ -980,7 +992,9 @@ export function App() {
             {diagnostics.slice(0, 5).map((event) => (
               <div key={event.id} style={{ fontSize: '0.8rem', color: '#444', wordBreak: 'break-word' }}>
                 <strong>{DIAGNOSTIC_LABELS[event.stage]}</strong>
-                {event.detail && <span style={{ color: '#666' }}>：{event.detail}</span>}
+                {isCountStage(event.stage) && typeof event.count === 'number'
+                  ? <span style={{ color: '#666' }}>：{event.count}</span>
+                  : event.detail && <span style={{ color: '#666' }}>：{event.detail}</span>}
               </div>
             ))}
           </div>
