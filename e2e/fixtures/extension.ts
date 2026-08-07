@@ -155,6 +155,7 @@ export const test = base.extend<{
           (collected
             ? `  Collected startup errors:\n${collected}`
             : '  No startup errors were collected.'),
+          { cause: waitError },
         )
       }
     }

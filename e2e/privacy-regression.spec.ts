@@ -128,7 +128,6 @@ test.describe('Privacy regression: redacted screenshot overlay', () => {
 test.describe('Error attribution regression', () => {
 
   test('deliberate SW console.error is positively attributed', async ({
-    context,
     serviceWorker,
     extensionId,
     collectedErrors,

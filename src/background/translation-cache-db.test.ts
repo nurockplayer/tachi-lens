@@ -188,10 +188,7 @@ const createIndexedDbMock = (): IndexedDbMock => {
           },
           transaction: makeTransaction,
         } as unknown as IDBDatabase
-        let request: MockRequest
-        // Expose the fresh database and its versionchange transaction before the
-        // adapter's upgradeneeded handler reads them to create the store/index.
-        request = makeRequest({}, () => {
+        const request: MockRequest = makeRequest({}, () => {
           request.result = dbInstance
           request.transaction = makeTransaction(TRANSLATION_CACHE_STORE)
         })
