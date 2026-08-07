@@ -26,9 +26,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Run Twitch canary
+      - name: Run canary resolver unit tests
+        run: node --test scripts/twitch-canary-selector.test.mjs
+      - name: Select a live Twitch candidate
+        id: select
         env:
-          TWITCH_CANARY_URL: ${{ vars.TWITCH_CANARY_URL }}
+          TWITCH_CANARY_CANDIDATES: ${{ vars.TWITCH_CANARY_CANDIDATES }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+        run: node scripts/twitch-canary-resolver.mjs >> "$GITHUB_ENV"
+      - name: Run Twitch canary
         run: pnpm test:e2e:canary
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
