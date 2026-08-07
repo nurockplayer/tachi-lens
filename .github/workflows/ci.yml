@@ -22,10 +22,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check:agent-docs
       - run: pnpm lint
+      - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm check:agent-docs
 
   e2e:
     needs: check
