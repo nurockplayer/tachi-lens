@@ -10,7 +10,7 @@ Twitch 聊天室沉浸式翻譯 Chrome Extension。Manifest V3、BYOK，支援 G
 | `pnpm dev` | Vite watch build，輸出至 ignored `dist/` |
 | `pnpm test` | 執行完整 Vitest suite |
 | `pnpm typecheck` | TypeScript strict type check |
-| `pnpm build` | Typecheck、production build、popup CSP check |
+| `pnpm build` | Production Vite build、popup CSP check |
 
 ## Architecture
 
@@ -69,6 +69,16 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 - Controller 負責實際 edit、test、security/architecture judgment、commit/push/PR 與最終使用者結論。
 - Worker/外部模型不得負責 destructive command、public state change 或最終 approval。
 - GSD yolo mode 只控制 planning convenience 與 phase auto-advance，不得授權跳過 issue scope、delivery gates 或 public-state-change 授權；見 `docs/agents/gsd-workflow.md`。
+
+## Model routing
+
+Implementation follows a three-layer cost-aware routing policy; optimize total completion cost and throughput rather than routing by ticket size alone.
+
+1. **DeepSeek V4 Flash** — bounded, low-uncertainty implementation where location, implementation strategy, repository pattern, and acceptance criteria are already known. Flash gets one normal implementation attempt plus at most one obvious mechanical correction (lint/format/typo/clear type or assertion mismatch). Do not ask merely whether Flash can complete the work; default to the cheapest layer that can reliably finish.
+2. **Intermediate reasoning controller (DeepSeek V4 Pro or Gemini-class)** — diagnosis, repository exploration, design narrowing, log analysis, and turning uncertainty into a concrete implementation contract. Escalate beyond Flash when root cause is unclear, assumptions are wrong, architecture must be re-explored, scope expands, contracts are unclear, a reviewer finds a conceptual error, or the same validation failure repeats.
+3. **Sol** — only for the smallest unresolved architecture, concurrency, security, correctness, or API/data-contract decision after the intermediate layer has narrowed the problem. Do not start with Sol when a cheaper reasoning pass can narrow the problem. Ask Sol only for the smallest unresolved decision and require a concrete decision/implementation contract; return mechanical implementation and routine test fixes to Flash afterward.
+
+On conceptual uncertainty, Flash escalates to the intermediate reasoning layer before Sol. Reuse already acquired repository context across related work instead of repeatedly paying for full-repo exploration.
 
 ## Automated review validation
 
