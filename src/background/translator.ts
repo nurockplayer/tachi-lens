@@ -6,9 +6,31 @@ import { type RateLimiter } from './rate-limiter'
 import { CharacterTokenEstimator, type GeminiQuotaSettings } from './gemini-quota'
 import { type QuotaScheduler } from './quota-scheduler'
 import { advanceFairServiceCount, selectFairPriority } from './priority-fairness'
+import type { TranslationCacheRecord } from './translation-cache-db'
+
+/**
+ * The persistent (L2) cache surface the Translator reads and writes on demand.
+ *
+ * Shape-compatible with `TranslationCacheDb` so the Service Worker can inject
+ * the real IndexedDB adapter while unit tests inject a stub. The interface is
+ * deliberately minimal: the translator never opens, counts, or iterates the
+ * store, and never hydrates it at startup — it only does per-key lookups and
+ * write-throughs keyed by the shared canonical translation identity.
+ */
+export interface PersistentTranslationCache {
+  get(key: string): Promise<TranslationCacheRecord | null>
+  put(key: string, record: TranslationCacheRecord): Promise<void>
+}
 
 export interface TranslatorDependencies {
   cache: TranslationCache
+  /**
+   * Optional persistent (L2) IndexedDB cache. When absent, the translator
+   * behaves exactly as before: L1-only with the provider on miss. All
+   * IndexedDB failures are cache-layer failures that fall back to the
+   * existing L1/provider path and never reject a translation request.
+   */
+  persistentCache?: PersistentTranslationCache
   rateLimiter: RateLimiter
   getSettings: () => Promise<{
     selectedProvider: ProviderId
@@ -56,6 +78,16 @@ const tokenEstimator = new CharacterTokenEstimator()
 const hasUsableTranslation = (result: BatchItemResult): boolean =>
   typeof result.translatedText === 'string' && result.translatedText.trim().length > 0
 
+/** Build the minimal successful record persisted to the L2 IndexedDB cache. */
+const buildL2Record = (
+  key: string,
+  result: BatchItemResult,
+): TranslationCacheRecord => ({
+  key,
+  translatedText: result.translatedText as string,
+  storedAt: Date.now(),
+})
+
 export class Translator {
   private liveQueue: PendingItem[] = []
   private backlogQueue: PendingItem[] = []
@@ -69,6 +101,23 @@ export class Translator {
     private deps: TranslatorDependencies,
     private options: TranslatorOptions,
   ) {}
+
+  /**
+   * Store a successful provider result in the cache layers.
+   *
+   * The L1 in-memory cache is always populated synchronously (unchanged
+   * behavior). The L2 IndexedDB write-through is best-effort and
+   * fire-and-forget: a failed write is a cache-layer failure that must never
+   * turn a successful translation into an error, so it is swallowed here
+   * (#104).
+   */
+  private persistCachedResult(cacheKey: string, result: BatchItemResult): void {
+    this.deps.cache.set(cacheKey, result)
+    if (this.deps.persistentCache) {
+      void this.deps.persistentCache.put(cacheKey, buildL2Record(cacheKey, result))
+        .catch(() => undefined)
+    }
+  }
 
   translate(request: TranslationRequest): Promise<TranslationResult> {
     return new Promise((resolve) => {
@@ -241,6 +290,73 @@ export class Translator {
     }
 
     ownedItems = uncached
+
+    // On-demand L2 lookup (#104): after L1, flush-local dedup, and in-flight
+    // lookups all miss, query the persistent IndexedDB cache once per distinct
+    // canonical identity. This never hydrates the database at startup and is
+    // skipped entirely when no persistent cache is wired in. An L2 hit is
+    // promoted into L1 and settled without any provider work. Any L2 read
+    // failure is a cache-layer failure: it is treated as a miss and falls back
+    // to the provider path below, never rejecting the request.
+    if (uncached.length > 0 && this.deps.persistentCache) {
+      const l2Lookups = new Map<string, Promise<TranslationCacheRecord | null>>()
+      const l2HitKeys = new Set<string>()
+
+      await Promise.all(uncached.map(async (item) => {
+        const cacheKey = this.deps.cache.buildKey(
+          item.request.text,
+          targetLang,
+          settings.selectedProvider,
+          model,
+          item.request.sourceLang,
+        )
+        let lookup = l2Lookups.get(cacheKey)
+        if (!lookup) {
+          // Wrap in Promise.resolve().then so a synchronous throw from the
+          // adapter is also treated as a cache-layer failure, not a flush crash.
+          lookup = Promise.resolve()
+            .then(() => this.deps.persistentCache!.get(cacheKey))
+            .catch(() => null)
+          l2Lookups.set(cacheKey, lookup)
+        }
+        const record = await lookup
+        if (record && typeof record.translatedText === 'string' && record.translatedText.trim().length > 0) {
+          l2HitKeys.add(cacheKey)
+        }
+      }))
+
+      if (l2HitKeys.size > 0) {
+        const stillUncached: PendingItem[] = []
+        for (const item of uncached) {
+          const cacheKey = this.deps.cache.buildKey(
+            item.request.text,
+            targetLang,
+            settings.selectedProvider,
+            model,
+            item.request.sourceLang,
+          )
+          const record = l2HitKeys.has(cacheKey)
+            ? await l2Lookups.get(cacheKey)!
+            : null
+          if (record) {
+            this.deps.cache.set(cacheKey, {
+              id: item.request.messageId,
+              translatedText: record.translatedText,
+            })
+            item.resolve(this.toTranslationResult(item.request.messageId, {
+              id: item.request.messageId,
+              translatedText: record.translatedText,
+            }))
+            this.deps.reportDiagnosticCount?.('l2_cache_hit')
+          } else {
+            stillUncached.push(item)
+          }
+        }
+        uncached.length = 0
+        uncached.push(...stillUncached)
+      }
+    }
+
     if (uncached.length === 0) return
 
     const apiKey = await this.deps.getApiKey(settings.selectedProvider)
@@ -298,7 +414,7 @@ export class Translator {
         const providerId = scheduled.providers.get(item.request.messageId) ?? 'gemini'
         const resultModel = providerId === 'deepseek' ? deepseekModel : model
         if (providerId === 'gemini' && result && hasUsableTranslation(result)) {
-          this.deps.cache.set(this.deps.cache.buildKey(
+          this.persistCachedResult(this.deps.cache.buildKey(
             item.request.text,
             targetLang,
             providerId,
@@ -517,7 +633,7 @@ export class Translator {
       }
       results.set(request.id, result)
       if (hasUsableTranslation(result)) {
-        this.deps.cache.set(this.deps.cache.buildKey(
+        this.persistCachedResult(this.deps.cache.buildKey(
           request.text,
           targetLang,
           DEEPSEEK_FALLBACK_PROVIDER,
@@ -641,7 +757,7 @@ export class Translator {
             item.request.sourceLang,
           )
 
-          this.deps.cache.set(cacheKey, result)
+          this.persistCachedResult(cacheKey, result)
         }
 
         item.resolve(this.toTranslationResult(item.request.messageId, result))

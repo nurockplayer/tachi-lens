@@ -22,6 +22,7 @@ import { createRestartSafeReservationId, GeminiQuotaStore } from './gemini-quota
 import { collectQuotaHealthResults, deriveQuotaHealth } from './quota-health'
 import { QuotaScheduler } from './quota-scheduler'
 import { Translator } from './translator'
+import { TranslationCacheDb } from './translation-cache-db'
 
 const ignoreStorageInitializationError = (): void => {}
 
@@ -34,6 +35,10 @@ initializeTrustedStorageAccess()
 const cache = new TranslationCache()
 const clock = createSystemClock()
 const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
+// Persistent (L2) IndexedDB cache. Opened lazily on first L1-miss lookup and
+// never hydrated at startup; every open/read/write failure falls back to the
+// existing L1/provider path inside the Translator.
+const persistentCache = new TranslationCacheDb(undefined, clock)
 const geminiQuotaStore = new GeminiQuotaStore({
   getSession: async () => {
     const items = await chrome.storage.session.get('geminiQuotaSession')
@@ -50,6 +55,7 @@ const quotaScheduler = new QuotaScheduler(geminiQuotaStore, { clock })
 const translator = new Translator(
   {
     cache,
+    persistentCache,
     rateLimiter,
     getSettings: () => getUserSettings(),
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
@@ -96,6 +102,7 @@ const DIAGNOSTIC_COUNTER_STAGES: readonly DiagnosticStage[] = [
   'in_flight_coalesced',
   'queue_overflow_drop',
   'queue_obsolete_drop',
+  'l2_cache_hit',
 ]
 
 const isCounterStage = (stage: DiagnosticStage): boolean => DIAGNOSTIC_COUNTER_STAGES.includes(stage)

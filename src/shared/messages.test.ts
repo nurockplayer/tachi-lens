@@ -39,7 +39,7 @@ describe('message protocol guards', () => {
 
   describe('privacy-safe counter diagnostic stages (#60)', () => {
     it('accepts a counter event with a bounded non-negative count', () => {
-      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop']) {
+      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop', 'l2_cache_hit']) {
         expect(isDiagnosticEventMessage({
           type: 'diagnostic_event',
           payload: { id: 'd1', stage, timestamp: 1000, count: 3 },

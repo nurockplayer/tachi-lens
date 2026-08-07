@@ -254,7 +254,7 @@ describe('service worker startup', () => {
 
       // Counter events are privacy-safe aggregate signals. Each is just a
       // stage + count; even a burst must not spam storage or the Popup.
-      for (const stage of ['batch_dedup_removed', 'queue_overflow_drop', 'queue_obsolete_drop', 'in_flight_coalesced']) {
+      for (const stage of ['batch_dedup_removed', 'queue_overflow_drop', 'queue_obsolete_drop', 'in_flight_coalesced', 'l2_cache_hit']) {
         sendCounterEvent(handler, stage)
       }
 
@@ -285,7 +285,7 @@ describe('service worker startup', () => {
     it('counters never carry chat text, usernames, channel names, or provider bodies', async () => {
       const { handler } = await setup()
 
-      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop']) {
+      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop', 'l2_cache_hit']) {
         sendCounterEvent(handler, stage)
       }
       const events = await getDiagnosticsSnapshot(handler)

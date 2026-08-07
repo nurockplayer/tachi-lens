@@ -183,6 +183,8 @@ const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
   in_flight_coalesced: '同內容進行中請求已合併',
   queue_overflow_drop: '佇列溢位已丟棄',
   queue_obsolete_drop: '佇列過時項目已丟棄',
+  // #104: persistent L2 IndexedDB cache hits, aggregated as a bounded counter.
+  l2_cache_hit: '持久快取命中',
 }
 
 const isCountStage = (stage: DiagnosticStage): boolean =>
@@ -190,6 +192,7 @@ const isCountStage = (stage: DiagnosticStage): boolean =>
   || stage === 'in_flight_coalesced'
   || stage === 'queue_overflow_drop'
   || stage === 'queue_obsolete_drop'
+  || stage === 'l2_cache_hit'
 
 const mergeDiagnostics = (current: DiagnosticEvent[], incoming: DiagnosticEvent[]): DiagnosticEvent[] => {
   const byId = new Map(current.map((event) => [event.id, event]))
