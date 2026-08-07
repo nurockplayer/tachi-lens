@@ -99,6 +99,10 @@ export type DiagnosticStage =
   | 'in_flight_coalesced'
   | 'queue_overflow_drop'
   | 'queue_obsolete_drop'
+  // Privacy-safe aggregate counter (#104): a successful L2 IndexedDB cache
+  // hit. Carries only a `count` — never chat text, usernames, channel names,
+  // provider request/response bodies, or translation output.
+  | 'l2_cache_hit'
 
 /** A privacy-safe lifecycle event. It never includes chat text, usernames, or API keys. */
 export interface DiagnosticEvent {
@@ -295,6 +299,7 @@ const DIAGNOSTIC_STAGES: readonly DiagnosticStage[] = [
   'in_flight_coalesced',
   'queue_overflow_drop',
   'queue_obsolete_drop',
+  'l2_cache_hit',
 ]
 
 const DIAGNOSTIC_COUNT_STAGES: readonly DiagnosticStage[] = [
@@ -302,6 +307,7 @@ const DIAGNOSTIC_COUNT_STAGES: readonly DiagnosticStage[] = [
   'in_flight_coalesced',
   'queue_overflow_drop',
   'queue_obsolete_drop',
+  'l2_cache_hit',
 ]
 
 const isOptionalCount = (value: unknown): boolean =>
