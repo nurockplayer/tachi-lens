@@ -26,7 +26,7 @@ export const test = base.extend<{
   extensionId: string
   collectedErrors: ExtensionError[]
 }>({
-  context: async ({}, use) => {
+  context: async (_fixtures, use) => {
     const manifestPath = path.join(DIST_DIR, 'manifest.json')
     if (!fs.existsSync(manifestPath)) {
       throw new Error(
@@ -155,6 +155,7 @@ export const test = base.extend<{
           (collected
             ? `  Collected startup errors:\n${collected}`
             : '  No startup errors were collected.'),
+          { cause: waitError },
         )
       }
     }

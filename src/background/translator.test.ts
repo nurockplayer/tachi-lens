@@ -515,7 +515,7 @@ describe('Translator', () => {
     })
 
     it('preserves retryable Gemini quota result when scheduler denies and DeepSeek fallback returns auth', async () => {
-      let now = Date.UTC(2026, 6, 14, 12)
+      const now = Date.UTC(2026, 6, 14, 12)
       const session: Record<string, unknown> = {}
       const local: Record<string, unknown> = {}
       const storage: QuotaStorage = {
@@ -568,7 +568,7 @@ describe('Translator', () => {
     })
 
     it('preserves DeepSeek fallback success when Gemini is quota-denied', async () => {
-      let now = Date.UTC(2026, 6, 14, 12)
+      const now = Date.UTC(2026, 6, 14, 12)
       const session: Record<string, unknown> = {}
       const local: Record<string, unknown> = {}
       const storage: QuotaStorage = {
@@ -2456,7 +2456,7 @@ describe('Translator', () => {
     })
 
     it('still returns retryable Gemini rate_limited on Gemini quota denial with unavailable DeepSeek fallback (Test F)', async () => {
-      let now = Date.UTC(2026, 6, 14, 12)
+      const now = Date.UTC(2026, 6, 14, 12)
       const session: Record<string, unknown> = {}
       const local: Record<string, unknown> = {}
       const storage: QuotaStorage = {

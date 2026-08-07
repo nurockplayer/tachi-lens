@@ -189,7 +189,6 @@ export class TwitchMessageHandler {
       return false
     }
 
-    /* eslint-disable @typescript-eslint/no-unnecessary-condition */
     // DOM structure-based filters
     if (fc.skipSystemMessages && !this.hasUsername(element)) {
       debugLog('shouldTranslate: systemMessage skip (no username)')
@@ -241,8 +240,6 @@ export class TwitchMessageHandler {
         return false
       }
     }
-    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-
     return true
   }
 
