@@ -65,13 +65,14 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 ## Agent workflow
 
 - Issue tracker 操作見 `docs/agents/issue-tracker.md`；治理 pattern 決策見 `docs/agents/governance.md`。
-- Broad scan、diff grouping、log summary 與 test draft 優先交給 DeepSeek worker；Codex 必須重讀引用檔案並驗證重要 claim。
-- Codex 負責實際 edit、test、security/architecture judgment、commit/push/PR 與最終使用者結論。
+- Broad scan、diff grouping、log summary 與 test draft 優先交給 DeepSeek worker；controller 必須重讀引用檔案並驗證重要 claim。
+- Controller 負責實際 edit、test、security/architecture judgment、commit/push/PR 與最終使用者結論。
 - Worker/外部模型不得負責 destructive command、public state change 或最終 approval。
+- GSD yolo mode 只控制 planning convenience 與 phase auto-advance，不得授權跳過 issue scope、delivery gates 或 public-state-change 授權；見 `docs/agents/gsd-workflow.md`。
 
 ## Automated review validation
 
-本節規範 Codex 如何判定 PR 上的 automated review（CodeRabbit、chatgpt-codex-connector 等 bot）是否真的執行過，避免把「沒有實際執行審查」的 bot 通知誤判為有效 review 或 review finding。
+本節規範 Controller 如何判定 PR 上的 automated review（CodeRabbit、chatgpt-codex-connector 等 bot）是否真的執行過，避免把「沒有實際執行審查」的 bot 通知誤判為有效 review 或 review finding。
 
 ### Repository reference
 
