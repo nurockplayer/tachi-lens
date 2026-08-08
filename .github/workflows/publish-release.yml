@@ -161,7 +161,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [gate, e2e]
+    needs: [metadata, gate, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -191,8 +191,7 @@ jobs:
             exit 1
           fi
           if [[ "$PLAN" == "noop" ]]; then
-            echo "Plan is noop (tag and Release already match); nothing to publish."
-            exit 0
+            echo "Plan is noop (tag and Release already match); continuing only to repair a possibly-missing ZIP asset."
           fi
 
       - name: Build extension
@@ -211,13 +210,18 @@ jobs:
         run: 'echo "Planned action: $PLAN"'
 
       - name: Stop before tag/release on dry run
-        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: |
           echo "dry_run=true: validation, gate, build, and packaging all passed. Not creating a tag or Release."
           exit 0
 
+      - name: Configure git identity for the annotated tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Create annotated tag
-        if: needs.metadata.outputs.plan == 'publish' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')
+        if: needs.metadata.outputs.plan == 'publish' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env:
           HEAD_SHA: ${{ needs.metadata.outputs.head_sha }}
           TAG: ${{ needs.metadata.outputs.tag }}
@@ -227,7 +231,7 @@ jobs:
           git push origin "refs/tags/$TAG"
 
       - name: Create GitHub Release
-        if: (needs.metadata.outputs.plan == 'publish' || needs.metadata.outputs.plan == 'resume') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')
+        if: (needs.metadata.outputs.plan == 'publish' || needs.metadata.outputs.plan == 'resume') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
@@ -253,20 +257,21 @@ jobs:
           fi
 
       - name: Attach ZIP if a matching Release is missing the asset
-        if: needs.metadata.outputs.plan == 'resume' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')
+        if: (needs.metadata.outputs.plan == 'resume' || needs.metadata.outputs.plan == 'noop') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
           PLAN: ${{ needs.metadata.outputs.plan }}
         run: |
-          if [[ "$PLAN" == "resume" ]]; then
-            ASSET_EXISTS="$(
-              gh release view "$TAG" --json assets --jq '.assets[]? | select(.name == "${{ env.ARTIFACT_NAME }}") | .name' 2>/dev/null
-            )"
-            if [[ -z "$ASSET_EXISTS" ]]; then
-              echo "Release $TAG exists but is missing ${{ env.ARTIFACT_NAME }}; attaching it."
-              gh release upload "$TAG" "${{ env.ARTIFACT_NAME }}"
-            else
-              echo "Release $TAG already carries ${{ env.ARTIFACT_NAME }}; nothing to do."
-            fi
+          # A matching Release that lacks the ZIP is a partial-publication state:
+          # repair it even on a noop rerun. resume: Release missing -> created
+          # above; noop: Release exists -> attach the missing asset here.
+          ASSET_EXISTS="$(
+            gh release view "$TAG" --json assets --jq '.assets[]? | select(.name == "${{ env.ARTIFACT_NAME }}") | .name' 2>/dev/null
+          )"
+          if [[ -z "$ASSET_EXISTS" ]]; then
+            echo "Release $TAG exists but is missing ${{ env.ARTIFACT_NAME }}; attaching it."
+            gh release upload "$TAG" "${{ env.ARTIFACT_NAME }}"
+          else
+            echo "Release $TAG already carries ${{ env.ARTIFACT_NAME }}; nothing to do."
           fi
