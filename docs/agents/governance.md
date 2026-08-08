@@ -12,10 +12,11 @@ applies_when: Claude Code and Codex both work in tachi-lens
 ## Adopted
 
 - **CLAUDE.md + AGENTS.md dual entrypoints**：兩者鏡像 scope、Git、安全邊界與 AI collaboration responsibility，避免 policy drift。
-- **Scope pollution guard**：GitHub Issue 是 source of truth；額外需求另開 Issue/PR；research/plan 不自動成為 implementation requirement。
+- **Scope pollution guard**：GitHub Issue 是 source of truth；額外需求另開 Issue/PR；research/plan 不自動成為 implementation requirement。**Spec 不是 requirements pipeline**：shared-contract 情境下的 lightweight Spec 只定義跨實作邊界的 what，atomic change 仍由 Issue 定義，`Spec: N/A` 是 bounded 獨立工作的預設。
 - **Traceable problem reporting**：技術障礙、重要權衡與 workaround 記錄在相關 Issue/PR。
 - **Controller verification**：worker 只提供 evidence/draft，controller 重讀本地檔案並負責最終風險判斷。
 - **GSD planning-only workflow**：GSD yolo mode 只控制 planning convenience 與 phase auto-advance，不授權跳過 issue scope、validation、security review 或 `/codex:review`。完整責任邊界見 [`docs/agents/gsd-workflow.md`](gsd-workflow.md)。
+- **Selective Lightweight SDD**：Issue 仍是執行單位，只有共享 contract 情境或高影響正確性語意（migration/compatibility/rollout/privacy/security/concurrency/release-transaction）需在實作前凍結時，才引入 lightweight spec；三層 level（`N/A` / `Inline` / `docs/specs/`）、source-of-truth precedence 與平行 freeze 語意見 `CLAUDE.md`／`AGENTS.md` 的「Spec and implementation routing」。
 
 ## Rejected for this repository
 

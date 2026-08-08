@@ -16,6 +16,21 @@ body:
         - Is likely to make users abandon the extension
     validations:
       required: true
+  - type: dropdown
+    id: specification
+    attributes:
+      label: Specification level
+      description: >-
+        The repository's Selective Lightweight SDD convention (CLAUDE.md / AGENTS.md
+        "Spec and implementation routing"). Level 0 is the default for bounded
+        independent work; higher levels apply when multiple implementations share a
+        contract or high-impact correctness semantics must freeze before implementation.
+      options:
+        - Spec: N/A
+        - Spec: Inline — this issue
+        - Spec: docs/specs/<name>.md
+    validations:
+      required: true
   - type: textarea
     id: description
     attributes:
