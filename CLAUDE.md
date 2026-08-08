@@ -62,6 +62,62 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 - Push、PR、issue comment、label、merge 等 public state change 需要使用者明確授權。
 - 技術問題與重要權衡要留在相關 Issue 或 PR，不只存在聊天記錄。
 
+## Spec and implementation routing
+
+Implementation follows a Selective Lightweight SDD policy：Issue 仍是執行單位，只有當多個獨立實作可能對共享 contract 產生分歧時，才在實作前引入 lightweight spec。
+
+### Issues remain the unit of execution
+
+- 每個 implementation PR 關閉一個 focused GitHub Issue；ordinary isolated bug、maintenance、dependency、CI、test、copy 與 bounded feature 不強制走 separate Spec。
+- 不引入 requirements → design → tasks pipeline。Research-only 工作一律不需先寫 Spec。
+
+### Selective Spec gate
+
+至少下列之一成立時，才要求 lightweight Spec：
+
+- (a) 多個獨立 implementable Issues 共享同一個 behavior/API/schema/protocol/storage/model contract。
+- (b) 平行 agents 可能實作出不相容的 interpretation。
+- (c) migration/compatibility/rollout/privacy/security/concurrency/release-transaction 等高影響正確性語意需在實作前凍結。
+- (d) parent/initiative 需要數個 child Issues 消費的 durable contract。
+
+### Spec levels
+
+- **Level 0 — Issue-only（`Spec: N/A`）**：bounded 獨立工作的預設，無 Spec artifact。
+- **Level 1 — Inline spec（`Spec: Inline — this issue`）**：契約凍結在 owner/parent Issue，不建 repository Spec file。
+- **Level 2 — Repository spec（`Spec: docs/specs/<name>.md`）**：多 Issues 共享或跨 wave 存續的 durable contract，僅存放於 `docs/specs/`。
+
+不得新增 level，也不得引入 heavyweight SDD framework。
+
+### Responsibility split
+
+- Spec 定義跨實作邊界必須維持的 **what**：observable behavior、shared contracts、invariants、failure semantics、compatibility boundaries、non-goals。
+- Issue 定義 atomic repository change：scope、AC、validation、dependency、implementation boundary。
+- Implementing agent 擁有 local implementation details。
+
+### Source-of-truth precedence
+
+`repository rules → referenced/current Spec → Issue scope + AC → existing implementation → agent assumptions`
+
+Issue 可縮小 Spec 所需工作，但不得靜默改變 shared Spec contract。
+
+### Parallel implementation freeze
+
+多個 Issues 對同一 shared Spec dispatch 後，契約凍結。若發現契約錯誤、不完整或與 `main` 衝突，不得靜默 reinterpret/rewrite，回報 **SPEC BLOCKER**（最小衝突決策），deliberately 更新權威 Spec/Issue，並識別受影響的 in-flight Issues。
+
+### Parallelization is the success criterion
+
+Spec 必須改善獨立實作邊界，而非增加 approval latency。多個 Issues 引用同一 Spec 不得序列化獨立實作；偏好一個 frozen shared contract 餵給可並行的 disjoint Issues。
+
+### Issue metadata convention
+
+`## Specification` section 支援：
+
+- `Spec: N/A`
+- `Spec: Inline — this issue`
+- `Spec: docs/specs/<name>.md`
+
+Legacy/closed Issues 不要求有此 section，不 bulk-rewrite backlog。
+
 ## Agent workflow
 
 - Issue tracker 操作見 `docs/agents/issue-tracker.md`；治理 pattern 決策見 `docs/agents/governance.md`。
