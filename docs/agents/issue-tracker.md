@@ -20,7 +20,7 @@ GitHub Issues 是需求與缺陷的 source of truth。所有 GitHub CLI 操作�
 
 ## Specification metadata
 
-GitHub Issue 仍是執行單位；shared-contract 情境才需要 lightweight Spec，三層 level 與 freeze 語意見 `CLAUDE.md`／`AGENTS.md` 的「Spec and implementation routing」與 `docs/agents/governance.md`。
+GitHub Issue 仍是執行單位；shared-contract 情境或高影響正確性語意（migration/compatibility/rollout/privacy/security/concurrency/release-transaction）需在實作前凍結時，才需要 lightweight Spec，三層 level 與 freeze 語意見 `CLAUDE.md`／`AGENTS.md` 的「Spec and implementation routing」與 `docs/agents/governance.md`。
 
 Issue 的 `## Specification` section 使用下列 metadata convention：
 
