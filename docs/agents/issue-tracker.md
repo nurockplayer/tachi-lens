@@ -29,3 +29,7 @@ The Issue's `## Specification` section uses the following metadata convention:
 - `Spec: docs/specs/<name>.md` — Level 2, a durable contract shared across multiple Issues or persisting across waves; the spec lives in `docs/specs/`.
 
 An Issue carries exactly one level; the Spec defines the what across implementation boundaries, while the Issue still defines the atomic change such as scope/AC/validation. Once multiple Issues are dispatched against the same shared Spec, the contract is frozen; if a contract error or a conflict with `main` is found, report **SPEC BLOCKER** and do not silently reinterpret or rewrite it. Legacy/closed Issues do not need a `## Specification` section.
+
+## Review compliance
+
+A final/adversarial review must verify that the exact-head implementation completely satisfies this Issue's scope, acceptance criteria, and any referenced/current Spec, not only code quality or regressions. For each relevant Acceptance Criterion, classify it as `SATISFIED`, `PARTIALLY SATISFIED`, `MISSING`, or `N/A`; a `PARTIALLY SATISFIED` or `MISSING` required criterion is a review finding even when the code itself appears correct. Findings may include missing requirements, incomplete acceptance criteria, Spec violations, scope/non-goal violations, or insufficient validation evidence. Any semantic change after review invalidates the prior compliance verdict and requires re-review. See `docs/agents/governance.md` → "Final/adversarial review contract" for the full contract, including the review precedence chain and preserved policy.
