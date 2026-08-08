@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "tachi-lens",
-  "version": "0.1.0.2",
-  "version_name": "0.2.0-beta.2",
+  "version": "0.1.0.3",
+  "version_name": "0.2.0-beta.3",
   "default_locale": "en",
   "description": "Twitch 聊天室沉浸式翻譯 — 支援 Gemini、DeepSeek、OpenAI、Claude",
   "permissions": ["storage"],
