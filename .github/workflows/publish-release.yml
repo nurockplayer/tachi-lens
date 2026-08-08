@@ -1,0 +1,272 @@
+name: Publish Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'manifest.json'
+      - 'docs/releases/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
+        description: Validate + plan only, do not tag/release
+
+# Only the publish job overrides this with the write permission it needs.
+permissions:
+  contents: read
+
+env:
+  PNPM_VERSION: 10.21.0
+  NODE_VERSION: 22
+  ARTIFACT_NAME: tachi-lens.zip
+
+jobs:
+  metadata:
+    name: Validate metadata and plan
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      head_sha: ${{ steps.metadata.outputs.head_sha }}
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Guard — non-release push (skip when nothing release-relevant changed)
+        if: github.event_name == 'push'
+        run: |
+          set -e
+          git rev-parse --verify HEAD^ >/dev/null 2>&1 || { echo "No parent commit (initial push); proceeding."; exit 0; }
+          if git diff --quiet HEAD^ HEAD -- package.json manifest.json docs/releases/; then
+            echo "No release-relevant changes in this push; nothing to publish."
+            exit 0
+          fi
+          echo "Release-relevant changes detected; proceeding."
+
+      - name: Metadata validation (fast-fail)
+        id: metadata
+        env:
+          INPUT_HEAD_SHA: ${{ github.sha }}
+        run: node scripts/release-metadata.mjs
+
+      - name: Resolve exact tag commit (deref annotated tag)
+        id: resolve-tag
+        env:
+          TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          TAG_SHA=""
+          if git rev-parse "refs/tags/${TAG}^{commit}" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          fi
+          echo "tag_sha=${TAG_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether a matching Release already exists
+        id: release-check
+        if: steps.metadata.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute publish plan
+        id: plan
+        env:
+          TAG: ${{ steps.metadata.outputs.tag }}
+          INPUT_HEAD_SHA: ${{ github.sha }}
+          INPUT_TAG_SHA: ${{ steps.resolve-tag.outputs.tag_sha }}
+          INPUT_RELEASE_EXISTS: ${{ steps.release-check.outputs.exists }}
+        run: node scripts/release-metadata.mjs --plan
+
+  gate:
+    name: Release gate
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: needs.metadata.outputs.plan != 'noop'
+        run: pnpm lint
+      - name: Typecheck
+        if: needs.metadata.outputs.plan != 'noop'
+        run: pnpm typecheck
+      - name: Test
+        if: needs.metadata.outputs.plan != 'noop'
+        run: pnpm test
+      - name: Build
+        if: needs.metadata.outputs.plan != 'noop'
+        run: pnpm build
+
+  e2e:
+    name: Packaged-extension E2E
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run E2E tests
+        run: pnpm test:e2e
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: [gate, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # persist-credentials stays at the default true so the scoped
+          # GITHUB_TOKEN (github.token) is available for the annotated-tag push.
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Halt on conflicting plan
+        env:
+          PLAN: ${{ needs.metadata.outputs.plan }}
+        run: |
+          if [[ "$PLAN" == "fail" ]]; then
+            echo "Target tag already points to a different commit. Refusing to move/delete/recreate it; aborting without mutation."
+            exit 1
+          fi
+          if [[ "$PLAN" == "noop" ]]; then
+            echo "Plan is noop (tag and Release already match); nothing to publish."
+            exit 0
+          fi
+
+      - name: Build extension
+        run: pnpm build
+
+      - name: Package extension
+        run: |
+          cd dist && zip -r "../${{ env.ARTIFACT_NAME }}" .
+
+      - name: Verify ZIP contents
+        run: unzip -l "${{ env.ARTIFACT_NAME }}" | grep -q manifest.json
+
+      - name: Print planned action
+        env:
+          PLAN: ${{ needs.metadata.outputs.plan }}
+        run: 'echo "Planned action: $PLAN"'
+
+      - name: Stop before tag/release on dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        run: |
+          echo "dry_run=true: validation, gate, build, and packaging all passed. Not creating a tag or Release."
+          exit 0
+
+      - name: Create annotated tag
+        if: needs.metadata.outputs.plan == 'publish' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')
+        env:
+          HEAD_SHA: ${{ needs.metadata.outputs.head_sha }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -a "$TAG" -m "Release $TAG" "$HEAD_SHA"
+          git push origin "refs/tags/$TAG"
+
+      - name: Create GitHub Release
+        if: (needs.metadata.outputs.plan == 'publish' || needs.metadata.outputs.plan == 'resume') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+          PLAN: ${{ needs.metadata.outputs.plan }}
+        run: |
+          NOTES_FILE="docs/releases/${TAG}.md"
+
+          # resume: a matching tag already exists but the Release is missing —
+          # only create the Release, never the tag. publish: create the Release
+          # with the just-created tag.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping creation."
+          else
+            ARGS=(--notes-file "$NOTES_FILE")
+            if [[ "$PRERELEASE" == "true" ]]; then
+              ARGS+=(--prerelease)
+            fi
+            gh release create "$TAG" \
+              --title "tachi-lens $TAG" \
+              "${ARGS[@]}" \
+              "${{ env.ARTIFACT_NAME }}"
+          fi
+
+      - name: Attach ZIP if a matching Release is missing the asset
+        if: needs.metadata.outputs.plan == 'resume' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          PLAN: ${{ needs.metadata.outputs.plan }}
+        run: |
+          if [[ "$PLAN" == "resume" ]]; then
+            ASSET_EXISTS="$(
+              gh release view "$TAG" --json assets --jq '.assets[]? | select(.name == "${{ env.ARTIFACT_NAME }}") | .name' 2>/dev/null
+            )"
+            if [[ -z "$ASSET_EXISTS" ]]; then
+              echo "Release $TAG exists but is missing ${{ env.ARTIFACT_NAME }}; attaching it."
+              gh release upload "$TAG" "${{ env.ARTIFACT_NAME }}"
+            else
+              echo "Release $TAG already carries ${{ env.ARTIFACT_NAME }}; nothing to do."
+            fi
+          fi
