@@ -7,21 +7,39 @@ last_verified: 2026-07-13
 applies_when: Claude Code and Codex both work in tachi-lens
 ```
 
-本文件記錄跨專案 pattern 在 tachi-lens 的採用狀態。Repo 明確規則永遠優先於 reference 或 corpus precedent。
+This document records the adoption status in tachi-lens of patterns that originate from other projects. Explicit repository rules always take precedence over reference or corpus precedent.
 
 ## Adopted
 
-- **CLAUDE.md + AGENTS.md dual entrypoints**：兩者鏡像 scope、Git、安全邊界與 AI collaboration responsibility，避免 policy drift。
-- **Scope pollution guard**：GitHub Issue 是 source of truth；額外需求另開 Issue/PR；research/plan 不自動成為 implementation requirement。**Spec 不是 requirements pipeline**：shared-contract 情境下的 lightweight Spec 只定義跨實作邊界的 what，atomic change 仍由 Issue 定義，`Spec: N/A` 是 bounded 獨立工作的預設。
-- **Traceable problem reporting**：技術障礙、重要權衡與 workaround 記錄在相關 Issue/PR。
-- **Controller verification**：worker 只提供 evidence/draft，controller 重讀本地檔案並負責最終風險判斷。
-- **GSD planning-only workflow**：GSD yolo mode 只控制 planning convenience 與 phase auto-advance，不授權跳過 issue scope、validation、security review 或 `/codex:review`。完整責任邊界見 [`docs/agents/gsd-workflow.md`](gsd-workflow.md)。
-- **Selective Lightweight SDD**：Issue 仍是執行單位，只有共享 contract 情境或高影響正確性語意（migration/compatibility/rollout/privacy/security/concurrency/release-transaction）需在實作前凍結時，才引入 lightweight spec；三層 level（`N/A` / `Inline` / `docs/specs/`）、source-of-truth precedence 與平行 freeze 語意見 `CLAUDE.md`／`AGENTS.md` 的「Spec and implementation routing」。
+- **CLAUDE.md + AGENTS.md dual entrypoints**: the two mirror scope, Git, security boundaries, and AI collaboration responsibilities to avoid policy drift.
+- **Scope pollution guard**: a GitHub Issue is the source of truth; additional requirements open another Issue/PR; research/plans do not automatically become implementation requirements. **Spec is not a requirements pipeline**: in shared-contract situations, the lightweight Spec only defines the what across implementation boundaries, while the atomic change is still defined by the Issue, and `Spec: N/A` is the default for bounded independent work.
+- **Traceable problem reporting**: technical obstacles, important trade-offs, and workarounds are recorded in the relevant Issue/PR.
+- **Controller verification**: workers only provide evidence/drafts; the controller re-reads local files and owns the final risk judgment.
+- **GSD planning-only workflow**: GSD yolo mode only controls planning convenience and phase auto-advance; it does not authorize skipping issue scope, validation, security review, or `/codex:review`. See [`docs/agents/gsd-workflow.md`](gsd-workflow.md) for the full responsibility boundary.
+- **Selective Lightweight SDD**: the Issue remains the unit of execution; a lightweight spec is introduced only when a shared-contract situation or high-impact correctness semantics (migration/compatibility/rollout/privacy/security/concurrency/release-transaction) need to be frozen before implementation; see "Spec and implementation routing" in `CLAUDE.md`/`AGENTS.md` for the three levels (`N/A` / `Inline` / `docs/specs/`), source-of-truth precedence, and the parallel-freeze semantics.
 
 ## Rejected for this repository
 
-- **tachigo `develop → main` Git flow**：tachi-lens 目前採單一 `main` PR base，沒有 release promotion 需求。
-- **Fixed issue/title prefixes**：目前 repo 沒有對應 automation contract，先不引入無法驗證的命名政策。
-- **Scope-police auto-close、review labels、Dependabot auto-approve**：高影響 automation 未獲明確授權，保持停用。
-- **Permanent implementation plans**：完成後由 Issue、tests 與 Git history 承接；過期 plan 容易被誤認為現況。
-- **Per-session `memory/last-report.md` updates in this cleanup**：使用者指定恢復現有 tracked report，避免把本次 session handoff 混入產品 PR。
+- **tachigo `develop → main` Git flow**: tachi-lens currently uses a single `main` PR base with no release promotion need.
+- **Fixed issue/title prefixes**: the repository has no matching automation contract, so an unverifiable naming policy is not introduced for now.
+- **Scope-police auto-close, review labels, Dependabot auto-approve**: high-impact automation lacks explicit authorization and stays disabled.
+- **Permanent implementation plans**: completed work is carried by the Issue, tests, and Git history; stale plans are easily mistaken for current state.
+- **Per-session `memory/last-report.md` updates in this cleanup**: the user specified restoring the existing tracked report to avoid mixing this session handoff into the product PR.
+
+## Language inventory (post-migration, issue #120)
+
+English is the canonical language for technical artifacts (see "Language policy" in `CLAUDE.md`/`AGENTS.md`). The following tracked content remains in Traditional Chinese and is either preserved intentionally or scheduled as touch-to-migrate:
+
+**Preserved (language is product behavior / user-facing):**
+- `public/_locales/en/messages.json`, `public/_locales/zh_TW/messages.json` — Chrome i18n localization resources.
+- `src/shared/i18n.ts` — `t()` fallback locale map.
+- `src/popup/App.tsx` `DIAGNOSTIC_LABELS` and content-script diagnostic messages (`src/content/twitch-entry.ts`, `src/content/twitch-handler.ts`) — rendered to the popup UI for users.
+- `manifest.json` / `package.json` `description` — store/registry user-facing copy.
+- Language-detection fixtures and all translation test data (Chinese/Japanese/Korean strings in tests) — language is product behavior.
+
+**Touch-to-migrate (legacy or planning artifacts; translated only when actively modified):**
+- `.planning/PROJECT.md`, `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, `.planning/STATE.md` — GSD planning artifacts, not requirements sources.
+- `docs/releases/v0.2.0-beta.1.md`, `docs/releases/v0.2.0-beta.2.md` — published historical release notes (do not rewrite history).
+- `src/content/twitch-selectors-notes.md` — historical DOM-selector verification notes; migrate when next maintained.
+
+Historical commits, closed issues, and closed PRs are excluded per the issue scope.

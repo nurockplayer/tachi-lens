@@ -3,6 +3,16 @@ description: Report a bug or propose a fix with maintenance justification
 labels:
   - bug
 body:
+  - type: input
+    id: japanese-summary
+    attributes:
+      label: 日本語サマリー (Japanese summary, optional)
+      description: >-
+        A concise Japanese summary for team-facing visibility. Leave empty if
+        not needed. Detailed technical specifications and acceptance criteria
+        below must be written in English per the repository language policy.
+    validations:
+      required: false
   - type: dropdown
     id: maintenance-justification
     attributes:
