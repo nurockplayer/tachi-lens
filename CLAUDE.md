@@ -64,7 +64,7 @@ src/shared/      SW/Content/Popup 共用 message protocol 與 i18n
 
 ## Spec and implementation routing
 
-Implementation follows a Selective Lightweight SDD policy：Issue 仍是執行單位，只有當多個獨立實作可能對共享 contract 產生分歧時，才在實作前引入 lightweight spec。
+Implementation follows a Selective Lightweight SDD policy：Issue 仍是執行單位，只有當多個獨立實作可能對共享 contract 產生分歧，或 migration/compatibility/rollout/privacy/security/concurrency/release-transaction 等高影響正確性語意需在實作前凍結時，才引入 lightweight spec。
 
 ### Issues remain the unit of execution
 
