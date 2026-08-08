@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-GitHub Issues 是需求與缺陷的 source of truth。所有 GitHub CLI 操作使用 `rtk gh`。
+GitHub Issues are the source of truth for requirements and defects. All GitHub CLI operations use `rtk gh`.
 
 ## Commands
 
@@ -13,19 +13,19 @@ GitHub Issues 是需求與缺陷的 source of truth。所有 GitHub CLI 操作�
 
 ## Rules
 
-- 有對應 Issue 的技術問題、scope change 或設計權衡，必須在該 Issue 或實作 PR 留下可追溯紀錄。
-- PR 不是外部需求收件匣；未經確認的外部 PR 不進 agent triage queue。
-- 不假設 custom triage labels 存在；使用 label 前先以 `rtk gh label list` 查證。
-- Issue 未要求的額外功能另開 Issue，不塞進目前 PR。
+- Technical issues, scope changes, or design trade-offs that have a corresponding Issue must leave a traceable record in that Issue or the implementing PR.
+- PRs are not an inbox for external requirements; unconfirmed external PRs do not enter the agent triage queue.
+- Do not assume custom triage labels exist; verify with `rtk gh label list` before using a label.
+- Additional functionality not requested by the Issue opens another Issue; do not fold it into the current PR.
 
 ## Specification metadata
 
-GitHub Issue 仍是執行單位；shared-contract 情境或高影響正確性語意（migration/compatibility/rollout/privacy/security/concurrency/release-transaction）需在實作前凍結時，才需要 lightweight Spec，三層 level 與 freeze 語意見 `CLAUDE.md`／`AGENTS.md` 的「Spec and implementation routing」與 `docs/agents/governance.md`。
+A GitHub Issue remains the unit of execution; a lightweight Spec is needed only when a shared-contract situation or high-impact correctness semantics (migration/compatibility/rollout/privacy/security/concurrency/release-transaction) need to be frozen before implementation. See "Spec and implementation routing" in `CLAUDE.md`/`AGENTS.md` and `docs/agents/governance.md` for the three levels and the freeze semantics.
 
-Issue 的 `## Specification` section 使用下列 metadata convention：
+The Issue's `## Specification` section uses the following metadata convention:
 
-- `Spec: N/A` — Level 0，bounded 獨立工作的預設，不要求 Spec artifact。
-- `Spec: Inline — this issue` — Level 1，契約凍結在 owner/parent Issue，不建 repository Spec file。
-- `Spec: docs/specs/<name>.md` — Level 2，多 Issues 共享或跨 wave 存續的 durable contract，spec 存於 `docs/specs/`。
+- `Spec: N/A` — Level 0, the default for bounded independent work; no Spec artifact required.
+- `Spec: Inline — this issue` — Level 1, the contract is frozen in the owner/parent Issue without a repository Spec file.
+- `Spec: docs/specs/<name>.md` — Level 2, a durable contract shared across multiple Issues or persisting across waves; the spec lives in `docs/specs/`.
 
-一個 Issue 只標記一個 level；Spec 定義跨實作邊界的 what，Issue 仍定義 scope/AC/validation 等 atomic change。多個 Issues 對同一 shared Spec dispatch 後契約凍結，發現契約錯誤或與 `main` 衝突時回報 **SPEC BLOCKER**，不靜默 reinterpret/rewrite。Legacy/closed Issues 不需補 `## Specification` section。
+An Issue carries exactly one level; the Spec defines the what across implementation boundaries, while the Issue still defines the atomic change such as scope/AC/validation. Once multiple Issues are dispatched against the same shared Spec, the contract is frozen; if a contract error or a conflict with `main` is found, report **SPEC BLOCKER** and do not silently reinterpret or rewrite it. Legacy/closed Issues do not need a `## Specification` section.

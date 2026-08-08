@@ -21,33 +21,34 @@ const ruleDocs: Record<string, string> = {
 };
 
 function expectCoreRules(doc: string) {
-  // quota exhausted、skipped、disabled、cancelled、timed out → NOT A REVIEW
-  expect(doc).toMatch(/Codex quota exhausted／額度用盡/s);
+  // quota exhausted, skipped, disabled, cancelled, timed out → NOT A REVIEW
+  expect(doc).toMatch(/Codex quota exhausted/s);
   expect(doc).toMatch(/CodeRabbit review skipped/s);
   expect(doc).toMatch(/Auto reviews disabled/s);
-  expect(doc).toMatch(/Cancelled、timed out/s);
+  expect(doc).toMatch(/Cancelled, timed out/s);
 
-  // skipped SUCCESS 不等於 APPROVE
-  expect(doc).toMatch(/SUCCESS.*不得自行等同.*APPROVE/s);
+  // a skipped SUCCESS is not equal to APPROVE
+  expect(doc).toMatch(/SUCCESS.*must not be equated with.*APPROVE/s);
 
-  // issue-level bot 通知且無 finding → 不觸發 address-comments
-  expect(doc).toMatch(/只有 issue-level bot 通知/s);
-  expect(doc).toMatch(/沒有 finding、inline comment、review thread 或正式 verdict/s);
+  // an issue-level bot notice without a finding → no address-comments
+  expect(doc).toMatch(/Only an issue-level bot notice/s);
+  expect(doc).toMatch(/no finding, inline comment, review thread, or formal verdict/s);
 
-  // 無 unresolved thread → 不執行 resolve-thread
+  // no unresolved thread → no resolve-thread
   expect(doc).toMatch(/unresolved review threads/s);
 
-  // merged PR 後收到這類通知為 no-op
-  expect(doc).toMatch(/已 merged 後才收到此類通知時，判定為 no-op/s);
+  // notices received after the PR is merged are a no-op
+  expect(doc).toMatch(/after the PR has already been merged, treat it as a no-op/s);
 
-  // CI、有效 review、threads、exact head SHA 分開判定
-  expect(doc).toMatch(/Merge gate 必須分開判定/s);
+  // CI, valid review, threads, and exact head SHA are assessed separately
+  expect(doc).toMatch(/The merge gate must be assessed separately/s);
   expect(doc).toMatch(/exact head SHA/s);
 
-  // automated review 未執行時，有效 independent reviewer APPROVE 仍可滿足 review gate
-  expect(doc).toMatch(/已有符合政策的獨立 reviewer 正式.*APPROVE.*不得因此阻擋 merge/s);
+  // a valid independent reviewer APPROVE still satisfies the review gate when
+  // the automated review did not run
+  expect(doc).toMatch(/policy-compliant independent reviewer.*APPROVE.*must not block the merge/s);
 
-  // 狀態格式
+  // status formats
   expect(doc).toMatch(/CodeRabbit: SKIPPED \/ NOT A REVIEW/s);
   expect(doc).toMatch(/Codex review: NOT RUN — QUOTA EXHAUSTED/s);
   expect(doc).toMatch(/Independent reviewer: APPROVE/s);

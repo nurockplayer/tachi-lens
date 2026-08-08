@@ -519,7 +519,7 @@ export function App() {
         {t('appDescription')}
       </p>
 
-      {/* 頻道資訊 */}
+      {/* Channel info */}
       {channelName && (
         <div
           style={{
@@ -535,7 +535,7 @@ export function App() {
         </div>
       )}
 
-      {/* 每頻道設定 */}
+      {/* Per-channel settings */}
       {channelName && (
         <label
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
@@ -550,7 +550,7 @@ export function App() {
         </label>
       )}
 
-      {/* 翻譯啟用 */}
+      {/* Translation enabled */}
       <label
         style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
       >
@@ -563,7 +563,7 @@ export function App() {
         <span style={{ fontSize: '0.9rem' }}>{t('enableTranslation')}</span>
       </label>
 
-      {/* 翻譯提供者 */}
+      {/* Translation provider */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
@@ -695,7 +695,7 @@ export function App() {
         </div>
       </div>
 
-      {/* 目標語言 */}
+      {/* Target language */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
@@ -719,7 +719,7 @@ export function App() {
         </select>
       </div>
 
-      {/* 中文訊息處理 */}
+      {/* Chinese message handling */}
       {isChineseTarget(settings.targetLanguage) && (
         <fieldset
           style={{
@@ -756,7 +756,7 @@ export function App() {
         </fieldset>
       )}
 
-      {/* 顯示模式 */}
+      {/* Display modes */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
@@ -778,7 +778,7 @@ export function App() {
         </select>
       </div>
 
-      {/* 最短翻譯長度 */}
+      {/* Minimum translation length */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
@@ -799,7 +799,7 @@ export function App() {
         />
       </div>
 
-      {/* 訊息過濾 */}
+      {/* Message filtering */}
       <div style={{ marginBottom: '0.75rem' }}>
         <div
           style={{
@@ -832,7 +832,7 @@ export function App() {
         ))}
       </div>
 
-      {/* Bot 黑名單 */}
+      {/* Bot blacklist */}
       <div style={{ marginBottom: '0.75rem' }}>
         <label
           style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
@@ -850,7 +850,7 @@ export function App() {
         />
       </div>
 
-      {/* 儲存 */}
+      {/* Save */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <button
           onClick={handleSave}
@@ -867,7 +867,7 @@ export function App() {
         )}
       </div>
 
-      {/* 錯誤通知區 */}
+      {/* Error notification area */}
       {errorNotifications.length > 0 && (
         <div style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
           <h3 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem', color: '#666' }}>
@@ -907,7 +907,7 @@ export function App() {
         </div>
       )}
 
-      {/* Gemini 配額健康狀態 */}
+      {/* Gemini quota health */}
       {quotaHealth.length > 0 && (
         <section style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.75rem' }}>
           <h2 style={{ fontSize: '0.9rem', margin: '0 0 0.3rem', color: '#333' }}>
@@ -1004,7 +1004,7 @@ export function App() {
         )}
       </section>
 
-      {/* 快捷鍵資訊 */}
+      {/* Shortcut info */}
       <div
         style={{
           marginTop: '1rem',

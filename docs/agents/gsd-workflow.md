@@ -7,67 +7,67 @@ last_verified: 2026-08-07
 applies_when: GSD drives implementation work inside tachi-lens
 ```
 
-本文件定義 GSD yolo mode 與本 repo 既有 implementation、validation、review、public-state-change workflow 之間的責任邊界。`docs/agents/governance.md` 記錄此 policy 的採用狀態。
+This document defines the responsibility boundary between GSD yolo mode and the repository's existing implementation, validation, review, and public-state-change workflows. `docs/agents/governance.md` records the adoption status of this policy.
 
-## GSD yolo mode 的範圍
+## Scope of GSD yolo mode
 
-GSD yolo mode 只控制 **planning convenience** 與 **phase auto-advance**：
+GSD yolo mode only controls **planning convenience** and **phase auto-advance**:
 
-- 允許 GSD 快速建立/更新 planning artifact、依照 workflow phase 自動前進。
-- 不得擴大或縮小 issue scope，也不得授權任何 delivery gate 被跳過。
+- It allows GSD to quickly create/update planning artifacts and advance automatically per the workflow phase.
+- It must neither expand nor shrink the issue scope, nor authorize any delivery gate to be skipped.
 
-`.planning/config.json` 目前的 `plan_check: false`、`verifier: false`、`auto_advance: true` 屬於 planning 層設定。這些旗標**不授權**跳過下列任何一項：
+The current `.planning/config.json` settings `plan_check: false`, `verifier: false`, `auto_advance: true` belong to the planning layer. These flags do **not** authorize skipping any of the following:
 
-- Issue scope 與 repository rules（`CLAUDE.md`／`AGENTS.md`）。
-- Tests、typecheck、build。
-- Security review。
-- `/codex:review`。
+- Issue scope and repository rules (`CLAUDE.md`/`AGENTS.md`).
+- Tests, typecheck, build.
+- Security review.
+- `/codex:review`.
 
 ## Source of truth
 
-- GitHub Issue 是 implementation source of truth。
-- GSD 產生的 planning artifact、research notes 與 plan 只提供背景與脈絡；除非 Issue 明確引用，否則不是 implementation requirement。
-- 對 scope 的變更或擴大一律另開 Issue/PR，不直接寫入目前的工作。
+- A GitHub Issue is the implementation source of truth.
+- Planning artifacts, research notes, and plans produced by GSD only provide background and context; unless an Issue explicitly references them, they are not implementation requirements.
+- Any scope change or expansion always opens another Issue/PR instead of being written directly into the current work.
 
-## Worker 與 controller 責任分工
+## Worker and controller responsibility split
 
-Worker（subagent、背景 agent）在 bounded child issue 內可以：
+A Worker (subagent, background agent) may, within a bounded child issue:
 
-- inspect（調查、讀取檔案）
-- draft（擬稿、產出草稿）
-- implement（在明確定義的子範圍內實作）
+- inspect (investigate, read files)
+- draft (outline, produce drafts)
+- implement (implement within a clearly defined sub-scope)
 
-但 controller 必須：
+But the controller must:
 
-- 重讀並驗證 referenced files（不直接信任 worker 的摘要）。
-- 親自執行命令（build、tests、lint、typecheck）。
-- 審查完整 diff。
-- 負責所有 public state changes（push、PR、issue comment、label、merge）。
-- 做最終 security／architecture judgment。
+- Re-read and verify referenced files (do not trust the worker's summary directly).
+- Execute commands personally (build, tests, lint, typecheck).
+- Review the full diff.
+- Own all public state changes (push, PR, issue comment, label, merge).
+- Make the final security/architecture judgment.
 
-Worker 的輸出只是 evidence／draft，不具備最終風險判斷或對外發布權限。
+A Worker's output is only evidence/draft and carries no final risk judgment or external publication authority.
 
-## Public state changes 需明確授權
+## Public state changes require explicit authorization
 
-下列操作仍然要求使用者明確授權，GSD 不得自動執行：
+The following operations still require explicit user authorization; GSD must not perform them automatically:
 
 - `git push`
-- PR 建立與更新
-- Issue comment
-- Label 變更
+- PR creation and updates
+- Issue comments
+- Label changes
 - Merge
 
-未獲授權前，controller 不得執行上述任何操作。
+Until authorized, the controller must not perform any of the above.
 
 ## Delivery gates
 
-- 任何一次 failed validation（tests、typecheck、build、`git diff --check`）都會 **block push 與 PR publication**。
-- 任何 actionable review finding 都會 **block push 與 PR publication**；必須修正後再重新 review，直到沒有 actionable findings。
-- PR body 必須包含最終 review 結果、validation 結果，以及 GSD configuration 與 extension runtime 未被變更的確認。
+- Any failed validation (tests, typecheck, build, `git diff --check`) will **block push and PR publication**.
+- Any actionable review finding will **block push and PR publication**; it must be fixed and re-reviewed until there are no actionable findings.
+- The PR body must include the final review result, validation results, and confirmation that the GSD configuration and extension runtime were not changed.
 
-## Auto-advance 邊界
+## Auto-advance boundary
 
-GSD 不得 auto-advance 到 active issue 以外的 work：
+GSD must not auto-advance into work beyond the active issue:
 
-- phase auto-advance 只能在同一 active issue 的範圍內進行。
-- 進入新 issue、新需求或新 scope 前必須停止，等待使用者或 controller 明確指示。
+- Phase auto-advance only proceeds within the scope of the same active issue.
+- Before entering a new issue, requirement, or scope, it must stop and wait for explicit direction from the user or controller.
