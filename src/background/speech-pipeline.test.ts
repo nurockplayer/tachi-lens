@@ -88,6 +88,7 @@ const createMockProvider = (): { provider: SpeechProvider; handle: ProviderHandl
 const DEFAULT_SETTINGS: Partial<UserSettings> = {
   speechConfig: {
     speechEnabled: true,
+    speechConsentGranted: true,
     speechProvider: 'gemini',
     speechModel: 'gemini-2.5-flash',
     speechTargetLanguage: 'zh-TW',

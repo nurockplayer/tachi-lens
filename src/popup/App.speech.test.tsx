@@ -74,7 +74,11 @@ describe('Popup speech settings', () => {
     render(<App />)
 
     await screen.findByText('語音字幕')
+    // First enable shows the consent panel; the confirm click grants consent
+    // and persists speechEnabled (the checkbox alone never enables capture).
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: '啟用並開始' }))
     await user.selectOptions(screen.getByRole('combobox', { name: '語音模型' }), 'gemini-2.5-pro')
     await user.selectOptions(screen.getByRole('combobox', { name: '語音目標語言' }), 'en')
     fireEvent.change(screen.getByRole('spinbutton', { name: '字幕最大行數' }), { target: { value: '3' } })

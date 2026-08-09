@@ -364,7 +364,12 @@ const speechPipeline = new SpeechPipeline({
   budget: speechBudget,
   rateLimiter: speechRateLimiter,
   onState: (payload) => {
-    broadcastToContentScripts({ type: 'speech_state', payload })
+    // speech_state is broadcast to every extension context — the content
+    // overlay AND the Popup's live-status readout (#162). chrome.runtime
+    // .sendMessage reaches both the content scripts' runtime.onMessage and the
+    // open popup in one call, so the popup receives capturing/paused/error
+    // without any new message contract.
+    void chrome.runtime.sendMessage({ type: 'speech_state', payload }).catch(() => undefined)
   },
   onCaption: (caption) => {
     broadcastToContentScripts({ type: 'speech_caption', payload: caption })

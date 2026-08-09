@@ -15,7 +15,7 @@ import type { GeminiQuotaSettings } from '@/background/gemini-quota'
 import { t } from '@/shared/i18n'
 import { normalizeLocale } from '@/shared/language-detection'
 import type { ChineseVariantMode } from '@/shared/language-detection'
-import { isDiagnosticEventMessage, isQuotaHealthResetResultMessage, isQuotaHealthResultMessage } from '@/shared/messages'
+import { isDiagnosticEventMessage, isQuotaHealthResetResultMessage, isQuotaHealthResultMessage, isSpeechStateMessage } from '@/shared/messages'
 import type {
   DiagnosticEvent,
   DiagnosticStage,
@@ -25,7 +25,9 @@ import type {
   QuotaHealthStatus,
   SettingsUpdatePayload,
   SpeechSettingsUpdatePayload,
+  SpeechStatePayload,
 } from '@/shared/messages'
+import type { SpeechPipelineState } from '@/shared/speech-state'
 import type { FilterConfig } from '@/content/message-filter'
 
 const SPEECH_LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -207,6 +209,16 @@ const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
   speech_error: '語音錯誤',
 }
 
+/** i18n labels for each speech_state machine value (Spec §6, live-status readout). */
+const SPEECH_STATE_LABELS: Record<SpeechPipelineState, Parameters<typeof t>[0]> = {
+  idle: 'speechStateIdle',
+  consent_pending: 'speechStateIdle',
+  capturing: 'speechStateCapturing',
+  transcribing: 'speechStateTranscribing',
+  paused: 'speechStatePaused',
+  error: 'speechErrorUnknown',
+}
+
 const isCountStage = (stage: DiagnosticStage): boolean =>
   stage === 'batch_dedup_removed'
   || stage === 'in_flight_coalesced'
@@ -237,6 +249,12 @@ export function App() {
   const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
   const [diagnostics, setDiagnostics] = useState<DiagnosticEvent[]>([])
   const [quotaHealth, setQuotaHealth] = useState<QuotaHealthResult[]>([])
+  // Consent modal + live speech_state readout (#162). `speechConsentOpen` is a
+  // transient UI flag (never persisted); the persisted grant is
+  // `speechConfig.speechConsentGranted`. `speechState` mirrors the SW's
+  // `speech_state` broadcast so the popup reflects capturing/paused/error live.
+  const [speechConsentOpen, setSpeechConsentOpen] = useState(false)
+  const [speechState, setSpeechState] = useState<SpeechStatePayload | null>(null)
   const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
 
   const providers = listProviderMetadata()
@@ -352,6 +370,9 @@ export function App() {
       if (isDiagnosticEventMessage(message)) {
         setDiagnostics((prev) => mergeDiagnostics(prev, [message.payload]))
       }
+      if (isSpeechStateMessage(message)) {
+        setSpeechState(message.payload)
+      }
       const diagnosticSnapshot = message as { type?: string; payload?: { events?: DiagnosticEvent[] } } | undefined
       const diagnosticEvents = diagnosticSnapshot?.payload?.events
       if (diagnosticSnapshot?.type === 'diagnostics_snapshot' && Array.isArray(diagnosticEvents)) {
@@ -415,6 +436,72 @@ export function App() {
     },
     [],
   )
+
+  /**
+   * Toggle change for the "語音字幕" switch (#162). First enable shows the
+   * consent panel (Spec §8.2) and does NOT start capture; capture starts only
+   * on the "啟用並開始" confirm gesture (speech_control start). The checkbox
+   * stays visually OFF until consent is granted, so turning it back off at any
+   * point before confirming is a no-op.
+   *
+   * Once consent is granted the switch is a direct capture control: toggling on
+   * persists speechEnabled then sends `speech_control start`, toggling off
+   * persists false then sends `speech_control stop`. Persistence happens before
+   * the control message because the SW pipeline's start() gates on
+   * speechEnabled being already stored.
+   */
+  const handleSpeechEnabledToggle = useCallback((checked: boolean) => {
+    void (async () => {
+      if (!checked) {
+        // Turning the switch off: close any open consent panel, and when consent
+        // was previously granted persist the off state and stop capture. If the
+        // panel is open nothing was started yet, so no control message is sent.
+        setSpeechConsentOpen(false)
+        if (settings?.speechConfig.speechConsentGranted) {
+          updateSpeechConfig('speechEnabled', false)
+          await saveUserSettings({ speechConfig: { ...settings.speechConfig, speechEnabled: false } })
+          await chrome.runtime.sendMessage({ type: 'speech_control', payload: { action: 'stop' } }).catch(() => undefined)
+        }
+        return
+      }
+      if (settings?.speechConfig.speechConsentGranted) {
+        // Consent was granted previously: persist first (the SW pipeline's
+        // start() reads speechEnabled from storage), then start capture.
+        updateSpeechConfig('speechEnabled', true)
+        await saveUserSettings({ speechConfig: { ...settings.speechConfig, speechEnabled: true } })
+        await chrome.runtime.sendMessage({ type: 'speech_control', payload: { action: 'start' } }).catch(() => undefined)
+        return
+      }
+      // First enable: show the consent panel; nothing is started or persisted
+      // until the confirm gesture (Spec §8.2).
+      setSpeechConsentOpen(true)
+    })().catch(() => undefined)
+  }, [settings, updateSpeechConfig])
+
+  /**
+   * The "啟用並開始" confirm click IS the gesture that authorizes capture
+   * (Spec §8.2): it persists consent + speechEnabled and then sends
+   * `speech_control start` to the SW. Persistence happens first because the SW
+   * pipeline's start() gates on speechEnabled being already stored.
+   */
+  const handleSpeechConsentConfirm = useCallback(async () => {
+    if (!settings) return
+    await saveUserSettings({
+      speechConfig: {
+        ...settings.speechConfig,
+        speechEnabled: true,
+        speechConsentGranted: true,
+      },
+    })
+    updateSpeechConfig('speechEnabled', true)
+    updateSpeechConfig('speechConsentGranted', true)
+    setSpeechConsentOpen(false)
+    void chrome.runtime.sendMessage({ type: 'speech_control', payload: { action: 'start' } }).catch(() => undefined)
+  }, [settings, updateSpeechConfig])
+
+  const handleSpeechConsentCancel = useCallback(() => {
+    setSpeechConsentOpen(false)
+  }, [])
 
   const handleProviderChange = useCallback(
     (providerId: string) => {
@@ -920,12 +1007,28 @@ export function App() {
         >
           <input
             type='checkbox'
-            checked={settings.speechConfig.speechEnabled}
-            onChange={(e) => updateSpeechConfig('speechEnabled', e.target.checked)}
+            // While the consent panel is open the switch reflects the user's
+            // intent (checked) even though capture has not started; unchecking
+            // cancels without persisting or starting anything (#162).
+            checked={speechConsentOpen || settings.speechConfig.speechEnabled}
+            onChange={(e) => handleSpeechEnabledToggle(e.target.checked)}
             aria-label={t('speechEnabled')}
           />
           <span style={{ fontSize: '0.9rem' }}>{t('speechEnabled')}</span>
         </label>
+
+        {/* Live speech_state readout (Spec §6/#162). Reflects the SW's
+            speech_state broadcast — capturing/paused/error/budget — via the
+            existing contract, never a new message. Error/paused states reuse
+            the fixed #160 i18n key when the payload carries one. */}
+        {speechState && (
+          <div style={{ marginBottom: '0.6rem', fontSize: '0.82rem', color: '#444' }}>
+            <span style={{ fontWeight: 600 }}>{t('speechStatus')}：</span>
+            <span>
+              {speechState.errorKey ? t(speechState.errorKey as Parameters<typeof t>[0]) : t(SPEECH_STATE_LABELS[speechState.state])}
+            </span>
+          </div>
+        )}
 
         <div style={{ marginBottom: '0.5rem' }}>
           <label
@@ -1051,6 +1154,53 @@ export function App() {
             style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
           />
         </div>
+
+        {/* First-enable consent panel (Spec §8.2 / #162). Capture is NOT started
+            until the "啟用並開始" confirm click. */}
+        {speechConsentOpen && (
+          <div
+            role='dialog'
+            aria-modal='true'
+            aria-label={t('speechConsentTitle')}
+            style={{
+              marginTop: '0.5rem',
+              padding: '0.6rem',
+              border: '1px solid #c0392b',
+              borderRadius: '4px',
+              background: '#fff8f6',
+            }}
+          >
+            <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.35rem', color: '#333' }}>
+              {t('speechConsentTitle')}
+            </div>
+            <div style={{ fontSize: '0.8rem', lineHeight: 1.5, color: '#444' }}>
+              {t('speechConsentIntro')}
+              <ul style={{ margin: '0.25rem 0 0.4rem 1.1rem', padding: 0 }}>
+                <li>{t('speechConsentCaptureTabAudio')}</li>
+                <li>{t('speechConsentSendProvider')}</li>
+                <li>{t('speechConsentNeverStored')}</li>
+                <li>{t('speechConsentBilledPerKey')}</li>
+                <li>{t('speechConsentActiveVisible')}</li>
+              </ul>
+            </div>
+            <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+              <button
+                type='button'
+                onClick={() => void handleSpeechConsentConfirm()}
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', cursor: 'pointer' }}
+              >
+                {t('speechConsentConfirm')}
+              </button>
+              <button
+                type='button'
+                onClick={handleSpeechConsentCancel}
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', cursor: 'pointer' }}
+              >
+                {t('speechConsentCancel')}
+              </button>
+            </div>
+          </div>
+        )}
       </fieldset>
 
       {/* Save */}

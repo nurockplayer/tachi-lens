@@ -47,6 +47,7 @@ export interface UserSettings extends FilterConfig {
 
 export const DEFAULT_SPEECH_CONFIG: SpeechTranslationConfig = {
   speechEnabled: false,
+  speechConsentGranted: false,
   speechProvider: 'gemini',
   speechModel: SPEECH_GEMINI_DEFAULT_MODEL,
   speechTargetLanguage: 'zh-TW',
@@ -140,6 +141,7 @@ export const normalizeSpeechConfig = (value: unknown): SpeechTranslationConfig =
 
   return {
     speechEnabled: candidate.speechEnabled === true,
+    speechConsentGranted: candidate.speechConsentGranted === true,
     speechProvider: typeof candidate.speechProvider === 'string' && isSpeechProviderId(candidate.speechProvider)
       ? candidate.speechProvider
       : DEFAULT_SPEECH_CONFIG.speechProvider,

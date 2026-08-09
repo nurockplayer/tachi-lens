@@ -29,6 +29,13 @@ export const SPEECH_GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 export interface SpeechTranslationConfig {
   /** Default false — capture is gesture-gated and never auto-starts. */
   speechEnabled: boolean
+  /**
+   * Whether the user has accepted the first-enable consent panel (Issue #162).
+   * Default false; set true only after the confirm gesture that also sends
+   * `speech_control start`. Persisted with the config so consent is remembered
+   * across sessions without asking again.
+   */
+  speechConsentGranted: boolean
   /** Only Gemini in v0.3 (Spec §13). */
   speechProvider: SpeechProviderId
   /** Default GEMINI speech model (SPEECH_GEMINI_DEFAULT_MODEL). */

@@ -501,6 +501,7 @@ export const isSpeechSettingsUpdateMessage = (
 
   return (
     isOptionalSpeechBoolean(payload.speechEnabled) &&
+    isOptionalSpeechBoolean(payload.speechConsentGranted) &&
     isOptionalSpeechProvider(payload.speechProvider) &&
     isOptionalSpeechString(payload.speechModel) &&
     isOptionalSpeechString(payload.speechTargetLanguage) &&
