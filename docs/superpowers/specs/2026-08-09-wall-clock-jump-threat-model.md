@@ -98,7 +98,7 @@ A "conservative" cap is not conservative for users: it converts expected offline
 - A user controlling device time can advance it while the worker is absent, restart it, and prematurely clear persisted minute-window reservations/cooldowns and potentially reset RPD.
 - A later backward correction triggers fail-closed denial but cannot undo capacity already restored or requests already sent.
 - An attacker with write access to extension local storage is outside the clock model and can attempt direct quota-state manipulation.
-- Existing manual repair (`resetQuotaAccounting`) remains the appropriate recovery path for legitimate rollback situations; it is not an automatic validation mechanism.
+- The manual repair control (`resetQuotaAccounting`) clears integrity fail-closed states (unsupported version, untrusted migration, malformed snapshots) and rewrites a clean baseline, but it cannot by itself clear a `clock_rollback` caused by wall time below the persisted high-water mark: the repair writes the clamped trusted wall time back as the new high-water mark, so the rollback remains active until the device clock catches up or is corrected. Recovery from a below-high-water rollback therefore requires catching up the clock, not just invoking repair.
 
 ## 7. Implementation-issue feasibility
 
