@@ -89,6 +89,14 @@ export type MessageKey =
   | 'quotaHealthDeepSeekOverflow'
   | 'quotaHealthRepair'
   | 'quotaHealthRepairConfirm'
+  | 'speechSection'
+  | 'speechEnabled'
+  | 'speechProvider'
+  | 'speechModel'
+  | 'speechTargetLanguage'
+  | 'speechCaptionMaxLines'
+  | 'speechCaptionOpacity'
+  | 'speechMaxSessionMinutes'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -173,6 +181,14 @@ export const MESSAGE_KEYS: readonly string[] = [
   'quotaHealthDeepSeekOverflow',
   'quotaHealthRepair',
   'quotaHealthRepairConfirm',
+  'speechSection',
+  'speechEnabled',
+  'speechProvider',
+  'speechModel',
+  'speechTargetLanguage',
+  'speechCaptionMaxLines',
+  'speechCaptionOpacity',
+  'speechMaxSessionMinutes',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -258,6 +274,14 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   quotaHealthDeepSeekOverflow: 'Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。',
   quotaHealthRepair: '修復配額資料',
   quotaHealthRepairConfirm: '確認修復？',
+  speechSection: '語音字幕',
+  speechEnabled: '啟用語音字幕',
+  speechProvider: '語音提供者',
+  speechModel: '語音模型',
+  speechTargetLanguage: '語音目標語言',
+  speechCaptionMaxLines: '字幕最大行數',
+  speechCaptionOpacity: '字幕不透明度 (%)',
+  speechMaxSessionMinutes: '單次語音時段上限 (分鐘)',
 }
 
 /**

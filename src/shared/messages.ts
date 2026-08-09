@@ -1,6 +1,8 @@
 // Shared message type definitions for SW ↔ CS ↔ Popup communication
 
 import type { ChineseVariantMode } from './language-detection'
+import { isSpeechProviderId } from '@/providers/speech-types'
+import type { SpeechTranslationConfig } from '@/providers/speech-types'
 
 export type MessageType =
   | 'translate_request'
@@ -25,6 +27,7 @@ export type MessageType =
   | 'quota_health_result'
   | 'reset_quota_health'
   | 'quota_health_reset_result'
+  | 'speech_settings_updated'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -49,6 +52,7 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'quota_health_result',
   'reset_quota_health',
   'quota_health_reset_result',
+  'speech_settings_updated',
 ]
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
@@ -432,6 +436,45 @@ export const isSettingsUpdateMessage = (
   }
 
   return typeof value.payload === 'object' && value.payload !== null && !Array.isArray(value.payload)
+}
+
+/** Payload for speech_settings_updated: Partial<SpeechTranslationConfig> broadcast (Spec §6). */
+export type SpeechSettingsUpdatePayload = Partial<SpeechTranslationConfig>
+
+const isOptionalSpeechBoolean = (value: unknown): boolean =>
+  value === undefined || typeof value === 'boolean'
+
+const isOptionalSpeechProvider = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'string' && isSpeechProviderId(value))
+
+const isOptionalSpeechString = (value: unknown): boolean =>
+  value === undefined || typeof value === 'string'
+
+const isOptionalSpeechNumber = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'number' && Number.isFinite(value))
+
+export const isSpeechSettingsUpdateMessage = (
+  value: unknown,
+): value is BaseMessage<'speech_settings_updated', SpeechSettingsUpdatePayload> => {
+  if (!isBaseMessage(value) || value.type !== 'speech_settings_updated') {
+    return false
+  }
+
+  if (typeof value.payload !== 'object' || value.payload === null || Array.isArray(value.payload)) {
+    return false
+  }
+
+  const payload = value.payload as Record<string, unknown>
+
+  return (
+    isOptionalSpeechBoolean(payload.speechEnabled) &&
+    isOptionalSpeechProvider(payload.speechProvider) &&
+    isOptionalSpeechString(payload.speechModel) &&
+    isOptionalSpeechString(payload.speechTargetLanguage) &&
+    isOptionalSpeechNumber(payload.captionMaxLines) &&
+    isOptionalSpeechNumber(payload.captionOpacity) &&
+    isOptionalSpeechNumber(payload.maxSessionMinutes)
+  )
 }
 
 export const serializeMessage = <T extends MessageType, P>(message: BaseMessage<T, P>): string => JSON.stringify(message)

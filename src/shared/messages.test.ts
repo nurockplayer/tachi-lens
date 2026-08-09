@@ -10,11 +10,13 @@ import {
   isQuotaHealthResultMessage,
   isResetQuotaHealthMessage,
   isSettingsUpdateMessage,
+  isSpeechSettingsUpdateMessage,
   isTranslationRequestMessage,
   serializeMessage,
   type BaseMessage,
   type ErrorNotification,
   type QuotaHealthResult,
+  type SpeechSettingsUpdatePayload,
   type TranslationRequest,
   type SettingsUpdatePayload,
 } from './messages'
@@ -176,6 +178,65 @@ describe('message protocol guards', () => {
 
     expect(isSettingsUpdateMessage({ type: 'settings_updated', payload })).toBe(true)
     expect(payload.chineseVariantMode).toBe('translate_other_script')
+  })
+})
+
+describe('speech_settings_updated message', () => {
+  it('accepts a full speech settings payload', () => {
+    const payload: SpeechSettingsUpdatePayload = {
+      speechEnabled: true,
+      speechProvider: 'gemini',
+      speechModel: 'gemini-2.5-flash',
+      speechTargetLanguage: 'en',
+      captionMaxLines: 3,
+      captionOpacity: 80,
+      maxSessionMinutes: 45,
+    }
+
+    expect(isSpeechSettingsUpdateMessage({ type: 'speech_settings_updated', payload })).toBe(true)
+  })
+
+  it('accepts a partial payload', () => {
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: { speechEnabled: false },
+    })).toBe(true)
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: { captionMaxLines: 2 },
+    })).toBe(true)
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: {},
+    })).toBe(true)
+  })
+
+  it('rejects an unknown speech provider', () => {
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: { speechProvider: 'deepseek' },
+    })).toBe(false)
+  })
+
+  it('rejects wrong-typed fields that are present', () => {
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: { speechEnabled: 'yes' },
+    })).toBe(false)
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: { captionMaxLines: '3' },
+    })).toBe(false)
+    expect(isSpeechSettingsUpdateMessage({
+      type: 'speech_settings_updated',
+      payload: { speechTargetLanguage: 42 },
+    })).toBe(false)
+  })
+
+  it('rejects a non-object payload and wrong message types', () => {
+    expect(isSpeechSettingsUpdateMessage({ type: 'speech_settings_updated' })).toBe(false)
+    expect(isSpeechSettingsUpdateMessage({ type: 'speech_settings_updated', payload: 'nope' })).toBe(false)
+    expect(isSpeechSettingsUpdateMessage({ type: 'settings_updated', payload: {} })).toBe(false)
   })
 })
 

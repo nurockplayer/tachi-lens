@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
+import { SPEECH_GEMINI_MODELS, SPEECH_PROVIDER_IDS } from '@/providers/speech-types'
+import type { SpeechProviderId, SpeechTranslationConfig } from '@/providers/speech-types'
 import {
   getChannelSettings,
   getUserSettings,
@@ -22,8 +24,19 @@ import type {
   QuotaHealthResult,
   QuotaHealthStatus,
   SettingsUpdatePayload,
+  SpeechSettingsUpdatePayload,
 } from '@/shared/messages'
 import type { FilterConfig } from '@/content/message-filter'
+
+const SPEECH_LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'zh-TW', label: '繁體中文' },
+  { value: 'zh-CN', label: '簡體中文' },
+  { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'th', label: 'ภาษาไทย' },
+]
 
 const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
   { key: 'skipEmotesOnly', labelKey: 'skipEmotesOnly' },
@@ -375,6 +388,22 @@ export function App() {
     [],
   )
 
+  const updateSpeechConfig = useCallback(
+    <K extends keyof SpeechTranslationConfig>(key: K, value: SpeechTranslationConfig[K]) => {
+      setSettings((previous) => {
+        if (!previous) return previous
+        return {
+          ...previous,
+          speechConfig: {
+            ...previous.speechConfig,
+            [key]: value,
+          },
+        }
+      })
+    },
+    [],
+  )
+
   const handleProviderChange = useCallback(
     (providerId: string) => {
       const meta = providers.find((p) => p.id === providerId)
@@ -412,9 +441,12 @@ export function App() {
       const {
         geminiQuota,
         geminiQuotaProfiles,
+        // Speech config is global-only in v0.3: it is persisted globally
+        // (like geminiQuota) and never enters the per-channel override.
+        speechConfig,
         ...channelSettings
       } = updatedSettings
-      await saveUserSettings({ geminiQuota, geminiQuotaProfiles })
+      await saveUserSettings({ geminiQuota, geminiQuotaProfiles, speechConfig })
       await saveChannelSettings(channelName, channelSettings)
     } else {
       await saveUserSettings(updatedSettings)
@@ -443,6 +475,14 @@ export function App() {
     await chrome.runtime.sendMessage({
       type: 'settings_updated',
       payload,
+    })
+
+    // Speech settings are broadcast on their own channel (Spec §6). The payload
+    // is Partial<SpeechTranslationConfig>-compatible.
+    const speechPayload: SpeechSettingsUpdatePayload = { ...updatedSettings.speechConfig }
+    await chrome.runtime.sendMessage({
+      type: 'speech_settings_updated',
+      payload: speechPayload,
     })
   }, [settings, blacklistInput, useChannelSettings, channelName])
 
@@ -849,6 +889,157 @@ export function App() {
           style={{ width: '100%', padding: '0.3rem' }}
         />
       </div>
+
+      {/* Speech subtitles (v0.3): capture/consent is owned by a later Issue. */}
+      <fieldset
+        style={{
+          margin: '0 0 0.75rem',
+          padding: '0.65rem',
+          border: '1px solid #d8d8d8',
+          borderRadius: '4px',
+        }}
+      >
+        <legend style={{ padding: '0 0.25rem', fontSize: '0.85rem', fontWeight: 600 }}>
+          {t('speechSection')}
+        </legend>
+
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}
+        >
+          <input
+            type='checkbox'
+            checked={settings.speechConfig.speechEnabled}
+            onChange={(e) => updateSpeechConfig('speechEnabled', e.target.checked)}
+            aria-label={t('speechEnabled')}
+          />
+          <span style={{ fontSize: '0.9rem' }}>{t('speechEnabled')}</span>
+        </label>
+
+        <div style={{ marginBottom: '0.5rem' }}>
+          <label
+            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
+            htmlFor='speech-provider-select'
+          >
+            {t('speechProvider')}
+          </label>
+          <select
+            id='speech-provider-select'
+            value={settings.speechConfig.speechProvider}
+            onChange={(e) => updateSpeechConfig('speechProvider', e.target.value as SpeechProviderId)}
+            style={{ width: '100%', padding: '0.3rem' }}
+          >
+            {SPEECH_PROVIDER_IDS.map((id) => (
+              <option key={id} value={id}>
+                {id === 'gemini' ? 'Gemini' : id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '0.5rem' }}>
+          <label
+            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
+            htmlFor='speech-model-select'
+          >
+            {t('speechModel')}
+          </label>
+          <select
+            id='speech-model-select'
+            value={settings.speechConfig.speechModel}
+            onChange={(e) => updateSpeechConfig('speechModel', e.target.value)}
+            style={{ width: '100%', padding: '0.3rem' }}
+          >
+            {SPEECH_GEMINI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '0.5rem' }}>
+          <label
+            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
+            htmlFor='speech-language-select'
+          >
+            {t('speechTargetLanguage')}
+          </label>
+          <select
+            id='speech-language-select'
+            value={settings.speechConfig.speechTargetLanguage}
+            onChange={(e) => updateSpeechConfig('speechTargetLanguage', e.target.value)}
+            style={{ width: '100%', padding: '0.3rem' }}
+          >
+            {SPEECH_LANGUAGE_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '0.5rem' }}>
+          <label
+            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
+            htmlFor='speech-caption-lines-input'
+          >
+            {t('speechCaptionMaxLines')}
+          </label>
+          <input
+            id='speech-caption-lines-input'
+            type='number'
+            min={1}
+            value={settings.speechConfig.captionMaxLines}
+            onChange={(e) =>
+              updateSpeechConfig('captionMaxLines', Math.max(1, parseInt(e.target.value) || 1))
+            }
+            style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '0.5rem' }}>
+          <label
+            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
+            htmlFor='speech-caption-opacity-input'
+          >
+            {t('speechCaptionOpacity')}
+          </label>
+          <input
+            id='speech-caption-opacity-input'
+            type='number'
+            min={0}
+            max={100}
+            value={settings.speechConfig.captionOpacity}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value)
+              const bounded = Number.isFinite(parsed)
+                ? Math.min(100, Math.max(0, parsed))
+                : 0
+              updateSpeechConfig('captionOpacity', bounded)
+            }}
+            style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '0.25rem' }}>
+          <label
+            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
+            htmlFor='speech-session-budget-input'
+          >
+            {t('speechMaxSessionMinutes')}
+          </label>
+          <input
+            id='speech-session-budget-input'
+            type='number'
+            min={1}
+            value={settings.speechConfig.maxSessionMinutes}
+            onChange={(e) =>
+              updateSpeechConfig('maxSessionMinutes', Math.max(1, parseInt(e.target.value) || 1))
+            }
+            style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
+          />
+        </div>
+      </fieldset>
 
       {/* Save */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

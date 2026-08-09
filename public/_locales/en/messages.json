@@ -80,5 +80,13 @@
   "quotaHealthRecoveryAt": { "message": "Automatic recovery" },
   "quotaHealthDeepSeekOverflow": { "message": "While Gemini is paused, DeepSeek remains available for translation." },
   "quotaHealthRepair": { "message": "Repair quota data" },
-  "quotaHealthRepairConfirm": { "message": "Confirm repair?" }
+  "quotaHealthRepairConfirm": { "message": "Confirm repair?" },
+  "speechSection": { "message": "Speech Subtitles" },
+  "speechEnabled": { "message": "Enable speech subtitles" },
+  "speechProvider": { "message": "Speech provider" },
+  "speechModel": { "message": "Speech model" },
+  "speechTargetLanguage": { "message": "Speech target language" },
+  "speechCaptionMaxLines": { "message": "Caption max lines" },
+  "speechCaptionOpacity": { "message": "Caption opacity (%)" },
+  "speechMaxSessionMinutes": { "message": "Session budget (minutes)" }
 }
