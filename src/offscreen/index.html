@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>tachi-lens speech capture</title>
+</head>
+<body>
+  <!-- Hidden capture page. No UI is rendered: the Service Worker owns all
+       capture state and this document only holds the tabCapture MediaStream,
+       downsamples it to 16 kHz mono PCM, and forwards chunks over a Port
+       (Spec §3: the offscreen document never reads storage or holds keys). -->
+  <script type="module" src="./capture.ts"></script>
+</body>
+</html>

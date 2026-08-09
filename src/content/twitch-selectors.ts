@@ -8,6 +8,10 @@ export const CHAT_MESSAGE_BODY = '[data-a-target="chat-line-message-body"]'
 export const CHAT_USERNAME = '.chat-author__display-name'
 export const CHAT_WHISPER = '[data-test-selector="whisper-message"]'
 
+// Twitch video player root. Used by the speech subtitle overlay (#160) as the
+// host anchor; the overlay is mounted into it via a shadow root.
+export const VIDEO_PLAYER = '[data-a-target="video-player"]'
+
 // Fallback selectors for each primary selector
 export const FALLBACKS: Record<string, string[]> = {
   [CHAT_CONTAINER]: [
@@ -29,6 +33,11 @@ export const FALLBACKS: Record<string, string[]> = {
     CHAT_USERNAME,
     '[data-a-target="chat-message-username"]',
     '.chat-line__username',
+  ],
+  [VIDEO_PLAYER]: [
+    VIDEO_PLAYER,
+    '.video-player__container',
+    '.video-player',
   ],
 }
 

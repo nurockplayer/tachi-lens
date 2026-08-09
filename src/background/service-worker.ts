@@ -21,6 +21,7 @@ import { RateLimiter } from './rate-limiter'
 import { createRestartSafeReservationId, GeminiQuotaStore } from './gemini-quota'
 import { collectQuotaHealthResults, deriveQuotaHealth } from './quota-health'
 import { QuotaScheduler } from './quota-scheduler'
+import { SpeechCapture, createSpeechCaptureChrome } from './speech-capture'
 import { Translator } from './translator'
 import { TranslationCacheDb } from './translation-cache-db'
 
@@ -310,4 +311,12 @@ chrome.runtime.onInstalled.addListener(() => {
   console.info('tachi-lens installed')
 })
 
-export {}
+// Speech capture primitive (v0.3, Spec §7/§9). The pipeline (#160) calls
+// speechCapture.start()/stop() and subscribes to onChunk/onError/onDisconnect;
+// nothing routes speech_control messages yet (that is #160's scope). The
+// capture surface is exported for the pipeline and tests; the underlying
+// offscreen/tabCapture internals are deliberately hidden behind the
+// SpeechSource shape.
+export const speechCapture = new SpeechCapture(createSpeechCaptureChrome())
+
+export {} // keep ES module marker (named exports above already mark it)
