@@ -5,6 +5,7 @@ import {
   CHAT_MESSAGE,
   CHAT_MESSAGE_BODY,
   CHAT_USERNAME,
+  VIDEO_PLAYER,
   detectPageType,
   getSelectorsForPage,
   matchesFirst,
@@ -316,5 +317,48 @@ describe('queryFirstAll', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     expect(queryFirstAll(container, CHAT_MESSAGE).length).toBe(0)
+  })
+})
+
+describe('VIDEO_PLAYER selector', () => {
+  const mountPlayer = (variant: 'primary' | 'container' | 'player'): HTMLElement => {
+    document.body.innerHTML = ''
+    const el = document.createElement('div')
+    if (variant === 'primary') el.setAttribute('data-a-target', 'video-player')
+    else el.className = variant === 'container' ? 'video-player__container' : 'video-player'
+    document.body.appendChild(el)
+    return el
+  }
+
+  it('has a primary selector with merged, deduped fallbacks', () => {
+    expect(VIDEO_PLAYER).toBe('[data-a-target="video-player"]')
+    // queryFirst relies on FALLBACKS[VIDEO_PLAYER] including the primary first.
+    expect(queryFirst(document.body, VIDEO_PLAYER)).toBeNull()
+    mountPlayer('primary')
+    expect(queryFirst(document.body, VIDEO_PLAYER)).not.toBeNull()
+  })
+
+  it('finds the video player via each fallback selector', () => {
+    for (const variant of ['primary', 'container', 'player'] as const) {
+      const el = mountPlayer(variant)
+      expect(queryFirst(document.body, VIDEO_PLAYER)).toBe(el)
+    }
+  })
+
+  it('matches the video player element via matchesFirst', () => {
+    const el = mountPlayer('container')
+    expect(matchesFirst(el, VIDEO_PLAYER)).toBe(true)
+    const unrelated = document.createElement('div')
+    document.body.appendChild(unrelated)
+    expect(matchesFirst(unrelated, VIDEO_PLAYER)).toBe(false)
+  })
+
+  it('dedupes elements matching both primary and a fallback', () => {
+    document.body.innerHTML = ''
+    const el = document.createElement('div')
+    el.setAttribute('data-a-target', 'video-player')
+    el.className = 'video-player'
+    document.body.appendChild(el)
+    expect(queryFirstAll(document.body, VIDEO_PLAYER)).toEqual([el])
   })
 })

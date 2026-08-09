@@ -107,10 +107,16 @@ export default tseslint.config(
       },
     },
   },
-  // Browser + WebExtension globals for the content script and React popup.
+  // Browser + WebExtension globals for the content script, React popup, and
+  // the offscreen capture document (window/navigator/AudioContext + chrome.runtime).
   {
     name: 'tachi-lens/browser-globals',
-    files: ['src/content/**/*.ts', 'src/popup/**/*.ts', 'src/popup/**/*.tsx'],
+    files: [
+      'src/content/**/*.ts',
+      'src/popup/**/*.ts',
+      'src/popup/**/*.tsx',
+      'src/offscreen/**/*.ts',
+    ],
     languageOptions: {
       globals: {
         ...globals.browser,
