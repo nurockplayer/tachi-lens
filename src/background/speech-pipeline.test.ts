@@ -1,6 +1,7 @@
 // Speech pipeline tests (v0.3 speech, Spec §2/§6/§9/§10).
-// Deterministic: fake SpeechSource + mock speech provider + mock settings +
-// fake budget storage + fake timers (Spec §11). No tabCapture/offscreen/provider.
+// Deterministic: shared FakeSpeechSource + shared mock speech provider + mock
+// settings + fake budget storage + fake timers (Spec §11). No tabCapture/
+// offscreen/provider.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SpeechBudget, type SpeechBudgetStorage } from './speech-budget'
@@ -12,78 +13,14 @@ import {
   mapCaptureError,
   type SpeechPipelineDependencies,
 } from './speech-pipeline'
-import type { SpeechSource } from './speech-capture'
-import type { SpeechCaptureError } from '@/offscreen/protocol'
-import type { AudioChunk, SpeechProvider, SpeechTranslationResult } from '@/providers/speech-types'
+import { FakeSpeechSource, fluentChunk, loudPcm, mkChunk, silentPcm } from '@/test-utils/fake-speech-source'
+import { createMockSpeechProvider, type MockSpeechProviderHandle } from '@/test-utils/mock-speech-provider'
+import type { AudioChunk } from '@/providers/speech-types'
 import type { UserSettings } from '@/storage/settings'
 import type { SpeechCaptionClearedPayload, SpeechCaptionPayload, SpeechStatePayload } from '@/shared/messages'
 import type { SpeechErrorReason } from '@/shared/speech-state'
 
 // --- fakes ------------------------------------------------------------------
-
-const loudPcm = (): ArrayBuffer => {
-  // 1 s of full-scale 16-bit PCM at 16 kHz (RMS ~32767).
-  const samples = 16_000
-  const buffer = new ArrayBuffer(samples * 2)
-  const view = new Int16Array(buffer)
-  for (let i = 0; i < samples; i++) view[i] = 32000
-  return buffer
-}
-
-const silentPcm = (): ArrayBuffer => {
-  const buffer = new ArrayBuffer(16_000 * 2)
-  new Int16Array(buffer).fill(0)
-  return buffer
-}
-
-interface FakeSource {
-  source: SpeechSource
-  start: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
-  emitChunk: (chunk: AudioChunk) => void
-  emitError: (error: SpeechCaptureError) => void
-  emitDisconnect: (reason: string) => void
-}
-
-const createFakeSource = (): FakeSource => {
-  let chunkCb: ((chunk: AudioChunk) => void) | undefined
-  let errorCb: ((error: SpeechCaptureError) => void) | undefined
-  let disconnectCb: ((reason: string) => void) | undefined
-  const source: SpeechSource = {
-    start: vi.fn(async () => undefined),
-    stop: vi.fn(async () => undefined),
-    onChunk: (cb) => { chunkCb = cb },
-    onError: (cb) => { errorCb = cb },
-    onDisconnect: (cb) => { disconnectCb = cb },
-  }
-  return {
-    source,
-    start: source.start as ReturnType<typeof vi.fn>,
-    stop: source.stop as ReturnType<typeof vi.fn>,
-    emitChunk: (chunk) => chunkCb?.(chunk),
-    emitError: (error) => errorCb?.(error),
-    emitDisconnect: (reason) => disconnectCb?.(reason),
-  }
-}
-
-interface ProviderHandle {
-  transcribeChunk: ReturnType<typeof vi.fn>
-}
-
-const createMockProvider = (): { provider: SpeechProvider; handle: ProviderHandle } => {
-  const transcribeChunk = vi.fn(async (_chunk: AudioChunk, _key: string, _model: string, _lang: string): Promise<SpeechTranslationResult[]> => {
-    return []
-  })
-  const provider: SpeechProvider = {
-    id: 'gemini',
-    displayName: 'Gemini',
-    models: [],
-    defaultModel: 'gemini-2.5-flash',
-    transcribeChunk,
-    validateKey: vi.fn(async () => ({ valid: true })),
-  }
-  return { provider, handle: { transcribeChunk } }
-}
 
 const DEFAULT_SETTINGS: Partial<UserSettings> = {
   speechConfig: {
@@ -122,8 +59,8 @@ const createBudgetStorage = (): SpeechBudgetStorage & {
 
 interface Harness {
   pipeline: SpeechPipeline
-  source: FakeSource
-  handle: ProviderHandle
+  source: FakeSpeechSource
+  handle: MockSpeechProviderHandle
   budget: SpeechBudget
   stateEvents: SpeechStatePayload[]
   captionEvents: SpeechCaptionPayload[]
@@ -142,8 +79,8 @@ const createHarness = (options: {
   dailyCapMinutes?: number
   now?: () => number
 } = {}): Harness => {
-  const source = createFakeSource()
-  const { provider, handle } = createMockProvider()
+  const source = new FakeSpeechSource()
+  const { provider, handle } = createMockSpeechProvider()
   const budgetStorage = createBudgetStorage()
   const budget = new SpeechBudget({
     storage: budgetStorage,
@@ -159,7 +96,7 @@ const createHarness = (options: {
   const counters: string[] = []
 
   const deps: SpeechPipelineDependencies = {
-    source: source.source,
+    source,
     getProvider: () => provider,
     getApiKey: async () => 'gemini-secret-key',
     getSettings: async () => ({ ...DEFAULT_SETTINGS, ...options.settings } as UserSettings),
@@ -180,19 +117,6 @@ const createHarness = (options: {
   const pipeline = new SpeechPipeline(deps)
   return { pipeline, source, handle, budget, stateEvents, captionEvents, clearedEvents, fatalErrors, counters }
 }
-
-const mkChunk = (overrides: Partial<AudioChunk> = {}): AudioChunk => ({
-  chunkId: 'c',
-  data: loudPcm(),
-  mimeType: 'audio/pcm;rate=16000',
-  startMs: 0,
-  endMs: 1000,
-  isFinal: false,
-  ...overrides,
-})
-
-const fluentChunk = (startMs: number, endMs: number, overrides: Partial<AudioChunk> = {}): AudioChunk =>
-  mkChunk({ startMs, endMs, chunkId: `c${startMs}`, ...overrides })
 
 /** Fill the pipeline buffer past the window threshold. */
 const pushWindow = (h: Harness, seconds = 5): void => {
@@ -232,15 +156,15 @@ describe('SpeechPipeline', () => {
     })
 
     it('fails with auth when no speech API key is configured', async () => {
-      const source = createFakeSource()
-      const { provider } = createMockProvider()
+      const source = new FakeSpeechSource()
+      const { provider } = createMockSpeechProvider()
       const budgetStorage = createBudgetStorage()
       const budget = new SpeechBudget({ storage: budgetStorage, now: () => 1_700_000_000_000 })
       const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock: { monotonicNow: () => 0 } })
       const fatalErrors: SpeechErrorReason[] = []
       const stateEvents: SpeechStatePayload[] = []
       const p = new SpeechPipeline({
-        source: source.source,
+        source,
         getProvider: () => provider,
         getApiKey: async () => undefined,
         getSettings: async () => ({ ...DEFAULT_SETTINGS } as UserSettings),
@@ -266,13 +190,13 @@ describe('SpeechPipeline', () => {
         speechAudioUsage: { version: 1, providerDay: '2099-01-01', audioSeconds: 60 },
       })
       const budget2 = new SpeechBudget({ storage: budgetStorage, now: () => 1_700_000_000_000, dailyCapMinutes: 1 })
-      const source = createFakeSource()
-      const { provider } = createMockProvider()
+      const source = new FakeSpeechSource()
+      const { provider } = createMockSpeechProvider()
       const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock: { monotonicNow: () => 0 } })
       const fatalErrors2: SpeechErrorReason[] = []
       const stateEvents2: SpeechStatePayload[] = []
       const p2 = new SpeechPipeline({
-        source: source.source,
+        source,
         getProvider: () => provider,
         getApiKey: async () => 'key',
         getSettings: async () => ({ ...DEFAULT_SETTINGS } as UserSettings),
