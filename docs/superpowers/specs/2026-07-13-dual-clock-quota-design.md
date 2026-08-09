@@ -4,6 +4,23 @@
 
 Make Gemini quota accounting conservative under wall-clock rollback while using monotonic elapsed time for all in-process durations.
 
+## Decision and residual risk (2026-08-09, issue #64 research)
+
+The wall clock is a restart-survival approximation, not an authenticated elapsed-time source. After an MV3 restart, a forward wall-clock advance is indistinguishable from legitimate downtime and is accepted. Backward observations remain fail-closed.
+
+This is a **deliberate, documented residual risk**, not a defect. No candidate mechanism from issue #64 research provides a security benefit without unacceptable normal-downtime false positives or a separately reviewed external dependency. Specifically:
+
+- **Persisted lifecycle/shutdown markers**: no reliable commit point exists (`onSuspend` is not guaranteed in MV3), and absent/unclosed markers are normal after crashes, updates, evictions, and shutdowns. At most a non-security diagnostic hint.
+- **Conservative maximum elapsed-time caps**: any cap below real downtime misclassifies normal overnight/holiday use; a cap large enough for normal downtime is bypassable. Converts expected offline elapsed time into withheld quota.
+- **Chrome alarms / browser-session metadata**: alarms deliver epoch wall time (not an independent anchor), may be arbitrarily delayed, and missed alarms are normal during sleep.
+- **Gating provider-day reset on monotonic proof across restart**: across a restart there is no monotonic proof; requiring it denies ordinary next-day startup.
+- **Diagnostics-only reporting**: only reports "wall advanced since last durable observation", not "suspicious jump"; large advances are expected after normal downtime.
+- **External time sources**: adding a separate request for time validation requires a dedicated privacy/availability/security review and is explicitly out of scope here.
+
+A later policy change that accepts external time validation must start as a new design issue freezing trust source and authentication, privacy disclosure, failure mode, consent/permission model, caching/retention, attack model, and tests for offline, sleep, browser restart, clock forward/backward, and DeepSeek fallback.
+
+No implementation issue is warranted from this research. See the full threat model and candidate comparison in `2026-08-09-wall-clock-jump-threat-model.md`.
+
 ## Clock contract
 
 `Clock` exposes two independent readings:
