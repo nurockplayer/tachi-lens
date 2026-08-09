@@ -1,5 +1,11 @@
-import { isSettingsUpdateMessage } from '@/shared/messages'
-import type { DiagnosticEvent, DiagnosticStage, SettingsUpdatePayload } from '@/shared/messages'
+import {
+  isSettingsUpdateMessage,
+  isSpeechCaptionClearedMessage,
+  isSpeechCaptionMessage,
+  isSpeechSettingsUpdateMessage,
+  isSpeechStateMessage,
+} from '@/shared/messages'
+import type { DiagnosticEvent, DiagnosticStage, SettingsUpdatePayload, SpeechStatePayload } from '@/shared/messages'
 import type { ChineseVariantMode } from '@/shared/language-detection'
 import {
   parseChannelFromPathname,
@@ -17,6 +23,7 @@ import {
   type PageSelectors,
 } from './twitch-selectors'
 import { DEFAULT_FILTER_CONFIG, FILTER_CONFIG_KEYS } from './message-filter'
+import { SubtitleOverlay } from './subtitle-overlay'
 
 type RemoteContentSettings = Partial<Omit<ContentSettings, 'filterConfig'>> & {
   filterConfig?: Partial<ContentSettings['filterConfig']>
@@ -93,6 +100,62 @@ let currentSelectors: PageSelectors = getSelectorsForPage('channel')
 
 let chatObserver: MutationObserver | null = null
 let observeRetryTimer: ReturnType<typeof setTimeout> | null = null
+
+// --- v0.3 speech subtitle overlay (Spec §6/§10) -----------------------------
+//
+// The overlay is a shadow-root host appended to document.body; it never
+// mutates Twitch nodes. `speech_state`/`speech_caption`/`speech_caption_cleared`
+// are SW → CS broadcasts handled here; `speech_control {action:'toggle'}` is
+// sent CS → SW on the overlay's collapse-handle/user action.
+let subtitleOverlay: SubtitleOverlay | null = null
+// Last partial speech config broadcast. Retained so an overlay created after a
+// speech_settings_updated (e.g. a fresh SPA nav) still honors the user's
+// captionMaxLines/captionOpacity instead of falling back to defaults.
+let pendingSpeechConfig: { captionMaxLines?: number; captionOpacity?: number } | null = null
+
+const ensureSubtitleOverlay = (): SubtitleOverlay => {
+  if (subtitleOverlay === null) {
+    subtitleOverlay = new SubtitleOverlay({
+      onToggle: () => {
+        void safeRuntimeSendMessage<void>(runtimePort, {
+          type: 'speech_control',
+          payload: { action: 'toggle' },
+        }, stopContentScript).catch((error: unknown) => {
+          console.error('[tachi-lens] speech_control runtime message failed', error)
+        })
+      },
+    })
+    if (pendingSpeechConfig !== null) {
+      subtitleOverlay.setSpeechConfig(pendingSpeechConfig)
+    }
+  }
+  return subtitleOverlay
+}
+
+const handleSpeechState = (payload: SpeechStatePayload): void => {
+  if (!isSpeechStateMessage({ type: 'speech_state', payload })) return
+  if (payload.state === 'idle') {
+    subtitleOverlay?.destroy()
+    return
+  }
+  ensureSubtitleOverlay().setState(payload)
+}
+
+const handleSpeechCaption = (payload: { id: string; text: string; interim: boolean; lang?: string }): void => {
+  if (!isSpeechCaptionMessage({ type: 'speech_caption', payload })) return
+  ensureSubtitleOverlay().setCaption(payload)
+}
+
+const handleSpeechCaptionCleared = (payload: { reason: 'idle' | 'silence' | 'disabled' }): void => {
+  if (!isSpeechCaptionClearedMessage({ type: 'speech_caption_cleared', payload })) return
+  subtitleOverlay?.clearCaptions(payload.reason)
+}
+
+const handleSpeechSettingsUpdate = (payload: { captionMaxLines?: number; captionOpacity?: number }): void => {
+  if (!isSpeechSettingsUpdateMessage({ type: 'speech_settings_updated', payload })) return
+  pendingSpeechConfig = payload
+  subtitleOverlay?.setSpeechConfig(payload)
+}
 
 // --- SPA navigation via popstate ---
 const onLocationChange = (): void => {
@@ -537,12 +600,32 @@ const cleanup = (): void => {
   pendingMessages.clear()
   queuedElements = new WeakSet()
   translationQueue.length = 0
+  // Speech overlay: destroy the host (never leaves a stale overlay on the page).
+  subtitleOverlay?.destroy()
+  subtitleOverlay = null
+  pendingSpeechConfig = null
 }
 
 let runtimeMessageListenerAttached = false
 
 const onRuntimeMessage = (message: unknown): void => {
   if (stopped) return
+  if (isSpeechStateMessage(message)) {
+    handleSpeechState(message.payload)
+    return
+  }
+  if (isSpeechCaptionMessage(message)) {
+    handleSpeechCaption(message.payload)
+    return
+  }
+  if (isSpeechCaptionClearedMessage(message)) {
+    handleSpeechCaptionCleared(message.payload)
+    return
+  }
+  if (isSpeechSettingsUpdateMessage(message)) {
+    handleSpeechSettingsUpdate(message.payload)
+    return
+  }
   if (isSettingsUpdateMessage(message)) {
     void handleSettingsUpdate(message.payload)
   }

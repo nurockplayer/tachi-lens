@@ -232,4 +232,125 @@ describe('content script entry', () => {
       vi.unstubAllGlobals()
     })
   })
+
+  describe('speech subtitle overlay message wiring', () => {
+    const loadEntry = async (
+      sendMessage: ReturnType<typeof vi.fn>,
+    ): Promise<(message: unknown) => void> => {
+      let onMessage: ((message: unknown) => void) | undefined
+      const addListener = vi.fn((listener: (message: unknown) => void) => {
+        onMessage = listener
+      })
+      vi.stubGlobal('chrome', {
+        runtime: {
+          sendMessage,
+          onMessage: { addListener, removeListener: vi.fn() },
+        },
+      })
+      // Module init registers onRuntimeMessage via main().
+      await import('./twitch-entry')
+      return (message: unknown) => onMessage!(message)
+    }
+
+    const overlayHost = (): HTMLElement | null =>
+      document.querySelector('[data-tachi-lens-subtitle-overlay]')
+
+    it('mounts the overlay on speech_state capturing and destroys it on idle', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      expect(overlayHost()).toBeNull()
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      expect(overlayHost()).not.toBeNull()
+
+      dispatch({ type: 'speech_state', payload: { state: 'transcribing' } })
+      expect(overlayHost()).not.toBeNull()
+
+      dispatch({ type: 'speech_state', payload: { state: 'idle' } })
+      expect(overlayHost()).toBeNull()
+
+      vi.unstubAllGlobals()
+    })
+
+    it('renders a caption inside the overlay shadow root', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      dispatch({ type: 'speech_caption', payload: { id: 'c1', text: 'Hello world', interim: false } })
+
+      const shadow = overlayHost()!.shadowRoot!
+      expect(shadow.querySelector('.tachi-lens-caption-row')?.textContent).toBe('Hello world')
+
+      vi.unstubAllGlobals()
+    })
+
+    it('clears captions on speech_caption_cleared silence and keeps the overlay', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      dispatch({ type: 'speech_caption', payload: { id: 'c1', text: 'x', interim: false } })
+      expect(overlayHost()!.shadowRoot!.querySelector('.tachi-lens-caption-row')).not.toBeNull()
+
+      dispatch({ type: 'speech_caption_cleared', payload: { reason: 'silence' } })
+      expect(overlayHost()!.shadowRoot!.querySelector('.tachi-lens-caption-row')).toBeNull()
+      expect(overlayHost()).not.toBeNull()
+
+      vi.unstubAllGlobals()
+    })
+
+    it('shows the sanitized error chip on speech_state error and auto-hides on recovery', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_state', payload: { state: 'error', errorKey: 'speechErrorAuth' } })
+      const chip = overlayHost()!.shadowRoot!.querySelector('.tachi-lens-error-chip')!
+      expect(chip.classList.contains('hidden')).toBe(false)
+      expect(chip.textContent).toBe('語音驗證失敗，請檢查語音 API Key')
+
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      expect(chip.classList.contains('hidden')).toBe(true)
+
+      vi.unstubAllGlobals()
+    })
+
+    it('sends speech_control toggle when the collapse handle is clicked', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      const handle = overlayHost()!.shadowRoot!.querySelector<HTMLButtonElement>('.tachi-lens-collapse-handle')!
+      expect(handle).not.toBeNull()
+      handle.click()
+      await Promise.resolve()
+
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'speech_control',
+        payload: { action: 'toggle' },
+      })
+
+      vi.unstubAllGlobals()
+    })
+
+    it('applies speech_settings_updated to the overlay', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      dispatch({ type: 'speech_settings_updated', payload: { captionMaxLines: 3, captionOpacity: 50 } })
+
+      const root = overlayHost()!.shadowRoot!.querySelector('.tachi-lens-overlay-root') as HTMLElement
+      expect(root.style.opacity).toBe('0.5')
+
+      for (let i = 1; i <= 4; i++) {
+        dispatch({ type: 'speech_caption', payload: { id: `c${i}`, text: `line ${i}`, interim: false } })
+      }
+      const rows = overlayHost()!.shadowRoot!.querySelectorAll('.tachi-lens-caption-row')
+      expect(rows).toHaveLength(3)
+      expect(rows[0]!.textContent).toBe('line 2')
+
+      vi.unstubAllGlobals()
+    })
+  })
 })
