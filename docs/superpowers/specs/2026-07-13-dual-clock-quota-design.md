@@ -31,6 +31,20 @@ When wall time catches up, the rollback latch clears only for trusted snapshots.
 
 Provider-day strings must pass real Gregorian `YYYY-MM-DD` validation before comparison. RPD resets only if the current valid Pacific date is lexically later than the stored valid date and the wall clock is not behind its trusted high-water mark. Earlier, invalid, or ambiguous dates retain the existing provider day and count.
 
+## Forward wall jumps across worker restart (accepted residual risk)
+
+Within one worker context, a forward wall jump is clamped by monotonic elapsed time, so it can never reset RPD or shorten rolling/cooldown deadlines. Across a worker restart the previous monotonic epoch is gone, and the first observation in the new context adopts `max(currentWall, wallHighWaterMark)` as the trusted wall reference. A forward wall jump first observed after restart is therefore indistinguishable from legitimate downtime, and it may advance rolling state, expire cooldowns, or cross a Pacific provider day (resetting RPD) before any monotonic elapsed time proves the transition.
+
+Issue #64 evaluated whether this restart gap can be detected or conservatively bounded. The conclusion is that reliable local detection is not achievable at reasonable cost without unacceptable false positives: legitimate downtime is unbounded (overnight shutdown, vacation), best-effort shutdown markers are unreliable on crash/reboot/update, Chrome exposes no previous-session-end instant, and alarms cover only the running-browser interval. Every candidate mechanism either denies a valid returning user (false positive) or leaves an attacker-detectable bypass. The accepted policy keeps the current behavior unchanged and documents the residual risk:
+
+- Never reset or discard valid RPD/RPM/TPM usage merely because the clock moved.
+- Keep backward jumps fail-closed across restarts via the persisted high-water mark.
+- Treat a forward wall value first observed after restart as accepted; provider-day reset proceeds under the normal rule.
+- DeepSeek overflow remains available whenever Gemini is denied.
+- No lifecycle marker, alarm, elapsed-time threshold, or provider-day heuristic becomes an enforcement input, and no external request is added solely to validate time.
+
+Residual risk: an attacker able to change the system clock can terminate or wait for the worker to terminate, advance the clock across a Pacific provider-day boundary, and enlarge extension-side RPD capacity by up to one configured safe daily allowance per accepted forward transition. Provider-side rate limits, daily limits, billing controls, and account caps remain the ultimate bound, and a backward return triggers the persisted high-water rollback protection. No false-positive denial of legitimate users is introduced. External authoritative time could remove the ambiguity but adds a dependency and privacy/availability trade-off disproportionate to this bounded harm, so it is intentionally not pursued.
+
 ## Tests
 
 Store tests cover backward wall movement with full RPM/TPM, Pacific-date rollback across PDT and PST, restart behind the high-water mark, cooldown retention, recovery, high-water monotonicity, and version-2 migration. Scheduler/Translator tests use the real `Translator -> QuotaScheduler -> GeminiQuotaStore -> Provider` path to verify `clock_rollback` overflow, no Gemini dispatch while fail closed, DeepSeek availability, and monotonic live deadlines despite wall adjustment.
