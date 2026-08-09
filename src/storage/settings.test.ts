@@ -3,22 +3,29 @@ import {
   API_KEY_PREVIEWS_STORAGE_KEY,
   API_KEYS_STORAGE_KEY,
   RUNTIME_STATE_STORAGE_KEY,
+  SPEECH_API_KEY_PREVIEWS_STORAGE_KEY,
+  SPEECH_API_KEYS_STORAGE_KEY,
   DEFAULT_SETTINGS,
   deleteApiKey,
   deleteChannelSettings,
+  deleteSpeechApiKey,
   getApiKeyForServiceWorker,
   getChannelSettings,
   getMaskedApiKeyForPopup,
+  getMaskedSpeechApiKeyForPopup,
   getPerChannelSettings,
   getRuntimeState,
+  getSpeechApiKeyForServiceWorker,
   getUserSettings,
   initializeStorageAccess,
   maskApiKey,
   mergeSettings,
+  normalizeSpeechConfig,
   rotateApiKey,
   saveApiKey,
   saveChannelSettings,
   saveRuntimeState,
+  saveSpeechApiKey,
   saveUserSettings,
   type StorageAreaLike,
   type UserSettings,
@@ -264,6 +271,228 @@ describe('settings storage', () => {
       minTextLength: 4,
     })
     expect(storage.session.set).not.toHaveBeenCalled()
+  })
+
+  describe('speech config', () => {
+    it('defaults to speech-disabled with Gemini and the chat default language', () => {
+      expect(DEFAULT_SETTINGS.speechConfig).toEqual({
+        speechEnabled: false,
+        speechProvider: 'gemini',
+        speechModel: expect.any(String),
+        speechTargetLanguage: 'zh-TW',
+        captionMaxLines: 2,
+        captionOpacity: 100,
+        maxSessionMinutes: 30,
+      })
+    })
+
+    it('loads defaults for a legacy stored userSettings without the speechConfig field', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.userSettings = {
+        selectedProvider: 'deepseek',
+        targetLanguage: 'zh-TW',
+      }
+
+      const settings = await getUserSettings(storage)
+
+      expect(settings.speechConfig).toEqual(DEFAULT_SETTINGS.speechConfig)
+      expect(settings.speechConfig.speechEnabled).toBe(false)
+    })
+
+    it('loads a valid stored speech config', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.userSettings = {
+        speechConfig: {
+          speechEnabled: true,
+          speechProvider: 'gemini',
+          speechModel: 'gemini-2.5-pro',
+          speechTargetLanguage: 'en',
+          captionMaxLines: 3,
+          captionOpacity: 80,
+          maxSessionMinutes: 45,
+        },
+      }
+
+      const settings = await getUserSettings(storage)
+
+      expect(settings.speechConfig).toEqual({
+        speechEnabled: true,
+        speechProvider: 'gemini',
+        speechModel: 'gemini-2.5-pro',
+        speechTargetLanguage: 'en',
+        captionMaxLines: 3,
+        captionOpacity: 80,
+        maxSessionMinutes: 45,
+      })
+    })
+
+    it('rejects an unknown speech provider and falls back to gemini', () => {
+      expect(normalizeSpeechConfig({ speechProvider: 'bogus' }).speechProvider).toBe('gemini')
+    })
+
+    it('clamps captionMaxLines to at least 1', () => {
+      expect(normalizeSpeechConfig({ captionMaxLines: 0 }).captionMaxLines).toBe(1)
+      expect(normalizeSpeechConfig({ captionMaxLines: -5 }).captionMaxLines).toBe(1)
+      expect(normalizeSpeechConfig({ captionMaxLines: 2.7 }).captionMaxLines).toBe(2)
+      expect(normalizeSpeechConfig({ captionMaxLines: 4 }).captionMaxLines).toBe(4)
+    })
+
+    it('clamps captionOpacity to 0..100', () => {
+      expect(normalizeSpeechConfig({ captionOpacity: -1 }).captionOpacity).toBe(0)
+      expect(normalizeSpeechConfig({ captionOpacity: 0 }).captionOpacity).toBe(0)
+      expect(normalizeSpeechConfig({ captionOpacity: 150 }).captionOpacity).toBe(100)
+      expect(normalizeSpeechConfig({ captionOpacity: 42.5 }).captionOpacity).toBe(42)
+    })
+
+    it('clamps maxSessionMinutes to at least 1', () => {
+      expect(normalizeSpeechConfig({ maxSessionMinutes: 0 }).maxSessionMinutes).toBe(1)
+      expect(normalizeSpeechConfig({ maxSessionMinutes: -10 }).maxSessionMinutes).toBe(1)
+      expect(normalizeSpeechConfig({ maxSessionMinutes: 60 }).maxSessionMinutes).toBe(60)
+    })
+
+    it('falls back to defaults for malformed speech config values', () => {
+      expect(normalizeSpeechConfig(null)).toEqual(DEFAULT_SETTINGS.speechConfig)
+      expect(normalizeSpeechConfig('nope')).toEqual(DEFAULT_SETTINGS.speechConfig)
+      expect(normalizeSpeechConfig({ speechModel: '   ' }).speechModel)
+        .toBe(DEFAULT_SETTINGS.speechConfig.speechModel)
+      expect(normalizeSpeechConfig({ speechTargetLanguage: 42 }).speechTargetLanguage)
+        .toBe(DEFAULT_SETTINGS.speechConfig.speechTargetLanguage)
+    })
+
+    it('normalizes malformed stored speech config at the storage boundary', async () => {
+      const storage = createChromeStorage()
+      storage.local.data.userSettings = {
+        speechConfig: {
+          speechProvider: 'bogus',
+          captionMaxLines: 0,
+          captionOpacity: 300,
+          maxSessionMinutes: -1,
+        },
+      }
+
+      const settings = await getUserSettings(storage)
+
+      expect(settings.speechConfig.speechProvider).toBe('gemini')
+      expect(settings.speechConfig.captionMaxLines).toBe(1)
+      expect(settings.speechConfig.captionOpacity).toBe(100)
+      expect(settings.speechConfig.maxSessionMinutes).toBe(1)
+    })
+
+    it('normalizes malformed speech config updates before persisting them', async () => {
+      const storage = createChromeStorage()
+
+      const settings = await saveUserSettings({
+        speechConfig: {
+          speechEnabled: true,
+          speechProvider: 'bogus' as never,
+          speechModel: 'gemini-2.5-pro',
+          speechTargetLanguage: 'en',
+          captionMaxLines: 0,
+          captionOpacity: 250,
+          maxSessionMinutes: -3,
+        },
+      }, storage)
+
+      expect(settings.speechConfig.speechProvider).toBe('gemini')
+      expect(settings.speechConfig.captionMaxLines).toBe(1)
+      expect(settings.speechConfig.captionOpacity).toBe(100)
+      expect(settings.speechConfig.maxSessionMinutes).toBe(1)
+      const stored = (storage.local.data.userSettings as UserSettings).speechConfig
+      expect(stored.speechEnabled).toBe(true)
+      expect(stored.captionOpacity).toBe(100)
+    })
+
+    it('never stores speech config in a channel override', async () => {
+      const storage = createChromeStorage()
+
+      await saveChannelSettings('testchannel', {
+        targetLanguage: 'en',
+        speechConfig: { ...DEFAULT_SETTINGS.speechConfig, speechEnabled: true },
+      }, storage)
+
+      const perChannel = await getChannelSettings('testchannel', storage)
+      expect(perChannel).not.toHaveProperty('speechConfig')
+      expect(perChannel?.targetLanguage).toBe('en')
+    })
+
+    it('mergeSettings keeps the global speech config and ignores a channel override', () => {
+      const global = { ...DEFAULT_SETTINGS, speechConfig: { ...DEFAULT_SETTINGS.speechConfig, captionMaxLines: 5 } }
+      const result = mergeSettings(global, {
+        speechConfig: { ...DEFAULT_SETTINGS.speechConfig, speechEnabled: true },
+        targetLanguage: 'ja',
+      })
+
+      expect(result.targetLanguage).toBe('ja')
+      expect(result.speechConfig.captionMaxLines).toBe(5)
+      expect(result.speechConfig.speechEnabled).toBe(false)
+    })
+
+    it('changing speech config does not alter chat provider or model fields', async () => {
+      const storage = createChromeStorage()
+      const before = await getUserSettings(storage)
+
+      await saveUserSettings({
+        speechConfig: { ...DEFAULT_SETTINGS.speechConfig, speechEnabled: true },
+      }, storage)
+
+      const after = await getUserSettings(storage)
+      expect(after.selectedProvider).toBe(before.selectedProvider)
+      expect(after.selectedModel).toBe(before.selectedModel)
+      expect(after.targetLanguage).toBe(before.targetLanguage)
+      expect(after.speechConfig.speechEnabled).toBe(true)
+    })
+  })
+
+  describe('speech API key namespace', () => {
+    it('stores speech keys under separate storage keys', async () => {
+      const storage = createChromeStorage()
+
+      await saveSpeechApiKey('gemini', 'sk-speech-secret', storage)
+
+      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'sk-speech-secret' })
+      expect(storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]).toEqual({ gemini: 'sk-*********cret' })
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toBeUndefined()
+      expect(storage.local.data[API_KEY_PREVIEWS_STORAGE_KEY]).toBeUndefined()
+    })
+
+    it('never returns a chat key from the speech accessor and vice versa', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'chat-key' }
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'speech-key' }
+
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('speech-key')
+      await expect(getApiKeyForServiceWorker('gemini', storage)).resolves.toBe('chat-key')
+    })
+
+    it('returns only masked speech keys for the popup', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'sk-full-speech-key-here' }
+      storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: 'sk-******ere' }
+
+      await expect(getMaskedSpeechApiKeyForPopup('gemini', storage)).resolves.toBe('sk-******ere')
+    })
+
+    it('deletes speech keys without touching chat keys', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'speech-old' }
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'chat-old' }
+
+      await deleteSpeechApiKey('gemini', storage)
+
+      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'chat-old' })
+    })
+
+    it('clears an existing speech key when saving an empty value', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'speech-old' }
+      storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: 'sp***old' }
+
+      await saveSpeechApiKey('gemini', '   ', storage)
+
+      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]).toEqual({})
+    })
   })
 
   it('stores full API keys in chrome.storage.local without writing to session storage', async () => {

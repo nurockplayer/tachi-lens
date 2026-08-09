@@ -80,5 +80,13 @@
   "quotaHealthRecoveryAt": { "message": "自動恢復時間" },
   "quotaHealthDeepSeekOverflow": { "message": "Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。" },
   "quotaHealthRepair": { "message": "修復配額資料" },
-  "quotaHealthRepairConfirm": { "message": "確認修復？" }
+  "quotaHealthRepairConfirm": { "message": "確認修復？" },
+  "speechSection": { "message": "語音字幕" },
+  "speechEnabled": { "message": "啟用語音字幕" },
+  "speechProvider": { "message": "語音提供者" },
+  "speechModel": { "message": "語音模型" },
+  "speechTargetLanguage": { "message": "語音目標語言" },
+  "speechCaptionMaxLines": { "message": "字幕最大行數" },
+  "speechCaptionOpacity": { "message": "字幕不透明度 (%)" },
+  "speechMaxSessionMinutes": { "message": "單次語音時段上限 (分鐘)" }
 }

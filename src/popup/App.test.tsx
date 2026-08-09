@@ -80,6 +80,12 @@ describe('Popup App', () => {
     expect(DEFAULT_SETTINGS.displayMode).toBe('below')
   })
 
+  it('defaults to speech-disabled with the Gemini speech provider', () => {
+    expect(DEFAULT_SETTINGS.speechConfig.speechEnabled).toBe(false)
+    expect(DEFAULT_SETTINGS.speechConfig.speechProvider).toBe('gemini')
+    expect(DEFAULT_SETTINGS.speechConfig.speechTargetLanguage).toBe('zh-TW')
+  })
+
   it('masks API keys correctly for display', () => {
     expect(maskApiKey('sk-abc123xyz')).toMatch(/^sk-.*xyz$/)
     expect(maskApiKey('sk-abc123xyz')).not.toContain('abc123')

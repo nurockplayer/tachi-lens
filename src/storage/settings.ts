@@ -10,6 +10,8 @@ import {
   normalizeGeminiQuotaSettings,
   type GeminiQuotaSettings,
 } from '@/background/gemini-quota'
+import { SPEECH_GEMINI_DEFAULT_MODEL, isSpeechProviderId } from '@/providers/speech-types'
+import type { SpeechProviderId, SpeechTranslationConfig } from '@/providers/speech-types'
 import type { ChineseVariantMode } from '@/shared/language-detection'
 
 export interface StorageAreaLike {
@@ -39,6 +41,18 @@ export interface UserSettings extends FilterConfig {
   filterConfig: FilterConfig
   geminiQuota: GeminiQuotaSettings
   geminiQuotaProfiles: Record<string, GeminiQuotaSettings>
+  /** v0.3 speech config — global-only, independent of chat settings (Spec §5). */
+  speechConfig: SpeechTranslationConfig
+}
+
+export const DEFAULT_SPEECH_CONFIG: SpeechTranslationConfig = {
+  speechEnabled: false,
+  speechProvider: 'gemini',
+  speechModel: SPEECH_GEMINI_DEFAULT_MODEL,
+  speechTargetLanguage: 'zh-TW',
+  captionMaxLines: 2,
+  captionOpacity: 100,
+  maxSessionMinutes: 30,
 }
 
 export const DEFAULT_GEMINI_QUOTA_PROFILES: Record<string, GeminiQuotaSettings> =
@@ -57,6 +71,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   filterConfig: DEFAULT_FILTER_CONFIG,
   geminiQuota: DEFAULT_GEMINI_QUOTA,
   geminiQuotaProfiles: DEFAULT_GEMINI_QUOTA_PROFILES,
+  speechConfig: DEFAULT_SPEECH_CONFIG,
 }
 
 export interface RuntimeState {
@@ -68,6 +83,8 @@ export interface RuntimeState {
 export const USER_SETTINGS_STORAGE_KEY = 'userSettings'
 export const API_KEYS_STORAGE_KEY = 'providerApiKeys'
 export const API_KEY_PREVIEWS_STORAGE_KEY = 'providerApiKeyPreviews'
+export const SPEECH_API_KEYS_STORAGE_KEY = 'speechProviderApiKeys'
+export const SPEECH_API_KEY_PREVIEWS_STORAGE_KEY = 'speechProviderApiKeyPreviews'
 export const RUNTIME_STATE_STORAGE_KEY = 'runtimeState'
 export const PER_CHANNEL_SETTINGS_STORAGE_KEY = 'perChannelSettings'
 
@@ -75,6 +92,8 @@ export type PerChannelSettings = Record<string, Partial<UserSettings>>
 
 type ApiKeyMap = Partial<Record<ProviderId, string>>
 type ApiKeyPreviewMap = Partial<Record<ProviderId, string>>
+type SpeechApiKeyMap = Partial<Record<SpeechProviderId, string>>
+type SpeechApiKeyPreviewMap = Partial<Record<SpeechProviderId, string>>
 
 const getDefaultStorage = (): ChromeStorageLike => chrome.storage
 
@@ -103,6 +122,37 @@ export const normalizeGeminiQuotaProfiles = (
       : legacyProfile
     return [modelId, normalizeGeminiQuotaSettings(merged)]
   }))
+}
+
+const clampInt = (value: unknown, fallback: number, min: number, max = Number.MAX_SAFE_INTEGER): number =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, Math.floor(value)))
+    : fallback
+
+/**
+ * Storage-boundary guard for the v0.3 speech config. Rejects unknown providers,
+ * clamps captionMaxLines to >=1, captionOpacity to 0..100, and maxSessionMinutes
+ * to >=1. Mirrors the normalizeChineseVariantMode / normalizeGeminiQuotaProfiles
+ * pattern (Spec §5).
+ */
+export const normalizeSpeechConfig = (value: unknown): SpeechTranslationConfig => {
+  const candidate = isRecord(value) ? value : {}
+
+  return {
+    speechEnabled: candidate.speechEnabled === true,
+    speechProvider: typeof candidate.speechProvider === 'string' && isSpeechProviderId(candidate.speechProvider)
+      ? candidate.speechProvider
+      : DEFAULT_SPEECH_CONFIG.speechProvider,
+    speechModel: typeof candidate.speechModel === 'string' && candidate.speechModel.trim()
+      ? candidate.speechModel.trim()
+      : DEFAULT_SPEECH_CONFIG.speechModel,
+    speechTargetLanguage: typeof candidate.speechTargetLanguage === 'string' && candidate.speechTargetLanguage.trim()
+      ? candidate.speechTargetLanguage.trim()
+      : DEFAULT_SPEECH_CONFIG.speechTargetLanguage,
+    captionMaxLines: clampInt(candidate.captionMaxLines, DEFAULT_SPEECH_CONFIG.captionMaxLines, 1),
+    captionOpacity: clampInt(candidate.captionOpacity, DEFAULT_SPEECH_CONFIG.captionOpacity, 0, 100),
+    maxSessionMinutes: clampInt(candidate.maxSessionMinutes, DEFAULT_SPEECH_CONFIG.maxSessionMinutes, 1),
+  }
 }
 
 const readRecord = async (area: StorageAreaLike, key: string): Promise<Record<string, unknown>> => {
@@ -137,6 +187,7 @@ export const getUserSettings = async (storage = getDefaultStorage()): Promise<Us
     chineseVariantMode: normalizeChineseVariantMode(storedSettings.chineseVariantMode),
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(storedSettings.geminiQuotaProfiles, geminiQuota),
+    speechConfig: normalizeSpeechConfig(storedSettings.speechConfig),
   }
 }
 
@@ -155,6 +206,7 @@ export const saveUserSettings = async (
     chineseVariantMode: normalizeChineseVariantMode(mergedSettings.chineseVariantMode),
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(profilesSource, geminiQuota),
+    speechConfig: normalizeSpeechConfig(mergedSettings.speechConfig),
   }
 
   await storage.local.set({ [USER_SETTINGS_STORAGE_KEY]: nextSettings })
@@ -234,6 +286,73 @@ export const getMaskedApiKeyForPopup = async (
   return apiKeyPreviews[providerId]
 }
 
+const readSpeechApiKeys = async (storage: ChromeStorageLike): Promise<SpeechApiKeyMap> =>
+  readRecord(storage.local, SPEECH_API_KEYS_STORAGE_KEY) as SpeechApiKeyMap
+
+const readSpeechApiKeyPreviews = async (storage: ChromeStorageLike): Promise<SpeechApiKeyPreviewMap> =>
+  readRecord(storage.local, SPEECH_API_KEY_PREVIEWS_STORAGE_KEY) as SpeechApiKeyPreviewMap
+
+export const saveSpeechApiKey = async (
+  providerId: SpeechProviderId,
+  apiKey: string,
+  storage = getDefaultStorage(),
+): Promise<void> => {
+  const normalizedKey = apiKey.trim()
+
+  if (!normalizedKey) {
+    await deleteSpeechApiKey(providerId, storage)
+    return
+  }
+
+  const speechApiKeys = await readSpeechApiKeys(storage)
+  const speechApiKeyPreviews = await readSpeechApiKeyPreviews(storage)
+
+  await storage.local.set({
+    [SPEECH_API_KEYS_STORAGE_KEY]: {
+      ...speechApiKeys,
+      [providerId]: normalizedKey,
+    },
+    [SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]: {
+      ...speechApiKeyPreviews,
+      [providerId]: maskApiKey(normalizedKey),
+    },
+  })
+}
+
+export const deleteSpeechApiKey = async (
+  providerId: SpeechProviderId,
+  storage = getDefaultStorage(),
+): Promise<void> => {
+  const speechApiKeys = await readSpeechApiKeys(storage)
+  const speechApiKeyPreviews = await readSpeechApiKeyPreviews(storage)
+
+  delete speechApiKeys[providerId]
+  delete speechApiKeyPreviews[providerId]
+
+  await storage.local.set({
+    [SPEECH_API_KEYS_STORAGE_KEY]: speechApiKeys,
+    [SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]: speechApiKeyPreviews,
+  })
+}
+
+export const getSpeechApiKeyForServiceWorker = async (
+  providerId: SpeechProviderId,
+  storage = getDefaultStorage(),
+): Promise<string | undefined> => {
+  const speechApiKeys = await readSpeechApiKeys(storage)
+
+  return speechApiKeys[providerId]
+}
+
+export const getMaskedSpeechApiKeyForPopup = async (
+  providerId: SpeechProviderId,
+  storage = getDefaultStorage(),
+): Promise<string | undefined> => {
+  const speechApiKeyPreviews = await readSpeechApiKeyPreviews(storage)
+
+  return speechApiKeyPreviews[providerId]
+}
+
 export const saveRuntimeState = async (
   runtimeState: RuntimeState,
   storage = getDefaultStorage(),
@@ -269,6 +388,9 @@ export const saveChannelSettings = async (
   const {
     geminiQuota: _ignoredLegacyQuota,
     geminiQuotaProfiles: _ignoredQuotaProfiles,
+    // Speech config is global-only in v0.3 (Spec §5, §13); never persisted in
+    // a per-channel override, exactly like the Gemini quota fields.
+    speechConfig: _ignoredSpeechConfig,
     ...channelSettings
   } = settings
 
@@ -298,6 +420,8 @@ export const mergeSettings = (
   const {
     geminiQuota: _ignoredLegacyQuota,
     geminiQuotaProfiles: _ignoredQuotaProfiles,
+    // Speech config is global-only in v0.3; channel overrides never carry it.
+    speechConfig: _ignoredSpeechConfig,
     ...channelSettings
   } = channel ?? {}
   const merged = { ...global, ...channelSettings }
@@ -312,5 +436,6 @@ export const mergeSettings = (
     chineseVariantMode,
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(global.geminiQuotaProfiles, geminiQuota),
+    speechConfig: normalizeSpeechConfig(global.speechConfig),
   }
 }
