@@ -1,5 +1,5 @@
+import { getGeminiErrorMessage, getGeminiRetryAfterMs, readGeminiErrorBody } from './gemini-errors'
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
-import { parseRetryAfterMs } from './retry-after'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const GEMINI_MODELS: ProviderModel[] = [
@@ -42,7 +42,7 @@ export const createGeminiProvider = (
       if (!response.ok) {
         const errorBody = await readGeminiErrorBody(response)
         const error = getGeminiErrorMessage(errorBody) ?? `Gemini API error (${response.status})`
-        const retryAfterMs = getRetryAfterMs(response, errorBody)
+        const retryAfterMs = getGeminiRetryAfterMs(response, errorBody)
 
         return allErrors(requests, error, {
           status: response.status,
@@ -88,59 +88,6 @@ const extractGeminiText = (data: unknown): string | undefined => {
   const textParts = parts?.parts as Array<Record<string, unknown>> | undefined
   const textPart = textParts?.find((p) => typeof p.text === 'string')
   return textPart?.text as string | undefined
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const readGeminiErrorBody = async (response: Response): Promise<Record<string, unknown> | undefined> => {
-  try {
-    const body: unknown = await response.json()
-    return isRecord(body) ? body : undefined
-  } catch {
-    return undefined
-  }
-}
-
-const getGeminiErrorMessage = (body: Record<string, unknown> | undefined): string | undefined => {
-  const error = body?.error
-  if (!isRecord(error) || typeof error.message !== 'string') return undefined
-
-  const message = error.message.trim()
-  return message ? message.slice(0, 500) : undefined
-}
-
-const parseSeconds = (value: string): number | undefined => {
-  const match = value.trim().match(/^(\d+(?:\.\d+)?)s?$/i)
-  if (!match) return undefined
-
-  const seconds = Number(match[1])
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
-}
-
-const getRetryAfterMs = (
-  response: Response,
-  body: Record<string, unknown> | undefined,
-): number | undefined => {
-  const headerDelay = response.headers.get('retry-after')
-  if (headerDelay) {
-    const parsedHeader = parseRetryAfterMs(headerDelay) ?? parseSeconds(headerDelay)
-    if (parsedHeader !== undefined) return parsedHeader
-  }
-
-  const error = body?.error
-  if (!isRecord(error) || !Array.isArray(error.details)) return undefined
-
-  for (const detail of error.details) {
-    if (!isRecord(detail)) continue
-    if (detail['@type'] !== 'type.googleapis.com/google.rpc.RetryInfo') continue
-    if (typeof detail.retryDelay !== 'string') continue
-
-    const parsedDetail = parseSeconds(detail.retryDelay)
-    if (parsedDetail !== undefined) return parsedDetail
-  }
-
-  return undefined
 }
 
 const allErrors = (
