@@ -198,6 +198,13 @@ const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
   queue_obsolete_drop: '佇列過時項目已丟棄',
   // #104: persistent L2 IndexedDB cache hits, aggregated as a bounded counter.
   l2_cache_hit: '持久快取命中',
+  // v0.3 speech counters (Spec §6). Aggregated counts only — never transcript
+  // text, audio, channel names, provider bodies, or keys.
+  speech_started: '語音字幕已啟動',
+  speech_stopped: '語音字幕已停止',
+  speech_caption_emitted: '語音字幕已輸出',
+  speech_chunk_sent: '語音片段已送出',
+  speech_error: '語音錯誤',
 }
 
 const isCountStage = (stage: DiagnosticStage): boolean =>
@@ -206,6 +213,11 @@ const isCountStage = (stage: DiagnosticStage): boolean =>
   || stage === 'queue_overflow_drop'
   || stage === 'queue_obsolete_drop'
   || stage === 'l2_cache_hit'
+  || stage === 'speech_started'
+  || stage === 'speech_stopped'
+  || stage === 'speech_caption_emitted'
+  || stage === 'speech_chunk_sent'
+  || stage === 'speech_error'
 
 const mergeDiagnostics = (current: DiagnosticEvent[], incoming: DiagnosticEvent[]): DiagnosticEvent[] => {
   const byId = new Map(current.map((event) => [event.id, event]))

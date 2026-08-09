@@ -8,6 +8,15 @@ vi.mock('@/storage/settings', () => ({
     selectedProvider: 'deepseek',
     selectedModel: 'deepseek-v4-flash',
     targetLanguage: 'zh-TW',
+    speechConfig: {
+      speechEnabled: true,
+      speechProvider: 'gemini',
+      speechModel: 'gemini-2.5-flash',
+      speechTargetLanguage: 'zh-TW',
+      captionMaxLines: 2,
+      captionOpacity: 100,
+      maxSessionMinutes: 30,
+    },
   })),
   getApiKeyForServiceWorker: vi.fn(async () => undefined),
   getRuntimeState: vi.fn(async () => ({})),
@@ -17,10 +26,22 @@ vi.mock('@/storage/settings', () => ({
   deleteApiKey: vi.fn(async () => undefined),
   getMaskedApiKeyForPopup: vi.fn(async () => undefined),
   saveUserSettings: vi.fn(async () => undefined),
+  getSpeechApiKeyForServiceWorker: vi.fn(async () => 'speech-key'),
 }))
 
 vi.mock('@/providers/registry', () => ({
   getProvider: vi.fn(() => undefined),
+}))
+
+vi.mock('@/providers/speech-registry', () => ({
+  getSpeechProvider: vi.fn(() => ({
+    id: 'gemini',
+    displayName: 'Gemini',
+    models: [],
+    defaultModel: 'gemini-2.5-flash',
+    transcribeChunk: vi.fn(async () => []),
+    validateKey: vi.fn(async () => ({ valid: true })),
+  })),
 }))
 
 const createChromeRuntime = () => ({
@@ -555,5 +576,95 @@ describe('service worker startup', () => {
     const result = response.payload[0] as { quotaKey: string; status: string }
     expect(result.quotaKey).toBe('gemini-2.5-pro')
     expect(result.status).toBe('malformed_snapshot')
+  })
+
+  describe('speech_control routing (#160)', () => {
+    const createSpeechChrome = () => {
+      const sendMessage = vi.fn(async () => undefined)
+      const storageLocal: Record<string, unknown> = {}
+      const storageSession: Record<string, unknown> = {}
+      const chromeRuntime = {
+        ...createChromeRuntime(),
+        runtime: {
+          ...createChromeRuntime().runtime,
+          sendMessage,
+        },
+        storage: {
+          local: {
+            get: vi.fn(async (keys: string | string[] | Record<string, unknown> | null) => {
+              if (typeof keys === 'string') return { [keys]: storageLocal[keys] }
+              if (Array.isArray(keys)) return Object.fromEntries(keys.map((k) => [k, storageLocal[k]]))
+              return { ...storageLocal }
+            }),
+            set: vi.fn(async (items: Record<string, unknown>) => { Object.assign(storageLocal, items) }),
+          },
+          session: {
+            get: vi.fn(async (keys: string | string[] | Record<string, unknown> | null) => {
+              if (typeof keys === 'string') return { [keys]: storageSession[keys] }
+              if (Array.isArray(keys)) return Object.fromEntries(keys.map((k) => [k, storageSession[k]]))
+              return { ...storageSession }
+            }),
+            set: vi.fn(async (items: Record<string, unknown>) => { Object.assign(storageSession, items) }),
+          },
+        },
+        tabs: {
+          query: vi.fn(async () => []),
+          sendMessage,
+        },
+      }
+      return { chromeRuntime, sendMessage }
+    }
+
+    it('routes speech_control start to the pipeline without throwing', async () => {
+      const { chromeRuntime } = createSpeechChrome()
+      vi.stubGlobal('chrome', chromeRuntime)
+
+      await import('./service-worker')
+
+      const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+        | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+        | undefined
+      if (!handler) throw new Error('Expected a message handler to be registered')
+
+      // start must be routed (returns false = async fire-and-forget broadcast).
+      const result = handler({ type: 'speech_control', payload: { action: 'start' } }, undefined, vi.fn())
+      expect(result).toBe(false)
+
+      // Give the pipeline's async start time to run without an unhandled rejection.
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+
+    it('routes speech_control stop and toggle', async () => {
+      const { chromeRuntime } = createSpeechChrome()
+      vi.stubGlobal('chrome', chromeRuntime)
+
+      await import('./service-worker')
+
+      const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+        | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+        | undefined
+      if (!handler) throw new Error('Expected a message handler to be registered')
+
+      expect(handler({ type: 'speech_control', payload: { action: 'stop' } }, undefined, vi.fn())).toBe(false)
+      expect(handler({ type: 'speech_control', payload: { action: 'toggle', channelName: 'somechannel' } }, undefined, vi.fn())).toBe(false)
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+
+    it('rejects malformed speech_control payloads (falls through to the router)', async () => {
+      const { chromeRuntime } = createSpeechChrome()
+      vi.stubGlobal('chrome', chromeRuntime)
+
+      await import('./service-worker')
+
+      const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+        | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+        | undefined
+      if (!handler) throw new Error('Expected a message handler to be registered')
+
+      // Unknown action is not a valid speech_control → not routed by the guard.
+      const result = handler({ type: 'speech_control', payload: { action: 'banana' } }, undefined, vi.fn())
+      expect(result).toBe(false)
+    })
   })
 })
