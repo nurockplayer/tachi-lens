@@ -277,6 +277,7 @@ describe('settings storage', () => {
     it('defaults to speech-disabled with Gemini and the chat default language', () => {
       expect(DEFAULT_SETTINGS.speechConfig).toEqual({
         speechEnabled: false,
+        speechConsentGranted: false,
         speechProvider: 'gemini',
         speechModel: expect.any(String),
         speechTargetLanguage: 'zh-TW',
@@ -317,6 +318,7 @@ describe('settings storage', () => {
 
       expect(settings.speechConfig).toEqual({
         speechEnabled: true,
+        speechConsentGranted: false,
         speechProvider: 'gemini',
         speechModel: 'gemini-2.5-pro',
         speechTargetLanguage: 'en',
@@ -384,6 +386,7 @@ describe('settings storage', () => {
       const settings = await saveUserSettings({
         speechConfig: {
           speechEnabled: true,
+          speechConsentGranted: true,
           speechProvider: 'bogus' as never,
           speechModel: 'gemini-2.5-pro',
           speechTargetLanguage: 'en',

@@ -30,6 +30,7 @@ describe('speech provider types', () => {
   it('speech config defaults to disabled, Gemini, and the chat default language', () => {
     const config: SpeechTranslationConfig = {
       speechEnabled: false,
+      speechConsentGranted: false,
       speechProvider: 'gemini',
       speechModel: SPEECH_GEMINI_DEFAULT_MODEL,
       speechTargetLanguage: 'zh-TW',
@@ -39,6 +40,7 @@ describe('speech provider types', () => {
     }
 
     expect(config.speechEnabled).toBe(false)
+    expect(config.speechConsentGranted).toBe(false)
     expect(config.speechProvider).toBe('gemini')
     expect(config.speechTargetLanguage).toBe('zh-TW')
     expect(config.captionMaxLines).toBe(2)

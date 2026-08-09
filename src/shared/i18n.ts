@@ -112,6 +112,19 @@ export type MessageKey =
   | 'speechStateCapturing'
   | 'speechStateTranscribing'
   | 'speechStatePaused'
+  // v0.3 speech consent panel + live status (Issue #162). Consent copy per
+  // Spec §8.2; the live-state labels reuse the #160 speech_state contract.
+  | 'speechConsentTitle'
+  | 'speechConsentIntro'
+  | 'speechConsentCaptureTabAudio'
+  | 'speechConsentSendProvider'
+  | 'speechConsentNeverStored'
+  | 'speechConsentBilledPerKey'
+  | 'speechConsentActiveVisible'
+  | 'speechConsentConfirm'
+  | 'speechConsentCancel'
+  | 'speechStatus'
+  | 'speechStateIdle'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -216,6 +229,17 @@ export const MESSAGE_KEYS: readonly string[] = [
   'speechStateCapturing',
   'speechStateTranscribing',
   'speechStatePaused',
+  'speechConsentTitle',
+  'speechConsentIntro',
+  'speechConsentCaptureTabAudio',
+  'speechConsentSendProvider',
+  'speechConsentNeverStored',
+  'speechConsentBilledPerKey',
+  'speechConsentActiveVisible',
+  'speechConsentConfirm',
+  'speechConsentCancel',
+  'speechStatus',
+  'speechStateIdle',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -321,6 +345,18 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   speechStateCapturing: '語音字幕錄製中',
   speechStateTranscribing: '語音轉錄中...',
   speechStatePaused: '語音字幕已暫停',
+  // Consent panel copy (Spec §8.2) + live status (Issue #162).
+  speechConsentTitle: '啟用語音字幕前，請先確認',
+  speechConsentIntro: '啟用後，tachi-lens 將：',
+  speechConsentCaptureTabAudio: '錄製目前 Twitch 分頁的音訊',
+  speechConsentSendProvider: '將音訊傳送至你所選的 BYOK 提供者進行轉錄',
+  speechConsentNeverStored: '音訊不會被儲存或保留',
+  speechConsentBilledPerKey: '用量會依你的 API Key 計費',
+  speechConsentActiveVisible: '錄製期間會持續顯示 REC 標記',
+  speechConsentConfirm: '啟用並開始',
+  speechConsentCancel: '取消',
+  speechStatus: '語音字幕狀態',
+  speechStateIdle: '語音字幕已關閉',
 }
 
 /**

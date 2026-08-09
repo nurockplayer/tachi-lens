@@ -1,5 +1,7 @@
-// @vitest-environment node
-import { describe, expect, it } from 'vitest'
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
 import { listProviderMetadata } from '@/providers/registry'
@@ -155,5 +157,185 @@ describe('Popup App', () => {
       ]
       expect(keys).toHaveLength(8)
     })
+  })
+})
+
+describe('Popup speech consent flow (#162)', () => {
+  let localData: Record<string, unknown>
+  let localSet: Mock<(value: Record<string, unknown>) => Promise<void>>
+  let sendMessage: Mock<(message: { type?: string; payload?: unknown }) => Promise<unknown>>
+  let runtimeListeners: Array<(message: unknown) => void>
+
+  beforeEach(() => {
+    localSet = vi.fn<(value: Record<string, unknown>) => Promise<void>>(async () => undefined)
+    sendMessage = vi.fn(async () => ({ type: 'ok', payload: {} }))
+    runtimeListeners = []
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => ({ [key]: localData[key] })),
+          set: vi.fn(async (value: Record<string, unknown>) => {
+            Object.assign(localData, value)
+            await localSet(value)
+          }),
+        },
+      },
+      runtime: {
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn((listener: (message: unknown) => void) => {
+            runtimeListeners.push(listener)
+          }),
+          removeListener: vi.fn(),
+        },
+      },
+      tabs: {
+        query: vi.fn(async () => []),
+      },
+    })
+    localData = { userSettings: { ...DEFAULT_SETTINGS } }
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  const getMessageTypes = (): string[] =>
+    sendMessage.mock.calls.map(([message]) => (message as { type?: string }).type ?? '')
+
+  const dispatchRuntimeMessage = (message: unknown): void => {
+    for (const listener of runtimeListeners) listener(message)
+  }
+
+  it('first enable shows the consent panel and does not start capture', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    const checkbox = screen.getByRole('checkbox', { name: '啟用語音字幕' })
+
+    await user.click(checkbox)
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByText('錄製目前 Twitch 分頁的音訊')).toBeTruthy()
+    expect(screen.getByText('將音訊傳送至你所選的 BYOK 提供者進行轉錄')).toBeTruthy()
+    expect(screen.getByText('音訊不會被儲存或保留')).toBeTruthy()
+    expect(screen.getByText('用量會依你的 API Key 計費')).toBeTruthy()
+    expect(screen.getByText('錄製期間會持續顯示 REC 標記')).toBeTruthy()
+
+    // Nothing started, nothing persisted. The switch reflects the user's intent
+    // (checked) while the panel is open, but capture has not begun.
+    expect(getMessageTypes()).not.toContain('speech_control')
+    expect(localSet).not.toHaveBeenCalled()
+    expect((checkbox as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('confirm sends speech_control start and persists speechEnabled + consent', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    await user.click(screen.getByRole('button', { name: '啟用並開始' }))
+
+    await waitFor(() => {
+      expect(getMessageTypes()).toContain('speech_control')
+    })
+    const startCall = sendMessage.mock.calls
+      .map(([message]) => message as { type?: string; payload?: unknown })
+      .find((message) => message.type === 'speech_control')
+    expect(startCall?.payload).toEqual({ action: 'start' })
+
+    await waitFor(() => {
+      expect(localSet).toHaveBeenCalled()
+    })
+    const saved = localSet.mock.calls
+      .map(([value]) => (value as Record<string, unknown>).userSettings)
+      .find((settings) => (settings as Record<string, unknown>).speechConfig !== undefined)
+    expect(saved).toMatchObject({
+      speechConfig: { speechEnabled: true, speechConsentGranted: true },
+    })
+    expect(screen.getByRole('checkbox', { name: '啟用語音字幕' })).toHaveProperty('checked', true)
+  })
+
+  it('cancel closes the panel and starts nothing', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(getMessageTypes()).not.toContain('speech_control')
+    expect(localSet).not.toHaveBeenCalled()
+    expect((screen.getByRole('checkbox', { name: '啟用語音字幕' }) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('toggle off with no consent sent does not persist or start', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    // Toggle back off while the panel is open.
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(getMessageTypes()).not.toContain('speech_control')
+    expect(localSet).not.toHaveBeenCalled()
+  })
+
+  it('chat settings remain untouched by the consent flow', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    await user.click(screen.getByRole('button', { name: '啟用並開始' }))
+
+    await waitFor(() => {
+      expect(localSet).toHaveBeenCalled()
+    })
+    const saved = localSet.mock.calls
+      .map(([value]) => (value as Record<string, unknown>).userSettings)
+      .find((settings) => (settings as Record<string, unknown>).speechConfig !== undefined)
+    expect(saved).toMatchObject({
+      selectedProvider: DEFAULT_SETTINGS.selectedProvider,
+      selectedModel: DEFAULT_SETTINGS.selectedModel,
+      targetLanguage: DEFAULT_SETTINGS.targetLanguage,
+      translationEnabled: DEFAULT_SETTINGS.translationEnabled,
+    })
+  })
+
+  it('renders the live speech state from a speech_state message', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    await user.click(screen.getByRole('button', { name: '啟用並開始' }))
+
+    dispatchRuntimeMessage({ type: 'speech_state', payload: { state: 'capturing' } })
+    expect(await screen.findByText(/語音字幕狀態/)).toBeTruthy()
+    expect(screen.getByText('語音字幕錄製中')).toBeTruthy()
+  })
+
+  it('renders error state from a speech_state message with the fixed error label', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByText('語音字幕')
+    await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
+    await user.click(screen.getByRole('button', { name: '啟用並開始' }))
+
+    dispatchRuntimeMessage({
+      type: 'speech_state',
+      payload: { state: 'error', reason: 'budget_exhausted', errorKey: 'speechErrorBudget' },
+    })
+    expect(await screen.findByText(/語音字幕狀態/)).toBeTruthy()
+    // Reuses the fixed #160 error key, never a raw provider message.
+    expect(screen.getByText('語音時段或每日用量已達上限')).toBeTruthy()
   })
 })

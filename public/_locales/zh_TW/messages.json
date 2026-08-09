@@ -100,5 +100,16 @@
   "speechErrorUnknown": { "message": "語音功能發生未知錯誤" },
   "speechStateCapturing": { "message": "語音字幕錄製中" },
   "speechStateTranscribing": { "message": "語音轉錄中..." },
-  "speechStatePaused": { "message": "語音字幕已暫停" }
+  "speechStatePaused": { "message": "語音字幕已暫停" },
+  "speechConsentTitle": { "message": "啟用語音字幕前，請先確認" },
+  "speechConsentIntro": { "message": "啟用後，tachi-lens 將：" },
+  "speechConsentCaptureTabAudio": { "message": "錄製目前 Twitch 分頁的音訊" },
+  "speechConsentSendProvider": { "message": "將音訊傳送至你所選的 BYOK 提供者進行轉錄" },
+  "speechConsentNeverStored": { "message": "音訊不會被儲存或保留" },
+  "speechConsentBilledPerKey": { "message": "用量會依你的 API Key 計費" },
+  "speechConsentActiveVisible": { "message": "錄製期間會持續顯示 REC 標記" },
+  "speechConsentConfirm": { "message": "啟用並開始" },
+  "speechConsentCancel": { "message": "取消" },
+  "speechStatus": { "message": "語音字幕狀態" },
+  "speechStateIdle": { "message": "語音字幕已關閉" }
 }

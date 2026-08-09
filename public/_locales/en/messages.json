@@ -100,5 +100,16 @@
   "speechErrorUnknown": { "message": "An unknown speech error occurred" },
   "speechStateCapturing": { "message": "Capturing speech subtitles" },
   "speechStateTranscribing": { "message": "Transcribing speech..." },
-  "speechStatePaused": { "message": "Speech captions paused" }
+  "speechStatePaused": { "message": "Speech captions paused" },
+  "speechConsentTitle": { "message": "Confirm before enabling speech subtitles" },
+  "speechConsentIntro": { "message": "When enabled, tachi-lens will:" },
+  "speechConsentCaptureTabAudio": { "message": "Capture audio from the current Twitch tab" },
+  "speechConsentSendProvider": { "message": "Send that audio to your chosen BYOK provider for transcription" },
+  "speechConsentNeverStored": { "message": "Audio is never stored or retained" },
+  "speechConsentBilledPerKey": { "message": "Usage is billed against your API key" },
+  "speechConsentActiveVisible": { "message": "A REC indicator stays visible while capturing" },
+  "speechConsentConfirm": { "message": "Enable and start" },
+  "speechConsentCancel": { "message": "Cancel" },
+  "speechStatus": { "message": "Speech subtitle status" },
+  "speechStateIdle": { "message": "Speech subtitles are off" }
 }
