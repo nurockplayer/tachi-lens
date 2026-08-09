@@ -6,14 +6,23 @@ import {
   getChannelSettings,
   getMaskedApiKeyForPopup,
   getRuntimeState,
+  getSpeechApiKeyForServiceWorker,
   getUserSettings,
   initializeStorageAccess,
   mergeSettings,
   saveApiKey,
   saveUserSettings,
 } from '@/storage/settings'
-import { isBaseMessage, isDiagnosticEventMessage, isGetQuotaHealthMessage, isResetQuotaHealthMessage } from '@/shared/messages'
+import {
+  isBaseMessage,
+  isDiagnosticEventMessage,
+  isGetQuotaHealthMessage,
+  isResetQuotaHealthMessage,
+  isSpeechControlMessage,
+} from '@/shared/messages'
 import type { DiagnosticEvent, DiagnosticStage, SettingsUpdatePayload } from '@/shared/messages'
+import { getSpeechProvider } from '@/providers/speech-registry'
+import type { SpeechErrorReason } from '@/shared/speech-state'
 import { TranslationCache } from './cache'
 import { createSystemClock } from './clock'
 import { createMessageRouter } from './message-router'
@@ -22,6 +31,8 @@ import { createRestartSafeReservationId, GeminiQuotaStore } from './gemini-quota
 import { collectQuotaHealthResults, deriveQuotaHealth } from './quota-health'
 import { QuotaScheduler } from './quota-scheduler'
 import { SpeechCapture, createSpeechCaptureChrome } from './speech-capture'
+import { SpeechBudget, createSpeechBudgetChromeStorage } from './speech-budget'
+import { SpeechPipeline } from './speech-pipeline'
 import { Translator } from './translator'
 import { TranslationCacheDb } from './translation-cache-db'
 
@@ -104,6 +115,13 @@ const DIAGNOSTIC_COUNTER_STAGES: readonly DiagnosticStage[] = [
   'queue_overflow_drop',
   'queue_obsolete_drop',
   'l2_cache_hit',
+  // Speech pipeline counters (Spec §6): aggregate counts only — never
+  // transcript text, raw audio, channel names, provider bodies, or keys.
+  'speech_started',
+  'speech_stopped',
+  'speech_caption_emitted',
+  'speech_chunk_sent',
+  'speech_error',
 ]
 
 const isCounterStage = (stage: DiagnosticStage): boolean => DIAGNOSTIC_COUNTER_STAGES.includes(stage)
@@ -235,6 +253,14 @@ const handleMessage = (
     return false
   }
 
+  // speech_control from Popup/content → drive the speech pipeline (Spec §6/§7).
+  // Capture lifecycle is owned by the SW; the pipeline handles start/stop and
+  // broadcasts speech_state/caption through the SW.
+  if (isSpeechControlMessage(message)) {
+    handleSpeechControl(message.payload)
+    return false
+  }
+
   // Explicit, confirmed repair action scoped to Gemini quota accounting state.
   if (isResetQuotaHealthMessage(message)) {
     const quotaKey = message.payload?.quotaKey
@@ -313,10 +339,102 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Speech capture primitive (v0.3, Spec §7/§9). The pipeline (#160) calls
 // speechCapture.start()/stop() and subscribes to onChunk/onError/onDisconnect;
-// nothing routes speech_control messages yet (that is #160's scope). The
-// capture surface is exported for the pipeline and tests; the underlying
-// offscreen/tabCapture internals are deliberately hidden behind the
+// the offscreen/tabCapture internals are deliberately hidden behind the
 // SpeechSource shape.
 export const speechCapture = new SpeechCapture(createSpeechCaptureChrome())
+
+// --- v0.3 speech pipeline / SW orchestration --------------------------------
+//
+// The SW owns capture lifecycle, provider calls, budget accounting, error
+// sanitization, and state broadcast (Spec §3). All broadcasts reuse the
+// `chrome.tabs.sendMessage` pattern established by `broadcastUpdate`; every
+// payload is sanitized at this boundary (fixed i18n errorKey only — never raw
+// provider messages, keys, audio, or transcript, Spec §6).
+
+const speechRateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
+const speechBudget = new SpeechBudget({
+  storage: createSpeechBudgetChromeStorage(),
+  now: () => clock.wallNow(),
+})
+const speechPipeline = new SpeechPipeline({
+  source: speechCapture,
+  getProvider: (providerId) => getSpeechProvider(providerId),
+  getApiKey: (providerId) => getSpeechApiKeyForServiceWorker(providerId),
+  getSettings: () => getUserSettings(),
+  budget: speechBudget,
+  rateLimiter: speechRateLimiter,
+  onState: (payload) => {
+    broadcastToContentScripts({ type: 'speech_state', payload })
+  },
+  onCaption: (caption) => {
+    broadcastToContentScripts({ type: 'speech_caption', payload: caption })
+  },
+  onCaptionCleared: (cleared) => {
+    broadcastToContentScripts({ type: 'speech_caption_cleared', payload: cleared })
+  },
+  onFatalError: (reason) => {
+    // Capture is terminal for this session; stop the source and end the budget
+    // session so a re-enable starts a fresh session counter.
+    void speechCapture.stop()
+    void speechBudget.markSessionInactive()
+    void speechBudget.flush()
+    // Auth/capture/budget errors are recorded as privacy-safe counters.
+    void handleSpeechFatalError(reason)
+  },
+  reportDiagnosticCount: (stage) => {
+    recordDiagnostic({ id: `speech-counter-${Date.now()}-${stage}`, stage, timestamp: Date.now() })
+  },
+})
+
+const broadcastToContentScripts = async <T extends { type: string; payload: unknown }>(
+  message: T,
+): Promise<void> => {
+  const tabs = await chrome.tabs.query({})
+  const results = await Promise.allSettled(
+    tabs
+      .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
+      .map((tab) => chrome.tabs.sendMessage(tab.id, message)),
+  )
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.debug('broadcastToContentScripts: tab not available', r.reason)
+    }
+  }
+}
+
+const handleSpeechFatalError = (reason: SpeechErrorReason): void => {
+  console.debug('speech pipeline fatal error', reason)
+}
+
+// Restore reconnectable paused state after MV3 worker wake (Spec §7). A fresh
+// worker starts at idle; the session counter stays active in storage.session,
+// so the overlay reports "paused" until the user re-enables.
+void speechBudget.readActiveSessionId().then((activeSessionId) => {
+  if (activeSessionId) {
+    speechPipeline.restorePaused()
+  }
+}).catch(() => undefined)
+
+const handleSpeechControl = (payload: { action: 'start' | 'stop' | 'toggle'; channelName?: string }): void => {
+  switch (payload.action) {
+    case 'start':
+      void speechPipeline.start()
+      break
+    case 'stop':
+      void speechPipeline.stop()
+      break
+    case 'toggle': {
+      // isCapturing() is true only while the stream is live. A rate-limit pause
+      // is a live session (toggle = stop); a suspension pause has no live stream
+      // (toggle = resume), matching Spec §7 "the user re-enables to resume".
+      if (speechPipeline.isCapturing()) {
+        void speechPipeline.stop()
+      } else {
+        void speechPipeline.start()
+      }
+      break
+    }
+  }
+}
 
 export {} // keep ES module marker (named exports above already mark it)

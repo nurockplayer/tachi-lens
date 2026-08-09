@@ -88,5 +88,17 @@
   "speechTargetLanguage": { "message": "Speech target language" },
   "speechCaptionMaxLines": { "message": "Caption max lines" },
   "speechCaptionOpacity": { "message": "Caption opacity (%)" },
-  "speechMaxSessionMinutes": { "message": "Session budget (minutes)" }
+  "speechMaxSessionMinutes": { "message": "Session budget (minutes)" },
+  "speechErrorAuth": { "message": "Speech authentication failed. Please check your speech API key" },
+  "speechErrorRateLimited": { "message": "Speech requests are too frequent; captions paused" },
+  "speechErrorQuota": { "message": "Speech usage has reached the quota limit" },
+  "speechErrorNetwork": { "message": "Speech connection error" },
+  "speechErrorNoTwitchTab": { "message": "No Twitch channel is being watched" },
+  "speechErrorPermissionDenied": { "message": "Audio permission was denied. Re-enable speech subtitles to retry" },
+  "speechErrorContextInvalidated": { "message": "The extension refreshed. Re-enable speech subtitles to resume" },
+  "speechErrorBudget": { "message": "The speech session or daily usage limit was reached" },
+  "speechErrorUnknown": { "message": "An unknown speech error occurred" },
+  "speechStateCapturing": { "message": "Capturing speech subtitles" },
+  "speechStateTranscribing": { "message": "Transcribing speech..." },
+  "speechStatePaused": { "message": "Speech captions paused" }
 }

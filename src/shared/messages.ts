@@ -3,6 +3,8 @@
 import type { ChineseVariantMode } from './language-detection'
 import { isSpeechProviderId } from '@/providers/speech-types'
 import type { SpeechTranslationConfig } from '@/providers/speech-types'
+import { SPEECH_ERROR_REASONS, isSpeechState } from './speech-state'
+import type { SpeechErrorReason, SpeechPipelineState } from './speech-state'
 
 export type MessageType =
   | 'translate_request'
@@ -28,6 +30,12 @@ export type MessageType =
   | 'reset_quota_health'
   | 'quota_health_reset_result'
   | 'speech_settings_updated'
+  // v0.3 speech translation wave (Spec §6). speech_settings_updated already
+  // exists (settings split issue); these are the pipeline/broadcast messages.
+  | 'speech_control'
+  | 'speech_state'
+  | 'speech_caption'
+  | 'speech_caption_cleared'
 
 export const MESSAGE_TYPES: readonly MessageType[] = [
   'translate_request',
@@ -53,6 +61,10 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'reset_quota_health',
   'quota_health_reset_result',
   'speech_settings_updated',
+  'speech_control',
+  'speech_state',
+  'speech_caption',
+  'speech_caption_cleared',
 ]
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
@@ -107,6 +119,14 @@ export type DiagnosticStage =
   // hit. Carries only a `count` — never chat text, usernames, channel names,
   // provider request/response bodies, or translation output.
   | 'l2_cache_hit'
+  // Privacy-safe speech lifecycle counters (v0.3 speech, Spec §6). These carry
+  // only a `count` — never transcript text, raw audio, channel names, provider
+  // bodies, or API keys.
+  | 'speech_started'
+  | 'speech_stopped'
+  | 'speech_caption_emitted'
+  | 'speech_chunk_sent'
+  | 'speech_error'
 
 /** A privacy-safe lifecycle event. It never includes chat text, usernames, or API keys. */
 export interface DiagnosticEvent {
@@ -304,6 +324,12 @@ const DIAGNOSTIC_STAGES: readonly DiagnosticStage[] = [
   'queue_overflow_drop',
   'queue_obsolete_drop',
   'l2_cache_hit',
+  // Speech pipeline counters (Spec §6): never transcript text/audio/keys.
+  'speech_started',
+  'speech_stopped',
+  'speech_caption_emitted',
+  'speech_chunk_sent',
+  'speech_error',
 ]
 
 const DIAGNOSTIC_COUNT_STAGES: readonly DiagnosticStage[] = [
@@ -312,6 +338,13 @@ const DIAGNOSTIC_COUNT_STAGES: readonly DiagnosticStage[] = [
   'queue_overflow_drop',
   'queue_obsolete_drop',
   'l2_cache_hit',
+  // Speech counters are aggregated in the Service Worker exactly like the chat
+  // counters (see service-worker.ts DIAGNOSTIC_COUNTER_STAGES).
+  'speech_started',
+  'speech_stopped',
+  'speech_caption_emitted',
+  'speech_chunk_sent',
+  'speech_error',
 ]
 
 const isOptionalCount = (value: unknown): boolean =>
@@ -478,3 +511,93 @@ export const isSpeechSettingsUpdateMessage = (
 }
 
 export const serializeMessage = <T extends MessageType, P>(message: BaseMessage<T, P>): string => JSON.stringify(message)
+
+// --- v0.3 speech pipeline message types (Spec §6) ---------------------------
+//
+// `speech_state` and `speech_caption` payloads NEVER carry API keys, raw audio,
+// or channel names. The caption `text` IS the display text (final = translated
+// output, interim = source-language caption draft) and is the feature's output
+// by design; it must never enter storage, diagnostics, or error payloads.
+// Error payloads carry ONLY a fixed i18n key (`errorKey`), mirroring the
+// `sanitizeTranslationResultForContent` precedent in message-router.ts.
+
+/** CS → SW speech control (Spec §6). */
+export interface SpeechControlRequest {
+  action: 'start' | 'stop' | 'toggle'
+  /** Present on `start` when the caller wants to target a specific channel. */
+  channelName?: string
+}
+
+/** SW → CS speech pipeline state broadcast (Spec §6). */
+export interface SpeechStatePayload {
+  state: SpeechPipelineState
+  /** Present when the machine is in `error` (or `paused` for transient issues). */
+  reason?: SpeechErrorReason
+  /** Fixed i18n key — the ONLY user-facing error text, never a raw message. */
+  errorKey?: string
+}
+
+/** SW → CS caption broadcast (Spec §6). */
+export interface SpeechCaptionPayload {
+  id: string
+  text: string
+  interim: boolean
+  /** Source-language code of the caption draft, when known. */
+  lang?: string
+}
+
+/** SW → CS caption-cleared broadcast (Spec §6). */
+export interface SpeechCaptionClearedPayload {
+  reason: 'idle' | 'silence' | 'disabled'
+}
+
+const SPEECH_CONTROL_ACTIONS: readonly SpeechControlRequest['action'][] = ['start', 'stop', 'toggle']
+const SPEECH_CAPTION_CLEARED_REASONS: readonly SpeechCaptionClearedPayload['reason'][] = ['idle', 'silence', 'disabled']
+
+export const isSpeechControlMessage = (
+  value: unknown,
+): value is BaseMessage<'speech_control', SpeechControlRequest> => {
+  if (!isBaseMessage(value) || value.type !== 'speech_control' || !isRecord(value.payload)) return false
+  const payload = value.payload as Record<string, unknown>
+  return (
+    typeof payload.action === 'string' &&
+    SPEECH_CONTROL_ACTIONS.includes(payload.action as SpeechControlRequest['action']) &&
+    (payload.channelName === undefined || typeof payload.channelName === 'string')
+  )
+}
+
+export const isSpeechStateMessage = (
+  value: unknown,
+): value is BaseMessage<'speech_state', SpeechStatePayload> => {
+  if (!isBaseMessage(value) || value.type !== 'speech_state' || !isRecord(value.payload)) return false
+  const payload = value.payload as Record<string, unknown>
+  return (
+    isSpeechState(payload.state) &&
+    (payload.reason === undefined || SPEECH_ERROR_REASONS.includes(payload.reason as SpeechErrorReason)) &&
+    (payload.errorKey === undefined || typeof payload.errorKey === 'string')
+  )
+}
+
+export const isSpeechCaptionMessage = (
+  value: unknown,
+): value is BaseMessage<'speech_caption', SpeechCaptionPayload> => {
+  if (!isBaseMessage(value) || value.type !== 'speech_caption' || !isRecord(value.payload)) return false
+  const payload = value.payload as Record<string, unknown>
+  return (
+    typeof payload.id === 'string' &&
+    typeof payload.text === 'string' &&
+    typeof payload.interim === 'boolean' &&
+    (payload.lang === undefined || typeof payload.lang === 'string')
+  )
+}
+
+export const isSpeechCaptionClearedMessage = (
+  value: unknown,
+): value is BaseMessage<'speech_caption_cleared', SpeechCaptionClearedPayload> => {
+  if (!isBaseMessage(value) || value.type !== 'speech_caption_cleared' || !isRecord(value.payload)) return false
+  const payload = value.payload as Record<string, unknown>
+  return (
+    typeof payload.reason === 'string' &&
+    SPEECH_CAPTION_CLEARED_REASONS.includes(payload.reason as SpeechCaptionClearedPayload['reason'])
+  )
+}

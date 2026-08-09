@@ -10,7 +10,11 @@ import {
   isQuotaHealthResultMessage,
   isResetQuotaHealthMessage,
   isSettingsUpdateMessage,
+  isSpeechCaptionClearedMessage,
+  isSpeechCaptionMessage,
+  isSpeechControlMessage,
   isSpeechSettingsUpdateMessage,
+  isSpeechStateMessage,
   isTranslationRequestMessage,
   serializeMessage,
   type BaseMessage,
@@ -41,7 +45,7 @@ describe('message protocol guards', () => {
 
   describe('privacy-safe counter diagnostic stages (#60)', () => {
     it('accepts a counter event with a bounded non-negative count', () => {
-      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop', 'l2_cache_hit']) {
+      for (const stage of ['batch_dedup_removed', 'in_flight_coalesced', 'queue_overflow_drop', 'queue_obsolete_drop', 'l2_cache_hit', 'speech_started', 'speech_stopped', 'speech_caption_emitted', 'speech_chunk_sent', 'speech_error']) {
         expect(isDiagnosticEventMessage({
           type: 'diagnostic_event',
           payload: { id: 'd1', stage, timestamp: 1000, count: 3 },
@@ -429,5 +433,110 @@ describe('quota_health messages', () => {
       type: 'quota_health_reset_result',
       payload: { ok: true, resetKeys: [123] },
     })).toBe(false)
+  })
+})
+
+describe('speech pipeline messages (Spec §6)', () => {
+  describe('speech_control (CS → SW)', () => {
+    it('accepts start/stop/toggle with an optional channel name', () => {
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: { action: 'start' } })).toBe(true)
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: { action: 'stop' } })).toBe(true)
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: { action: 'toggle' } })).toBe(true)
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: { action: 'start', channelName: 'somechannel' } })).toBe(true)
+    })
+
+    it('rejects unknown actions, wrong-typed channel names, and non-object payloads', () => {
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: { action: 'banana' } })).toBe(false)
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: { action: 'start', channelName: 42 } })).toBe(false)
+      expect(isSpeechControlMessage({ type: 'speech_control', payload: 'start' })).toBe(false)
+      expect(isSpeechControlMessage({ type: 'speech_control' })).toBe(false)
+      expect(isSpeechControlMessage({ type: 'settings_updated', payload: { action: 'start' } })).toBe(false)
+    })
+  })
+
+  describe('speech_state (SW → CS)', () => {
+    it('accepts every valid state and reason', () => {
+      for (const state of ['idle', 'consent_pending', 'capturing', 'transcribing', 'paused', 'error']) {
+        expect(isSpeechStateMessage({ type: 'speech_state', payload: { state } })).toBe(true)
+      }
+      for (const reason of ['auth', 'rate_limited', 'quota_exceeded', 'network', 'no_twitch_tab', 'permission_denied', 'context_invalidated', 'budget_exhausted', 'unknown']) {
+        expect(isSpeechStateMessage({ type: 'speech_state', payload: { state: 'error', reason, errorKey: 'speechErrorAuth' } })).toBe(true)
+      }
+    })
+
+    it('accepts a paused state with a reason and no errorKey', () => {
+      expect(isSpeechStateMessage({ type: 'speech_state', payload: { state: 'paused', reason: 'rate_limited' } })).toBe(true)
+    })
+
+    it('rejects unknown states, unknown reasons, and wrong-typed errorKey', () => {
+      expect(isSpeechStateMessage({ type: 'speech_state', payload: { state: 'banana' } })).toBe(false)
+      expect(isSpeechStateMessage({ type: 'speech_state', payload: { state: 'error', reason: 'banana' } })).toBe(false)
+      expect(isSpeechStateMessage({ type: 'speech_state', payload: { state: 'error', errorKey: 42 } })).toBe(false)
+      expect(isSpeechStateMessage({ type: 'speech_state', payload: 'error' })).toBe(false)
+    })
+
+    it('privacy: a speech_state payload never carries keys, raw audio, transcript, or channel names', () => {
+      const payload = { state: 'error', reason: 'auth', errorKey: 'speechErrorAuth' }
+      const serialized = JSON.stringify({ type: 'speech_state', payload })
+      expect(serialized).not.toMatch(/sk-[a-z0-9_-]+/)
+      expect(serialized).not.toMatch(/ArrayBuffer|audio|channelName|transcript/i)
+    })
+  })
+
+  describe('speech_caption (SW → CS)', () => {
+    it('accepts an interim caption (untranslated) and a final caption (translated)', () => {
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: { id: 'c1', text: '你好世界', interim: true, lang: 'zh' } })).toBe(true)
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: { id: 'c2', text: 'Hello world', interim: false } })).toBe(true)
+    })
+
+    it('rejects missing id/text, wrong-typed interim, and non-object payloads', () => {
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: { text: 'hi', interim: true } })).toBe(false)
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: { id: 'c1', interim: true } })).toBe(false)
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: { id: 'c1', text: 'hi', interim: 'yes' } })).toBe(false)
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: { id: 'c1', text: 'hi', interim: true, lang: 42 } })).toBe(false)
+      expect(isSpeechCaptionMessage({ type: 'speech_caption', payload: 'caption' })).toBe(false)
+    })
+  })
+
+  describe('speech_caption_cleared (SW → CS)', () => {
+    it('accepts idle/silence/disabled', () => {
+      for (const reason of ['idle', 'silence', 'disabled']) {
+        expect(isSpeechCaptionClearedMessage({ type: 'speech_caption_cleared', payload: { reason } })).toBe(true)
+      }
+    })
+    it('rejects unknown reasons and non-object payloads', () => {
+      expect(isSpeechCaptionClearedMessage({ type: 'speech_caption_cleared', payload: { reason: 'banana' } })).toBe(false)
+      expect(isSpeechCaptionClearedMessage({ type: 'speech_caption_cleared', payload: 'idle' })).toBe(false)
+    })
+  })
+
+  describe('speech diagnostic counters (#160)', () => {
+    it('accepts count-only events for the speech counter stages', () => {
+      for (const stage of ['speech_started', 'speech_stopped', 'speech_caption_emitted', 'speech_chunk_sent', 'speech_error']) {
+        expect(isDiagnosticEventMessage({
+          type: 'diagnostic_event',
+          payload: { id: 's1', stage, timestamp: 1000, count: 2 },
+        })).toBe(true)
+      }
+    })
+
+    it('rejects speech counter events carrying a detail string or a count on non-count stages', () => {
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 's1', stage: 'speech_caption_emitted', timestamp: 1000, detail: 'secret transcript' },
+      })).toBe(false)
+      expect(isDiagnosticEventMessage({
+        type: 'diagnostic_event',
+        payload: { id: 's1', stage: 'chat_container_ready', timestamp: 1000, count: 1 },
+      })).toBe(false)
+    })
+
+    it('privacy: speech counters carry only stage/count/id/timestamp, never transcript text', () => {
+      const serialized = JSON.stringify({
+        type: 'diagnostic_event',
+        payload: { id: 's1', stage: 'speech_caption_emitted', timestamp: 1000, count: 5 },
+      })
+      expect(serialized).not.toMatch(/secret|你好|channel|audio|sk-[a-z0-9_-]+/i)
+    })
   })
 })

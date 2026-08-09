@@ -97,6 +97,21 @@ export type MessageKey =
   | 'speechCaptionMaxLines'
   | 'speechCaptionOpacity'
   | 'speechMaxSessionMinutes'
+  // v0.3 speech error/label keys (Spec §6/§9). These are the FIXED i18n keys
+  // carried in `speech_state.errorKey` and the overlay error chip — never raw
+  // provider messages, keys, audio, or transcript.
+  | 'speechErrorAuth'
+  | 'speechErrorRateLimited'
+  | 'speechErrorQuota'
+  | 'speechErrorNetwork'
+  | 'speechErrorNoTwitchTab'
+  | 'speechErrorPermissionDenied'
+  | 'speechErrorContextInvalidated'
+  | 'speechErrorBudget'
+  | 'speechErrorUnknown'
+  | 'speechStateCapturing'
+  | 'speechStateTranscribing'
+  | 'speechStatePaused'
 
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
@@ -189,6 +204,18 @@ export const MESSAGE_KEYS: readonly string[] = [
   'speechCaptionMaxLines',
   'speechCaptionOpacity',
   'speechMaxSessionMinutes',
+  'speechErrorAuth',
+  'speechErrorRateLimited',
+  'speechErrorQuota',
+  'speechErrorNetwork',
+  'speechErrorNoTwitchTab',
+  'speechErrorPermissionDenied',
+  'speechErrorContextInvalidated',
+  'speechErrorBudget',
+  'speechErrorUnknown',
+  'speechStateCapturing',
+  'speechStateTranscribing',
+  'speechStatePaused',
 ] as const
 
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
@@ -282,6 +309,18 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   speechCaptionMaxLines: '字幕最大行數',
   speechCaptionOpacity: '字幕不透明度 (%)',
   speechMaxSessionMinutes: '單次語音時段上限 (分鐘)',
+  speechErrorAuth: '語音驗證失敗，請檢查語音 API Key',
+  speechErrorRateLimited: '語音請求過於頻繁，字幕暫時暫停',
+  speechErrorQuota: '語音用量已達配額上限',
+  speechErrorNetwork: '語音連線發生錯誤',
+  speechErrorNoTwitchTab: '找不到正在觀看的 Twitch 頻道',
+  speechErrorPermissionDenied: '無法取得音訊權限，請重新啟用語音字幕',
+  speechErrorContextInvalidated: '擴充功能已重新整理，請重新啟用語音字幕',
+  speechErrorBudget: '語音時段或每日用量已達上限',
+  speechErrorUnknown: '語音功能發生未知錯誤',
+  speechStateCapturing: '語音字幕錄製中',
+  speechStateTranscribing: '語音轉錄中...',
+  speechStatePaused: '語音字幕已暫停',
 }
 
 /**
