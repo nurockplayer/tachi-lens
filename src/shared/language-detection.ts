@@ -26,6 +26,20 @@ export interface ScriptEvidence {
   hasHangul: boolean
   hasForeignLetter: boolean
   hasChineseMarker: boolean
+  /** Total number of Han characters (CJK Ideographs). */
+  hanCount: number
+  /** Total number of non-Han/Kana/Hangul letters (Latin, Cyrillic, …). */
+  foreignLetterCount: number
+  /**
+   * Weighted count of Mandarin structural/function characters.
+   *
+   * These are characters that appear constantly in ordinary Mandarin chat
+   * but are rarely used as standalone characters in modern Japanese. The
+   * score is deliberately conservative (see CHINESE_STRUCTURAL): common
+   * Japanese Kanji such as 的 is weighted low, and characters that are
+   * ordinary Japanese usage are excluded entirely.
+   */
+  chineseStructureScore: number
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -91,6 +105,84 @@ const KNOWN_SHARED_SET = new Set(KNOWN_SHARED)
  */
 const CHINESE_LANGUAGE_MARKERS = '这们吗這們嗎很呢吧啊'
 const CHINESE_MARKER_SET = new Set(CHINESE_LANGUAGE_MARKERS)
+
+/**
+ * Mandarin structural/function characters used for Chinese-language confidence.
+ *
+ * These are characters that appear constantly in ordinary Mandarin live chat
+ * as grammatical particles or high-frequency function words. Each is weighted
+ * by how strongly it signals Chinese rather than kana-less Japanese:
+ *
+ * Weight 3 (strong Mandarin structural signal):
+ * - 這/这/個/个 are demonstratives with no ordinary standalone Japanese
+ *   equivalent.
+ * - 啦 is a colloquial Mandarin sentence-final particle.
+ * - 對/对 as a response word ("yes/right") is distinctively Mandarin; in
+ *   Japanese 対 is only an affix in on-yomi compounds.
+ * - 沒/没 negates existence in Mandarin and is not ordinary Japanese usage.
+ * - 嗎/吗/呢/吧 are Mandarin sentence-final particles.
+ * - 什/麼/么 form the Mandarin interrogative 什麼/什么 ("what").
+ *
+ * Weight 2 (common Mandarin grammar, with real kana-less Japanese
+ * homographs that weaken the signal):
+ * - 很 (Mandarin degree adverb 很熱/很好).
+ * - 是 (Mandarin copula 是/不是/那是; rare as standalone Japanese).
+ * - 會/会 (future/modal 不會/会; Japanese 会 is 会う in kun-yomi, a
+ *   different sense and common enough to count as Japanese-risk).
+ * - 能/可 (can/may; Japanese 能/可 are affixes in 可能, 能力).
+ *
+ * Weight 1 (weak, but accumulate with other evidence):
+ * - 不 (Mandarin negation 不客氣/不會; Japanese 不 is an affix in 不安/不明),
+ * - 的 (Japanese homograph 目的/個人的), 好 (Japanese 好む is rarer),
+ * - 我/你/他/她/它 (Mandarin pronouns; Japanese uses 私/あなた/彼/彼女),
+ * - 要/用, 了 (Mandarin aspect particle; Japanese homograph 了 in 了解).
+ *
+ * The list is deliberately conservative: characters are only added when they
+ * accumulate across a sentence and cannot flip a short kana-less Japanese word
+ * like 手紙 (手 shared + 紙 traditional) or 目的 (shared + shared) into a false
+ * Chinese classification. Weights are tuned so 手紙/電話/自動車/目的/終了 all
+ * stay below the confidence threshold.
+ */
+const CHINESE_STRUCTURAL: Record<string, number> = {
+  // Strong Mandarin structural particles (weight 3). None of these is
+  // ordinary standalone kana-less Japanese usage, so a single occurrence is
+  // already strong Chinese evidence.
+  這: 3, 这: 3, 啦: 3, 對: 3, 对: 3, 沒: 3, 没: 3,
+  嗎: 3, 吗: 3, 呢: 3, 吧: 3, 什: 3, 麼: 3, 么: 3,
+  們: 3, 们: 3, 啊: 3,
+  // Common Mandarin grammar (weight 2). 個/个 are ordinary Japanese Kanji in
+  // on-yomi compounds (個人, 個別) but the demonstrative-sense 這個/那个 is
+  // distinctively Mandarin, so they stay at 2.
+  很: 2, 是: 2, 個: 2, 个: 2,
+  // Weak but accumulating (weight 1). All of these are ordinary kana-less
+  // Japanese Kanji in common words (目的/終了/了解/可能性/社会), so a single
+  // occurrence never clears the threshold; they only accumulate with stronger
+  // evidence.
+  不: 1, 的: 1, 了: 1, 好: 1, 我: 1, 你: 1, 他: 1, 她: 1, 它: 1,
+  要: 1, 用: 1, 會: 1, 会: 1, 可: 1, 能: 1,
+}
+
+/**
+ * Structural score required before Han-only text is considered confidently
+ * Chinese. Tuned against the kana-less Japanese guard cases (手紙, 電話,
+ * 自動車, 目的, 個人的, 終了, 完了, 了解, 可能, 社会) which all stay below
+ * it, and the #182 observed Chinese messages which all clear it.
+ */
+const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
+
+/**
+ * Short Mandarin chat phrases that are too short to reach the structural
+ * threshold on character weights alone but are unambiguously Chinese.
+ *
+ * These are full-message matches only (no substring matching), so a Japanese
+ * sentence that happens to contain one of these strings is never affected.
+ * Each phrase is a phrase that has no ordinary kana-less Japanese reading.
+ */
+const CHINESE_PHRASES = new Set([
+  '不客氣',
+  '不客气',
+  '我才',
+])
 
 // ─── Unicode ranges (BMP only) ───────────────────────────────────────────────
 
@@ -192,6 +284,9 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let hasHangul = false
   let hasForeignLetter = false
   let hasChineseMarker = false
+  let hanCount = 0
+  let foreignLetterCount = 0
+  let chineseStructureScore = 0
 
   for (const char of text) {
     const code = char.charCodeAt(0)
@@ -214,9 +309,11 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
 
     if (isCJK(code)) {
       hasHan = true
+      hanCount++
       if (CHINESE_MARKER_SET.has(char)) {
         hasChineseMarker = true
       }
+      chineseStructureScore += CHINESE_STRUCTURAL[char] ?? 0
       if (SIMPLIFIED_SET.has(char)) {
         hasSimplifiedOnly = true
       } else if (TRADITIONAL_SET.has(char)) {
@@ -231,6 +328,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
 
     if (isForeignLetter(char)) {
       hasForeignLetter = true
+      foreignLetterCount++
     }
   }
 
@@ -244,6 +342,9 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     hasHangul,
     hasForeignLetter,
     hasChineseMarker,
+    hanCount,
+    foreignLetterCount,
+    chineseStructureScore,
   }
 }
 
@@ -251,30 +352,35 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
  * Decide whether a chat message should be skipped for the given target language
  * and Chinese variant mode.
  *
- * Chinese-language confidence comes only from CHINESE_LANGUAGE_MARKERS
- * (这/们/吗, 這/們/嗎, 很/呢/吧/啊). 的 and 了 are excluded because they
- * occur in ordinary kana-less Japanese words (目的, 終了). Simplified/
- * Traditional glyph evidence is used only to determine script direction and
- * is never treated as proof that the language is Chinese, because those
- * glyphs also appear unchanged in modern Japanese.
+ * Chinese-language confidence uses a deterministic weighted evidence model
+ * (CHINESE_STRUCTURAL) rather than a tiny positive-marker whitelist (#182).
+ * Simplified/Traditional glyph evidence is used only to determine script
+ * direction and is never treated as proof that the language is Chinese,
+ * because those glyphs also appear unchanged in modern Japanese.
  *
- * Rules:
+ * `skip_all_chinese` rules:
  * 1. Non-zh target families are never skipped here.
  * 2. Text with Japanese Kana or Hangul is never classified as Chinese.
  * 3. Text without any Han characters is not confidently Chinese.
- * 4. Letters from any non-Han/Kana/Hangul script mixed with Han indicate a
- *    mixed-language message; these are not skipped.
- * 5. Without a Chinese-language marker the message is not confidently
+ * 4. Foreign (non-Han/Kana/Hangul) letters mixed with Han are tolerated only
+ *    when Han clearly dominates the message AND the Chinese structural score
+ *    is strong (e.g. a Chinese sentence with an embedded acronym like OBS).
+ *    Otherwise mixed-language text stays translatable.
+ * 5. Han-only text is confidently Chinese when the weighted Chinese structure
+ *    score clears CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD. Short kana-less
+ *    Japanese words (手紙, 電話, 自動車, 目的, 終了) stay below it.
+ *
+ * `translate_other_script` rules (preserved from #46/#51/#55):
+ * 1. Letters from any non-Han/Kana/Hangul script mixed with Han → translate.
+ * 2. Without a Chinese-language marker the message is not confidently
  *    Chinese and stays translatable (conservative).
- * 6. `skip_all_chinese`: any confidently Chinese message is skipped.
- * 7. `translate_other_script`:
- *    - Generic zh target → never skip (conservative, favor translation).
- *    - Unknown/unclassified Han overrides same-script evidence → translate.
- *    - For a specific script target (simplified or traditional):
- *      - Only same-script evidence → skip
- *      - Opposite-script evidence → process (translate)
- *      - Mixed evidence → process
- *      - Known-shared-only characters → skip
+ * 3. Generic zh target → never skip (conservative, favor translation).
+ * 4. Unknown/unclassified Han overrides same-script evidence → translate.
+ * 5. For a specific script target (simplified or traditional):
+ *    - Only same-script evidence → skip
+ *    - Opposite-script evidence → process (translate)
+ *    - Mixed evidence → process
+ *    - Known-shared-only characters → skip
  */
 export function shouldSkipMessage(
   text: string,
@@ -292,6 +398,40 @@ export function shouldSkipMessage(
   // No Han characters → nothing to skip
   if (!evidence.hasHan) return false
 
+  if (mode === 'skip_all_chinese') {
+    // Short unambiguous Mandarin phrases (不客氣, 我才) clear the gate even
+    // though their character weights alone stay below the threshold.
+    // Punctuation/symbols/whitespace are stripped first so 不客氣！, 我才～
+    // still match while 手紙 is never affected.
+    const phraseStripped = text.replace(/[\p{P}\p{S}\s]/gu, '')
+    const isChinesePhrase = CHINESE_PHRASES.has(phraseStripped)
+
+    // Foreign letters are tolerated only when Han dominates and the Chinese
+    // structure evidence is strong (e.g. 把手機的畫面傳到電腦用OBS開台就可以不用斷).
+    // Mixed or foreign-dominated messages stay translatable (hello 大家好, é国).
+    if (evidence.hasForeignLetter) {
+      return (
+        evidence.hanCount > evidence.foreignLetterCount &&
+        evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
+      )
+    }
+
+    // Han-only text is confidently Chinese when:
+    // - it contains a conservative Chinese-language marker (preserved from
+    //   the original #55 gate, e.g. 對啊/上啊/品質很好/我們), or
+    // - the weighted structural evidence clears the threshold (e.g.
+    //   那是肯定沒有, 那要打訊號什麼的), or
+    // - the whole message is a known Chinese phrase (e.g. 不客氣, 我才).
+    // S/T glyph evidence alone (手紙, 電話) or a couple of shared characters
+    // (目的, 終了, 大人山水) clears none of these and stays translatable.
+    return (
+      evidence.hasChineseMarker ||
+      isChinesePhrase ||
+      evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
+    )
+  }
+
+  // mode === 'translate_other_script'
   // Any foreign (non-Han/Kana/Hangul) letter mixed with Han → mixed-language,
   // keep translatable
   if (evidence.hasForeignLetter) return false
@@ -300,11 +440,6 @@ export function shouldSkipMessage(
   // S/T glyph evidence alone (e.g. 手紙, 電話, 自動車) could be Japanese.
   if (!evidence.hasChineseMarker) return false
 
-  if (mode === 'skip_all_chinese') {
-    return true
-  }
-
-  // mode === 'translate_other_script'
   const scriptTarget = classifyChineseScriptTarget(targetLanguage)
 
   // Generic zh without script preference → conservative, do not skip

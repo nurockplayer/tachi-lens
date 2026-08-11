@@ -379,6 +379,85 @@ describe('shouldSkipMessage — skip_all_chinese mode', () => {
   it('skips mixed simplified and traditional Chinese text', () => {
     expect(shouldSkipMessage('这个熱吧', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
+
+  // #182: ordinary Chinese live chat must be skipped when the target is
+  // Chinese. These observed messages contain no CHINESE_LANGUAGE_MARKERS
+  // character and previously fell through to a translate_request.
+  describe('Issue #182 observed messages', () => {
+    it.each([
+      '那是肯定沒有',
+      '不客氣',
+      '我才',
+      '那要打訊號什麼的',
+    ])('skips %s for a zh-TW target in skip_all_chinese', (text) => {
+      expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(true)
+    })
+
+    it.each([
+      '那是肯定沒有',
+      '不客氣',
+      '我才',
+      '那要打訊號什麼的',
+    ])('skips %s for a zh-CN target in skip_all_chinese', (text) => {
+      expect(shouldSkipMessage(text, 'zh-CN', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('skips the OBS-mixed message for a zh-TW target in skip_all_chinese', () => {
+      // 把手機的畫面傳到電腦用OBS開台就可以不用斷: Han-dominated sentence
+      // with an embedded English acronym. The Chinese structure evidence is
+      // strong enough to skip despite the foreign letters.
+      expect(
+        shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
+      ).toBe(true)
+    })
+
+    it('skips the OBS-mixed message for a zh-CN target in skip_all_chinese', () => {
+      expect(
+        shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-CN', 'skip_all_chinese'),
+      ).toBe(true)
+    })
+
+    it('does not skip the OBS-mixed message in translate_other_script mode', () => {
+      // Mixed-script evidence and foreign letters stay conservative here.
+      expect(
+        shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'translate_other_script'),
+      ).toBe(false)
+    })
+
+    it('skips #182 messages with trailing punctuation in skip_all_chinese', () => {
+      // CHINESE_PHRASES matching strips punctuation/symbols, so 不客氣！/我才～ are still skipped.
+      expect(shouldSkipMessage('不客氣！', 'zh-TW', 'skip_all_chinese')).toBe(true)
+      expect(shouldSkipMessage('不客氣～', 'zh-TW', 'skip_all_chinese')).toBe(true)
+      expect(shouldSkipMessage('我才！', 'zh-TW', 'skip_all_chinese')).toBe(true)
+    })
+  })
+})
+
+describe('shouldSkipMessage — preserved skip_all_chinese coverage', () => {
+  // Regression guard for the original #55 marker gate: these common Mandarin
+  // messages all contain a CHINESE_LANGUAGE_MARKERS character and were skipped
+  // before the #182 scoring model, and must keep skipping.
+  it.each([
+    '對啊',
+    '上啊',
+    '衝啊',
+    '品質很好',
+    '品質很鳥',
+    '今天很好',
+    '今天真的很熱',
+    '今天真的很热',
+    '我們',
+    '我們要走了',
+  ])('still skips %s for a zh-TW target in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('still does not skip kana-less Japanese guard words with markers for zh-TW', () => {
+    // 完/了 are weight-1 characters and not markers; these stay translatable.
+    expect(shouldSkipMessage('完了', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('了解', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('個人的', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
 })
 
 describe('shouldSkipMessage — translate_other_script mode', () => {
