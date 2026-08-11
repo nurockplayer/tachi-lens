@@ -8,7 +8,7 @@ import type { Worker, TestInfo, Page } from '@playwright/test'
 import type { ExtensionError } from './extension'
 import { DEEPSEEK_MOCK_KEY } from './deepseek-mock'
 
-export const TWITCH_URL = 'https://www.twitch.tv/tachi-lens-e2e'
+export const TWITCH_URL = 'https://www.twitch.tv/informalmiku_'
 
 const DEFAULT_FILTER_CONFIG = {
   skipEmotesOnly: true,
