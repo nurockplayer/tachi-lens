@@ -57,7 +57,7 @@ TWITCH_CANARY_URL='https://www.twitch.tv/<known-active-channel>' pnpm test:e2e:c
 
 Related settings:
 
-- `TWITCH_CANARY_URL` (required): full Twitch channel URL, e.g. `https://www.twitch.tv/riotgames`
+- `TWITCH_CANARY_URL` (required): full Twitch channel URL, e.g. `https://www.twitch.tv/informalmiku_`
 - This test **does not** call any translation provider and does not use an API key
 - The default `pnpm test:e2e` **does not include** this canary
 - Runs in CI on a daily schedule plus manual triggers, and does not block pull requests

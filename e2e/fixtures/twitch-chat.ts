@@ -8,7 +8,7 @@
 
 export const getTwitchChatHtml = (): string => `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>tachi-lens-e2e</title></head>
+<head><meta charset="utf-8"><title>informalmiku_</title></head>
 <body>
   <section data-test-selector="chat-scrollable-area__message-container"></section>
   <script>
