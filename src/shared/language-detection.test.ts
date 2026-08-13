@@ -557,6 +557,81 @@ describe('shouldSkipMessage — weak Kanji must not skip in mixed-letter message
   })
 })
 
+describe('shouldSkipMessage — Japanese-use Kanji is not strong Mandarin evidence (什)', () => {
+  // #182 follow-up: 什 (U+4EC0) is ordinary modern Japanese Kanji (什器
+  // = fixtures/tools), so it must not act as decisive weight-3 evidence.
+  it.each([
+    '什器',
+    '什物',
+    '什錦',
+  ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips 那要打訊號什麼的 via 麼 (U+9EBC) for zh-TW', () => {
+    // 什 demoted to weight 1, but 麼 stays weight 3 → strong evidence remains.
+    expect(shouldSkipMessage('那要打訊號什麼的', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+})
+
+describe('shouldSkipMessage — Mandarin pronouns unlock Han-only aggregate', () => {
+  // #182 follow-up: Han-only Mandarin built from weak structural entries
+  // (我要用你的 = 5) must skip, but a Mandarin personal pronoun is required so
+  // kana-less Japanese compounds (個人利用不可, 使用不可能) still translate.
+  it('skips 我要用你的 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('我要用你的', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('skips 你要好好的 for zh-TW in skip_all_chinese', () => {
+    // 你1+要1+好1+好1+的1 = 5 with a Mandarin pronoun → aggregate path.
+    expect(shouldSkipMessage('你要好好的', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('does not skip pronoun-free 個人利用不可 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('個人利用不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip pronoun-free 使用不可能 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('使用不可能', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+})
+
+describe('shouldSkipMessage — mixed strong/marker evidence requires Han dominance', () => {
+  // #182 follow-up: a foreign-dominated segment with a marker or weight-3 char
+  // (hello 這個, English 對啊) must not skip the whole message; the dominance
+  // gate now applies before any Chinese evidence.
+  it.each([
+    'hello 這個',
+    'English 對啊',
+    'hello 品質很好',
+  ])('does not skip foreign-dominant mixed message %s for zh-TW', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips the Han-dominant Chinese OBS message for zh-TW in skip_all_chinese', () => {
+    expect(
+      shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
+    ).toBe(true)
+  })
+})
+
+describe('shouldSkipMessage — emoji variation selectors do not break phrase matching', () => {
+  // #182 follow-up: 不客氣❤️ contains ❤ (So) + U+FE0F variation selector (Mn);
+  // both must be stripped so the phrase still matches.
+  it('skips 不客氣❤️ for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('不客氣❤️', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('skips 我才👍 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('我才👍', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('does not skip 不客氣 with a Kana suffix', () => {
+    // Kana still short-circuits to translate regardless of the phrase.
+    expect(shouldSkipMessage('不客氣です', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+})
+
 describe('shouldSkipMessage — translate_other_script mode', () => {
   // Requirements from #46: 今天真的很熱 → skip, 今天真的很热 → translate, 今天很好 → skip
   // Targets from #51: traditional, simplified, generic, mixed

@@ -50,6 +50,15 @@ export interface ScriptEvidence {
    * accumulate into a confident-Chinese signal on their own.
    */
   strongStructureScore: number
+  /**
+   * Whether the message contains a Mandarin personal pronoun (我/你/他/她/它).
+   *
+   * Mandarin chat uses these as ordinary pronouns (我要用你的); modern
+   * kana-less Japanese does not (it uses 私/あなた/彼/彼女). Used to let an
+   * otherwise-weak Mandarin sentence clear the aggregate threshold without
+   * letting kana-less Japanese compounds (個人利用不可, 使用不可能) do the same.
+   */
+  hasMandarinPronoun: boolean
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -164,7 +173,7 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
   // as decisive Mandarin evidence. 沒 stays strong because Traditional 沒 is
   // not an ordinary modern Japanese usage.
   這: 3, 这: 3, 啦: 3, 對: 3, 对: 3, 沒: 3, 嗎: 3, 吗: 3, 呢: 3, 吧: 3,
-  什: 3, 麼: 3, 么: 3, 們: 3, 们: 3, 啊: 3,
+  麼: 3, 么: 3, 們: 3, 们: 3, 啊: 3,
   // Common Mandarin grammar (weight 2). 個/个 are ordinary Japanese Kanji in
   // on-yomi compounds (個人, 個別) but the demonstrative-sense 這個/那个 is
   // distinctively Mandarin, so they stay at 2.
@@ -174,8 +183,17 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
   // occurrence never clears the threshold; they only accumulate with stronger
   // evidence.
   不: 1, 的: 1, 了: 1, 好: 1, 我: 1, 你: 1, 他: 1, 她: 1, 它: 1,
-  要: 1, 用: 1, 會: 1, 会: 1, 可: 1, 能: 1, 没: 1,
+  要: 1, 用: 1, 會: 1, 会: 1, 可: 1, 能: 1, 没: 1, 什: 1,
 }
+
+/**
+ * Mandarin personal pronouns. These are ordinary first/second/third-person
+ * pronouns in Mandarin chat (我要用你的) but are not used this way in modern
+ * kana-less Japanese (which uses 私/あなた/彼/彼女), so their presence lets an
+ * otherwise-weak Mandarin sentence clear the aggregate threshold without
+ * letting kana-less Japanese compounds (個人利用不可, 使用不可能) do the same.
+ */
+const MANDARIN_PRONOUNS = new Set(['我', '你', '他', '她', '它'])
 
 /**
  * Structural score required before Han-only text is considered confidently
@@ -200,18 +218,18 @@ const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
 const HAN_FOREIGN_DOMINANCE_RATIO = 4
 
 /**
- * Minimum absolute Han count before the mixed-letter branch may trust the
- * aggregate structural score.
+ * Minimum absolute Han count before the mixed-letter branch may skip a
+ * message at all.
  *
  * The ratio gate alone is defeated by a single Latin letter: 使用不可能w
  * (5 Han vs 1 Latin) and 個人利用不可w (6 Han vs 1 Latin) would pass
- * hanCount >= 4 * 1 and skip on weak Kanji accumulation. The weak-aggregate
+ * hanCount >= 4 * 1 and skip on weak Kanji accumulation. The mixed-letter
  * path must therefore also require a substantial Han run, representing a long
  * Chinese sentence with an embedded acronym rather than a short Japanese
  * phrase with one trailing Latin character. 把手機的畫面傳到電腦用OBS開台就可
  * 以不用斷 (19 Han) clears it; the 5-6 Han Japanese phrases do not.
  */
-const MIN_HAN_COUNT_FOR_WEAK_MIXED = 12
+const MIN_HAN_COUNT_FOR_MIXED = 12
 
 /**
  * Strong structural score required before Han-only text is considered
@@ -344,6 +362,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let foreignLetterCount = 0
   let chineseStructureScore = 0
   let strongStructureScore = 0
+  let hasMandarinPronoun = false
 
   for (const char of text) {
     const code = char.charCodeAt(0)
@@ -369,6 +388,9 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       hanCount++
       if (CHINESE_MARKER_SET.has(char)) {
         hasChineseMarker = true
+      }
+      if (MANDARIN_PRONOUNS.has(char)) {
+        hasMandarinPronoun = true
       }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
       chineseStructureScore += weight
@@ -407,6 +429,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     foreignLetterCount,
     chineseStructureScore,
     strongStructureScore,
+    hasMandarinPronoun,
   }
 }
 
@@ -463,35 +486,27 @@ export function shouldSkipMessage(
   if (mode === 'skip_all_chinese') {
     // Short unambiguous Mandarin phrases (不客氣, 我才) clear the gate even
     // though their character weights alone stay below the threshold.
-    // Punctuation/symbols/whitespace are stripped first so 不客氣！, 我才～
-    // still match while 手紙 is never affected.
-    const phraseStripped = text.replace(/[\p{P}\p{S}\s]/gu, '')
+    // Punctuation/symbols/marks/whitespace are stripped first so 不客氣！,
+    // 我才～ and 不客氣❤️ (emoji variation selector) still match while 手紙 is
+    // never affected.
+    const phraseStripped = text.replace(/[\p{P}\p{S}\p{M}\s]/gu, '')
     const isChinesePhrase = CHINESE_PHRASES.has(phraseStripped)
 
-    // Foreign letters are tolerated only when the message is confidently
-    // Chinese by the same conservative evidence as the Han-only path, OR when
-    // Han overwhelmingly dominates the foreign letters so they read as an
-    // embedded acronym rather than mixed language.
-    //  - Strong Mandarin evidence (marker / weight-3 char) is decisive:
-    //    e.g. 這個很熱OBS.
-    //  - A weak aggregate score is trusted only at high Han dominance in both
-    //    ratio (hanCount >= 4 * foreignLetterCount) and absolute Han count
-    //    (hanCount >= 12): 把手機的畫面傳到電腦用OBS開台就可以不用斷 has 19
-    //    Han vs 3 Latin and correctly skips, while 個人利用不可OBS (6 Han vs 3
-    //    Latin), 使用不可能OBS (5 vs 3), 使用不可能w (5 vs 1) and
-    //    個人利用不可w (6 vs 1) must not skip on weak Kanji accumulation.
-    //  - Mixed or foreign-dominated messages stay translatable
-    //    (hello 大家好, é国, Ａ国).
+    // Foreign letters are tolerated only when Han overwhelmingly dominates
+    // the foreign letters so they read as an embedded acronym rather than
+    // mixed language. The dominance gate applies uniformly — before marker,
+    // strong, or weak evidence — so genuinely mixed chat (hello 這個,
+    // English 對啊) stays translatable even when the Chinese segment contains
+    // a marker, while the Han-dominant real Chinese OBS message
+    // (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3 Latin) skips.
     if (evidence.hasForeignLetter) {
-      if (
-        evidence.hasChineseMarker ||
-        evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD
-      ) {
-        return true
-      }
-      return (
+      const hanDominates =
         evidence.hanCount >= HAN_FOREIGN_DOMINANCE_RATIO * evidence.foreignLetterCount &&
-        evidence.hanCount >= MIN_HAN_COUNT_FOR_WEAK_MIXED &&
+        evidence.hanCount >= MIN_HAN_COUNT_FOR_MIXED
+      if (!hanDominates) return false
+      return (
+        evidence.hasChineseMarker ||
+        evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD ||
         evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
       )
     }
@@ -500,17 +515,22 @@ export function shouldSkipMessage(
     // - it contains a conservative Chinese-language marker (preserved from
     //   the original #55 gate, e.g. 對啊/上啊/品質很好/我們), or
     // - it contains a strong Mandarin structural character (weight 3,
-    //   e.g. 那是肯定沒有 → 沒, 那要打訊號什麼的 → 什/麼), or
-    // - the whole message is a known Chinese phrase (e.g. 不客氣, 我才).
+    //   e.g. 那是肯定沒有 → 沒, 那要打訊號什麼的 → 麼), or
+    // - the whole message is a known Chinese phrase (e.g. 不客氣, 我才), or
+    // - a Mandarin personal pronoun (我/你/他/她/它) pushes an otherwise-weak
+    //   sentence past the aggregate threshold (e.g. 我要用你的 = 5).
     // Weak/ambiguous Kanji (weight 1–2: 個/用/不/可/能/是) are excluded here
     // because they also appear in ordinary kana-less Japanese words, so
-    // 個人利用不可 and 使用不可能 never reach confidence on their own.
+    // 個人利用不可, 使用不可能, 什器 and 沒収 never reach confidence on their
+    // own — a Mandarin pronoun is required for the aggregate path.
     // S/T glyph evidence alone (手紙, 電話) or a couple of shared characters
     // (目的, 終了, 大人山水) clears none of these and stays translatable.
     return (
       evidence.hasChineseMarker ||
       isChinesePhrase ||
-      evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD
+      evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD ||
+      (evidence.hasMandarinPronoun &&
+        evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD)
     )
   }
 
