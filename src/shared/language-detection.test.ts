@@ -460,6 +460,35 @@ describe('shouldSkipMessage — preserved skip_all_chinese coverage', () => {
   })
 })
 
+describe('shouldSkipMessage — weak Kanji do not accumulate into Chinese', () => {
+  // #182 follow-up regression: several weak/ambiguous Han characters that also
+  // occur in kana-less Japanese words (個/用/不/可/能 in 個人, 利用, 可能) must
+  // never accumulate into a confident-Chinese signal on their own. Only strong
+  // (weight-3) Mandarin structural characters, markers, or phrases are decisive.
+  it.each([
+    '個人利用不可',
+    '使用不可能',
+    '不可能',
+    '再利用不可',
+    '個人利用',
+    '利用不可',
+    '個人情報',
+    '使用禁止',
+    '立入禁止',
+    '申込不要',
+  ])('does not skip kana-less Japanese %s for a zh-TW target in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it.each([
+    '個人利用不可',
+    '使用不可能',
+    '不可能',
+  ])('does not skip kana-less Japanese %s for a zh-CN target in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-CN', 'skip_all_chinese')).toBe(false)
+  })
+})
+
 describe('shouldSkipMessage — translate_other_script mode', () => {
   // Requirements from #46: 今天真的很熱 → skip, 今天真的很热 → translate, 今天很好 → skip
   // Targets from #51: traditional, simplified, generic, mixed

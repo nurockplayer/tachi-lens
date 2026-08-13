@@ -40,6 +40,16 @@ export interface ScriptEvidence {
    * ordinary Japanese usage are excluded entirely.
    */
   chineseStructureScore: number
+  /**
+   * Weighted count of strong Mandarin structural characters only (weight 3
+   * in CHINESE_STRUCTURAL: 這/啦/沒/嗎/什/麼/們/啊, …).
+   *
+   * Unlike chineseStructureScore, this excludes weak/ambiguous Kanji
+   * (weight 1–2: 個/用/不/可/能/是/…), which also appear in ordinary
+   * kana-less Japanese words (個人, 利用, 可能). Weak characters can never
+   * accumulate into a confident-Chinese signal on their own.
+   */
+  strongStructureScore: number
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -171,6 +181,19 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
 const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
 
 /**
+ * Strong structural score required before Han-only text is considered
+ * confidently Chinese by strong characters alone.
+ *
+ * Strong characters (weight 3) are unambiguously Mandarin and never ordinary
+ * kana-less Japanese usage, so a single occurrence is decisive. Weak characters
+ * (weight 1–2) share glyphs with common Japanese Kanji (個/用/不/可/能 in
+ * 個人/利用/可能) and are deliberately excluded from this score, so several of
+ * them — e.g. 個人利用不可 (個2+用1+不1+可1) — can never accumulate into a
+ * confident-Chinese signal by themselves (#182 follow-up regression).
+ */
+const STRONG_STRUCTURE_CONFIDENCE_THRESHOLD = 3
+
+/**
  * Short Mandarin chat phrases that are too short to reach the structural
  * threshold on character weights alone but are unambiguously Chinese.
  *
@@ -287,6 +310,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let hanCount = 0
   let foreignLetterCount = 0
   let chineseStructureScore = 0
+  let strongStructureScore = 0
 
   for (const char of text) {
     const code = char.charCodeAt(0)
@@ -313,7 +337,11 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       if (CHINESE_MARKER_SET.has(char)) {
         hasChineseMarker = true
       }
-      chineseStructureScore += CHINESE_STRUCTURAL[char] ?? 0
+      const weight = CHINESE_STRUCTURAL[char] ?? 0
+      chineseStructureScore += weight
+      if (weight >= 3) {
+        strongStructureScore += weight
+      }
       if (SIMPLIFIED_SET.has(char)) {
         hasSimplifiedOnly = true
       } else if (TRADITIONAL_SET.has(char)) {
@@ -345,6 +373,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     hanCount,
     foreignLetterCount,
     chineseStructureScore,
+    strongStructureScore,
   }
 }
 
@@ -419,15 +448,18 @@ export function shouldSkipMessage(
     // Han-only text is confidently Chinese when:
     // - it contains a conservative Chinese-language marker (preserved from
     //   the original #55 gate, e.g. 對啊/上啊/品質很好/我們), or
-    // - the weighted structural evidence clears the threshold (e.g.
-    //   那是肯定沒有, 那要打訊號什麼的), or
+    // - it contains a strong Mandarin structural character (weight 3,
+    //   e.g. 那是肯定沒有 → 沒, 那要打訊號什麼的 → 什/麼), or
     // - the whole message is a known Chinese phrase (e.g. 不客氣, 我才).
+    // Weak/ambiguous Kanji (weight 1–2: 個/用/不/可/能/是) are excluded here
+    // because they also appear in ordinary kana-less Japanese words, so
+    // 個人利用不可 and 使用不可能 never reach confidence on their own.
     // S/T glyph evidence alone (手紙, 電話) or a couple of shared characters
     // (目的, 終了, 大人山水) clears none of these and stays translatable.
     return (
       evidence.hasChineseMarker ||
       isChinesePhrase ||
-      evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
+      evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD
     )
   }
 
