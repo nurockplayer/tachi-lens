@@ -680,6 +680,45 @@ describe('shouldSkipMessage — emoji variation selectors do not break phrase ma
     // Kana still short-circuits to translate regardless of the phrase.
     expect(shouldSkipMessage('不客氣です', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
+
+  it('skips 不客氣👨👩👧 (joined emoji with U+200D ZWJ) for zh-TW', () => {
+    // The ZWJ (Cf format char) must be stripped like other marks/symbols.
+    expect(shouldSkipMessage('不客氣👨👩👧', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+})
+
+describe('shouldSkipMessage — astral-plane letters are detected as foreign', () => {
+  // #182 follow-up: stylized Twitch text uses astral-plane letters (surrogate
+  // pairs). Iterating the UTF-16 string by index yields surrogate halves that
+  // never match \p{L}; code-point iteration must count them as foreign letters.
+  it('does not skip 𝕙𝕖𝕝𝕝𝕠 這個 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('𝕙𝕖𝕝𝕝𝕠 這個', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip 𝕙𝕖𝕝𝕝𝕠 大家好 for zh-TW in skip_all_chinese', () => {
+    expect(shouldSkipMessage('𝕙𝕖𝕝𝕝𝕠 大家好', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+})
+
+describe('shouldSkipMessage — 的-particle needs enough weak context', () => {
+  // #182 follow-up: 個人的使用禁止 (kana-less Japanese) has 的 followed by 使,
+  // but only 2 weak structural chars, so the particle alone must not unlock the
+  // aggregate skip path. The real Chinese OBS message has 5 weak chars around
+  // its 的 and still skips.
+  it.each([
+    '個人的使用禁止',
+    '個人的利用禁止',
+    '個人の使用禁止',
+    '目的的利用',
+  ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips the Han-dominant Chinese OBS message via enough weak context', () => {
+    expect(
+      shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
+    ).toBe(true)
+  })
 })
 
 describe('shouldSkipMessage — translate_other_script mode', () => {

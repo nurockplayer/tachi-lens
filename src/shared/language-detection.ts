@@ -60,12 +60,20 @@ export interface ScriptEvidence {
   hasMandarinPronoun: boolean
   /**
    * Whether 的 (U+7684) is used as a Mandarin attributive particle — i.e.
-   * immediately followed by another Han character (手機的畫面). In kana-less
-   * Japanese, 的 is almost always word-final in on-yomi compounds (目的,
-   * 個人的), so 的-followed-by-Han is a strong Mandarin signal. Unlocks the
-   * aggregate score but never skips by itself.
+   * immediately followed by another Han character (手機的畫面). On its own this
+   * is too weak to discriminate Mandarin from kana-less Japanese (個人的使用禁
+   * 止 also has 的 followed by Han), so it only unlocks the aggregate path when
+   * the message also has a sufficient run of weak Mandarin structural
+   * characters (see WEAK_MANDARIN_CONTEXT_MIN).
    */
   hasMandarinParticle: boolean
+  /**
+   * Number of weak Mandarin structural characters (weight 1 in
+   * CHINESE_STRUCTURAL: 不/的/了/好/我/你/要/用/可/能/…). Used to require
+   * stronger context before the 的-particle or a bare pronoun unlocks the
+   * aggregate skip path.
+   */
+  weakStructureCount: number
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -228,6 +236,19 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
 const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
 
 /**
+ * Minimum count of weak (weight-1) Mandarin structural characters required for
+ * the 的-attributive-particle context to unlock the aggregate skip path.
+ *
+ * 的 followed by a Han character is not discriminating enough on its own:
+ * 個人的使用禁止 (kana-less Japanese "personal use prohibited") also has 的
+ * followed by 使, but only 2 weak structural chars (的 + 用) and must stay
+ * translatable. A long Mandarin sentence such as 把手機的畫面傳到電腦用OBS開台
+ * 就可以不用斷 has 5 weak structural chars (的/用/可/不/用) around its 的, so
+ * the aggregate path unlocks there.
+ */
+const WEAK_MANDARIN_CONTEXT_MIN = 3
+
+/**
  * Minimum Han-to-foreign-letter ratio before the mixed-letter branch may trust
  * the aggregate structural score.
  *
@@ -388,11 +409,17 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let strongStructureScore = 0
   let hasMandarinPronoun = false
   let hasMandarinParticle = false
+  let weakStructureCount = 0
 
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]!
+  // Iterate by code point (not UTF-16 index): astral-plane letters such as the
+  // stylized 𝕙𝕖𝕝𝕝𝕠 used in Twitch text are surrogate pairs, and indexing the
+  // string yields isolated halves that never match \p{L}. Array.from splits
+  // into full code points so foreign letters are detected correctly.
+  const chars = Array.from(text)
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i]!
     const code = char.charCodeAt(0)
-    const next = text[i + 1] ?? ''
+    const next = chars[i + 1] ?? ''
 
     if (isHiragana(code) || isKatakana(code)) {
       hasJapaneseKana = true
@@ -424,14 +451,18 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
         hasMandarinPronoun = true
       }
       // 的 used as a Mandarin attributive particle is followed by a Han
-      // character (手機的畫面). In kana-less Japanese, 的 is almost always
-      // word-final in on-yomi compounds (目的, 個人的), so the follower
-      // distinguishes the Mandarin particle usage.
+      // character (手機的畫面). On its own this is too weak — 個人的使用禁止
+      // (Japanese) also has 的 followed by 使 — so it only unlocks the
+      // aggregate path when weakStructureCount is high enough (checked in
+      // shouldSkipMessage via WEAK_MANDARIN_CONTEXT_MIN).
       if (char === '的' && next !== '' && isCJK(next.charCodeAt(0))) {
         hasMandarinParticle = true
       }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
       chineseStructureScore += weight
+      if (weight === 1) {
+        weakStructureCount++
+      }
       if (weight >= 3) {
         strongStructureScore += weight
       }
@@ -469,6 +500,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     strongStructureScore,
     hasMandarinPronoun,
     hasMandarinParticle,
+    weakStructureCount,
   }
 }
 
@@ -525,10 +557,11 @@ export function shouldSkipMessage(
   if (mode === 'skip_all_chinese') {
     // Short unambiguous Mandarin phrases (不客氣, 我才) clear the gate even
     // though their character weights alone stay below the threshold.
-    // Punctuation/symbols/marks/whitespace are stripped first so 不客氣！,
-    // 我才～ and 不客氣❤️ (emoji variation selector) still match while 手紙 is
-    // never affected.
-    const phraseStripped = text.replace(/[\p{P}\p{S}\p{M}\s]/gu, '')
+    // Punctuation/symbols/marks/format/whitespace are stripped first so
+    // 不客氣！, 我才～, 不客氣❤️ (U+FE0F variation selector) and
+    // 不客氣👨👩👧 (U+200D ZWJ format char) still match while 手紙 is never
+    // affected.
+    const phraseStripped = text.replace(/[\p{P}\p{S}\p{M}\p{Cf}\s]/gu, '')
     const isChinesePhrase = CHINESE_PHRASES.has(phraseStripped)
 
     // Mandarin-specific contextual evidence that unlocks the weak aggregate
@@ -536,9 +569,13 @@ export function shouldSkipMessage(
     // enough — kana-less Japanese compounds reach 4+ the same way (個人利用不
     // 可 = 5). The aggregate is trusted only when the text also contains a
     // Mandarin pronoun used as a pronoun (我要, 你的, 他是) or 的 used as an
-    // attributive particle (手機的畫面).
+    // attributive particle (手機的畫面) supported by enough weak structural
+    // characters — 個人的使用禁止 also has 的 followed by 使, but only 2 weak
+    // chars, so the particle alone does not unlock the path.
     const hasMandarinContext =
-      evidence.hasMandarinPronoun || evidence.hasMandarinParticle
+      evidence.hasMandarinPronoun ||
+      (evidence.hasMandarinParticle &&
+        evidence.weakStructureCount >= WEAK_MANDARIN_CONTEXT_MIN)
 
     // Foreign letters are tolerated only when Han overwhelmingly dominates
     // the foreign letters so they read as an embedded acronym rather than

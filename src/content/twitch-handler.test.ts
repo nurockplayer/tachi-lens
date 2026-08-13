@@ -989,6 +989,42 @@ describe('TwitchMessageHandler', () => {
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
 
+    // #182 follow-up: 個人的使用禁止 is kana-less Japanese despite the 的
+    // followed by 使, and astral-plane foreign letters must be detected. These
+    // must still translate.
+    it.each(['個人的使用禁止', '個人的利用禁止', '𝕙𝕖𝕝𝕝𝕠 這個'])(
+      'sends translate_request for Japanese/mixed %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（翻譯）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    it('does not send translate_request for 不客氣👨👩👧 against a zh-TW target', async () => {
+      // Joined emoji ZWJ is a Cf format char; the phrase must still match.
+      const el = createMessageElement({ text: '不客氣👨👩👧', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
     it('sends translate_request for mixed Latin and Han text against a zh-TW skip_all_chinese target', async () => {
       const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
       sendMessageMock.mockResolvedValue({
