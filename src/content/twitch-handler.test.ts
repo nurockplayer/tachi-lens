@@ -1151,6 +1151,25 @@ describe('TwitchMessageHandler', () => {
       expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
     })
 
+    it('sends translate_request for Japanese 他不要品買取不可 against a zh-TW target', async () => {
+      // 要 is a follower but 品 is a bare noun → the tail walk must continue
+      // past the follower chain and reject it.
+      const el = createMessageElement({ text: '他不要品買取不可', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '（日文）' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
     it('does not send translate_request for 我真的不可以 against a zh-TW target', async () => {
       // 我→真 is a pronoun followed by a Mandarin degree modifier.
       const el = createMessageElement({ text: '我真的不可以', username: 'user' })

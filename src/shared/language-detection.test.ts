@@ -825,6 +825,12 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
     expect(shouldSkipMessage('他不用品買取不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
+  it('rejects Japanese 不要品 after 他 (follower does not bypass the tail)', () => {
+    // 他不要品買取不可: 要 is a follower but 品 is a bare noun; the tail walk
+    // must continue past the follower chain and reject the bare noun.
+    expect(shouldSkipMessage('他不要品買取不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   it('recognizes numeral objects after pronoun predicates as context', () => {
     expect(analyzeMessageScript('我要一個手機').hasMandarinPronoun).toBe(true)
     expect(analyzeMessageScript('我要兩台電腦').hasMandarinPronoun).toBe(true)

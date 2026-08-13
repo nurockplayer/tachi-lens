@@ -224,6 +224,9 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
   '的', '了', '很', '好', '不', '就', '都', '還', '还', '也', '才', '吧', '嗎', '吗', '呢', '啊', '啦',
   // Mandarin degree modifiers (我真/我太/我最/我更/我挺/我超)
   '真', '太', '最', '更', '挺', '超',
+  // Mandarin collocations with a following particle (我可以: 可→以,
+  // 他真的不可以: 可→以)
+  '以',
   // plural suffix
   '們', '们',
 ])
@@ -514,37 +517,33 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       if (MANDARIN_PRONOUNS.has(char)) {
         const first = nextMeaningful(i + 1)
         if (first >= 0 && MANDARIN_PRONOUN_FOLLOWERS.has(chars[first]!)) {
+          // Walk the tail: numeral is conclusive (我要一個手機), follower /
+          // structural / verb / adverb continue (我真的不可以, 我要買一個手機,
+          // 我要再買一個手機), a bare noun rejects Japanese 他X prefixes
+          // (他有地: 有→地, 他不用品: 不→用→品, 他不要品: 不→要→品), and the
+          // end of the message is conclusive.
           let tail = first + 1
-          while (tail >= 0) {
+          let conclusive = true
+          while (conclusive) {
             const next = nextMeaningful(tail)
-            if (next < 0) {
-              hasMandarinPronoun = true
-              break
-            }
+            if (next < 0) break
             const nextChar = chars[next]!
-            // Follower or numeral after the predicate is conclusive Mandarin
-            // pronoun context (我要用你的, 我要一個手機).
-            if (
-              MANDARIN_PRONOUN_FOLLOWERS.has(nextChar) ||
-              MANDARIN_NUMERALS.has(nextChar)
-            ) {
-              hasMandarinPronoun = true
+            if (MANDARIN_NUMERALS.has(nextChar)) {
+              conclusive = true
               break
             }
-            // Structural chars, object verbs, and adverbs continue the tail
-            // (我要買一個手機: 要→買→一; 我要再買一個手機: 要→再→買→一). A
-            // bare noun after a structural char (他不用品: 不→用→品) or right
-            // after the predicate (他有地: 有→地) is rejected.
             if (
               CHINESE_STRUCTURAL[nextChar] !== undefined ||
+              MANDARIN_PRONOUN_FOLLOWERS.has(nextChar) ||
               MANDARIN_OBJECT_VERBS.has(nextChar) ||
               MANDARIN_OBJECT_ADVERBS.has(nextChar)
             ) {
               tail = next + 1
               continue
             }
-            break
+            conclusive = false
           }
+          if (conclusive) hasMandarinPronoun = true
         }
       }
       // 就/把 count as Mandarin function words. 就 needs a structural
