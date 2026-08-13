@@ -229,12 +229,15 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
 ])
 
 /**
- * Mandarin function words used for mixed-branch context.
+ * Mandarin function-word / short-phrase contexts used for the mixed branch.
  *
- * 把 (ba-construction) always introduces a noun phrase (把手機), so its
- * presence alone is the Mandarin signal. 就 (adverb "then") needs a structural
- * follower (就可) to avoid the ordinary Japanese compound 就業.
+ * These Mandarin grammatical collocations (可以, 不用, 就是, 就好, 就會) do not
+ * occur in kana-less Japanese, and 就 followed by a structural character
+ * (就可) distinguishes the Mandarin adverb from the Japanese compound 就業.
+ * A bare 把/就 occurrence is NOT sufficient — Japanese compounds 把握/把持
+ * must stay translatable.
  */
+const MANDARIN_FUNCTION_PHRASES = ['可以', '不用', '就是', '就好', '就會']
 
 /**
  * Structural score required before Han-only text is considered confidently
@@ -462,13 +465,12 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
           hasMandarinPronoun = true
         }
       }
-      // 就/把 count as Mandarin function words. 把 (ba-construction) always
-      // introduces a noun phrase (把手機), so its presence alone is the
-      // Mandarin signal — Japanese 把握/把持 are rare compounds whose 把 is
-      // weight 0 and whose aggregate stays below the skip threshold. 就 needs
-      // a structural follower (就可) to avoid the ordinary Japanese compound
-      // 就業.
-      if (char === '把' || (char === '就' && CHINESE_STRUCTURAL[next] !== undefined)) {
+      // 就/把 count as Mandarin function words. 就 needs a structural
+      // follower (就可) to distinguish the Mandarin adverb from the Japanese
+      // compound 就業. A bare 把 is not enough — Japanese 把握/把持 are
+      // ordinary compounds; Mandarin ba-constructions are covered via the
+      // MANDARIN_FUNCTION_PHRASES scan below.
+      if (char === '就' && CHINESE_STRUCTURAL[next] !== undefined) {
         hasMandarinFunction = true
       }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
@@ -491,6 +493,18 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     if (isForeignLetter(char)) {
       hasForeignLetter = true
       foreignLetterCount++
+    }
+  }
+
+  // Mandarin function-word collocations (可以, 不用, 就是, 就好, 就會) are
+  // unambiguous Mandarin contexts that never occur in kana-less Japanese, so
+  // they unlock the mixed-branch aggregate path without trusting a bare 把/就.
+  if (!hasMandarinFunction) {
+    for (const phrase of MANDARIN_FUNCTION_PHRASES) {
+      if (text.includes(phrase)) {
+        hasMandarinFunction = true
+        break
+      }
     }
   }
 
