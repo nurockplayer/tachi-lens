@@ -9,8 +9,11 @@ Twitch chat immersive translation Chrome Extension. Manifest V3, BYOK, supportin
 | `pnpm install` | Install local dependencies; CI uses `pnpm install --frozen-lockfile` |
 | `pnpm dev` | Vite watch build, outputs to the ignored `dist/` |
 | `pnpm test` | Run the full Vitest suite |
+| `pnpm test:e2e` | Run full Playwright E2E (builds first) |
+| `pnpm test:full` | Run full unit + E2E regression |
 | `pnpm typecheck` | TypeScript strict type check |
 | `pnpm build` | Production Vite build, popup CSP check |
+| `pnpm classify:risk` | Print the validation tier for the current change |
 
 ## Architecture
 
@@ -41,6 +44,23 @@ Data flow: the Content Script only sends `{messageId, text, priority?}` to the S
 - Use React only in the Popup; keep the Content Script as plain TypeScript/DOM.
 - Before designing or redesigning a frontend page, use `design-taste-frontend`; for dense product UI such as the Popup, prioritize the existing design system and task ergonomics.
 - Do not commit `dist/`, `.omc` session/state noise, release zips, or other generated artifacts.
+
+## Validation tiers
+
+Validation is risk-based, deterministic, and path-based; there is no LLM-based test selection. `scripts/classify-risk.mjs` classifies a change by the files it touches relative to `origin/main`.
+
+| Tier | When | Validation |
+| --- | --- | --- |
+| T0 Focused | Inner loop only (not CI) | `pnpm vitest run <path>` on affected tests |
+| T1 Docs | Every changed file is markdown (`*.md`) or under `docs/` | `check` only; Playwright E2E is skipped |
+| T2 Runtime | Any other changed file (source, manifest, dependencies, e2e specs, scripts, build config, locales, workflows) | `check` + full Playwright E2E |
+
+- `check` always runs (agent-docs sync, lint, typecheck, full Vitest, build); full Vitest is cheap and is never skipped.
+- Playwright E2E is gated on the classifier: it runs only for runtime changes (T2) and is skipped for docs-only changes (T1).
+- Fail-safe escalation: an unknown, ambiguous, empty, or unparseable change set escalates to T2 (full E2E). Only an explicit `*.md`/`docs/` match skips E2E.
+- Inner loop: prefer focused affected tests (`pnpm vitest run <path>`) over repeated full `pnpm test`.
+- Full regression (all unit + E2E) is available anytime via `pnpm test:full`.
+- The live Twitch canary remains a separate scheduled workflow and is never a routine PR gate.
 
 ## Language policy
 
