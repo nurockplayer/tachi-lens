@@ -799,6 +799,20 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
   it('still skips 他很好 (Han-only, 他→很 pronoun context)', () => {
     expect(shouldSkipMessage('他很好', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
+
+  it('recognizes verb-object clauses after content predicates as pronoun context', () => {
+    // 我要手機 (我→要→手), 他有時間 (他→有→時): 要/有 are content
+    // predicates taking a noun object, so the pronoun context holds even
+    // though the object is not a structural character. These short messages
+    // stay below the aggregate threshold, so they still translate — the point
+    // is that the pronoun is not rejected as a Japanese 他X prefix.
+    expect(analyzeMessageScript('我要手機').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('他有時間').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('我會看').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('他會來').hasMandarinPronoun).toBe(true)
+    // Japanese 他会場 (modal 会 + noun 場) is not a Mandarin pronoun.
+    expect(analyzeMessageScript('他会場利用不可').hasMandarinPronoun).toBe(false)
+  })
 })
 
 describe('shouldSkipMessage — translate_other_script mode', () => {

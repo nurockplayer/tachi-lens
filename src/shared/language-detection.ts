@@ -461,20 +461,26 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       }
       // A Mandarin pronoun counts only with contextual evidence: the pronoun
       // is followed by a Mandarin predicate/particle (我要, 你的, 他是),
-      // skipping any separators (我，真的不可以). The glyph after that
-      // predicate must itself be a Mandarin structural character or the end of
-      // the message, so Japanese 他X prefixes are excluded: 他会場利用不可
-      // (他→会→場) is "other venue" and must not be a pronoun, while 他很好
-      // (他→很→好) and 我真的不可以 (我→真→的) are.
+      // skipping any separators (我，真的不可以). When the predicate is the
+      // modal 会/會 (a Mandarin modal takes a verb phrase: 他会來, 我會看),
+      // the glyph after it must be a Mandarin structural character or another
+      // follower, so the Japanese compound 他会場 (other venue) is excluded.
+      // Content predicates (要/有/想/看/… take a noun object: 我要手機,
+      // 他有時間) need no such second lookahead.
       if (MANDARIN_PRONOUNS.has(char)) {
         const first = nextMeaningful(i + 1)
         if (first >= 0 && MANDARIN_PRONOUN_FOLLOWERS.has(chars[first]!)) {
-          const second = nextMeaningful(first + 1)
-          if (
-            second < 0 ||
-            CHINESE_STRUCTURAL[chars[second]!] !== undefined ||
-            MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!)
-          ) {
+          const follower = chars[first]!
+          if (follower === '会' || follower === '會') {
+            const second = nextMeaningful(first + 1)
+            if (
+              second < 0 ||
+              CHINESE_STRUCTURAL[chars[second]!] !== undefined ||
+              MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!)
+            ) {
+              hasMandarinPronoun = true
+            }
+          } else {
             hasMandarinPronoun = true
           }
         }
