@@ -767,6 +767,8 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
     '他用途不可',
     '他利用不可',
     '他用途禁止',
+    '他会場利用不可',
+    '他方利用不可',
   ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
     expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
   })

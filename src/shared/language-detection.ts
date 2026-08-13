@@ -444,11 +444,23 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
         hasChineseMarker = true
       }
       // A Mandarin pronoun counts only with contextual evidence: the pronoun
-      // is followed by a Mandarin structural character (我要, 你的, 他是).
-      // Bare presence is not enough — 他人 (Japanese "other people") has 他
-      // followed by a noun and must not unlock the aggregate path.
-      if (MANDARIN_PRONOUNS.has(char) && MANDARIN_PRONOUN_FOLLOWERS.has(next)) {
-        hasMandarinPronoun = true
+      // is followed by a Mandarin predicate/particle (我要, 你的, 他是). The
+      // glyph after that predicate must itself be a Mandarin structural
+      // character or the end of the message, so Japanese 他X prefixes are
+      // excluded: 他会場利用不可 (他→会→場) is "other venue" and must not be a
+      // pronoun, while 他很好 (他→很→好) and 我真的不可以 (我→真→的) are.
+      if (
+        MANDARIN_PRONOUNS.has(char) &&
+        MANDARIN_PRONOUN_FOLLOWERS.has(next)
+      ) {
+        const secondNext = chars[i + 2] ?? ''
+        if (
+          secondNext === '' ||
+          CHINESE_STRUCTURAL[secondNext] !== undefined ||
+          MANDARIN_PRONOUN_FOLLOWERS.has(secondNext)
+        ) {
+          hasMandarinPronoun = true
+        }
       }
       // 就/把 count as Mandarin function words. 把 (ba-construction) always
       // introduces a noun phrase (把手機), so its presence alone is the
