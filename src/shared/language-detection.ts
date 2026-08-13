@@ -513,12 +513,27 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     }
   }
 
-  // Mandarin function-word collocations (可以, 不用, 就是, 就好, 就會) are
-  // unambiguous Mandarin contexts that never occur in kana-less Japanese, so
-  // they unlock the mixed-branch aggregate path without trusting a bare 把/就.
+  // Mandarin function-word collocations (可以, 就是, 就好, 就會) are
+  // Mandarin contexts that unlock the mixed-branch aggregate path without
+  // trusting a bare 把/就. 可以 is additionally required to be followed by a
+  // Mandarin structural character or the end of the message, so a cross-word
+  // match in 許可以外 (許可|以外, Japanese "except permission") does not count.
   if (!hasMandarinFunction) {
     for (const phrase of MANDARIN_FUNCTION_PHRASES) {
-      if (text.includes(phrase)) {
+      if (phrase === '可以') {
+        let idx = text.indexOf(phrase)
+        while (idx >= 0) {
+          const after = nextMeaningful(idx + phrase.length)
+          if (
+            after < 0 ||
+            CHINESE_STRUCTURAL[chars[after]!] !== undefined
+          ) {
+            hasMandarinFunction = true
+            break
+          }
+          idx = text.indexOf(phrase, idx + 1)
+        }
+      } else if (text.includes(phrase)) {
         hasMandarinFunction = true
         break
       }

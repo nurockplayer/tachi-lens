@@ -1003,6 +1003,7 @@ describe('TwitchMessageHandler', () => {
       '就業規則個人情報無断利用不可w',
       '把握事項個人情報利用不可禁止w',
       '不用品個人情報無断利用禁止w',
+      '許可以外使用不可無断転載禁止w',
       '𝕙𝕖𝕝𝕝𝕠 這個',
     ])(
       'sends translate_request for Japanese/mixed %s against a zh-TW skip_all_chinese target',
