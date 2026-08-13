@@ -1092,6 +1092,21 @@ describe('TwitchMessageHandler', () => {
       },
     )
 
+    it.each(['没问题', '没有问题'])(
+      'does not send translate_request for Simplified %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      },
+    )
+
     it('does not send translate_request for 我要一個手機 (numeral object) against a zh-TW target', async () => {
       // 我→要→一: a numeral/classifier object after the predicate is valid
       // Mandarin pronoun context, so this already-Chinese message skips.

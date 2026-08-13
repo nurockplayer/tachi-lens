@@ -730,6 +730,15 @@ describe('shouldSkipMessage — common courtesy phrases skip', () => {
     },
   )
 
+  it.each(['没问题', '没有问题', '沒問題', '沒问题'])(
+    'skips %s (没问题 reply) for zh-TW in skip_all_chinese',
+    (text) => {
+      // Simplified 没 is weight 1 (so 没収/水没/没入 stay translatable), so
+      // these full-message forms are recognized via the phrase fallback.
+      expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(true)
+    },
+  )
+
   it('still does not skip 謝謝です (kana suffix)', () => {
     expect(shouldSkipMessage('謝謝です', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
