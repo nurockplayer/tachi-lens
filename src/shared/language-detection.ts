@@ -518,25 +518,26 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   // trusting a bare 把/就. 可以 is additionally required to be followed by a
   // Mandarin structural character or the end of the message, so a cross-word
   // match in 許可以外 (許可|以外, Japanese "except permission") does not count.
+  // Matching runs over the same code-point array (chars) as nextMeaningful, so
+  // an astral letter before the match cannot skew the follower offset.
   if (!hasMandarinFunction) {
-    for (const phrase of MANDARIN_FUNCTION_PHRASES) {
-      if (phrase === '可以') {
-        let idx = text.indexOf(phrase)
-        while (idx >= 0) {
-          const after = nextMeaningful(idx + phrase.length)
-          if (
-            after < 0 ||
-            CHINESE_STRUCTURAL[chars[after]!] !== undefined
-          ) {
+    const phraseChars = MANDARIN_FUNCTION_PHRASES.map((p) => Array.from(p))
+    for (let i = 0; i < chars.length; i++) {
+      for (const pc of phraseChars) {
+        const matches = pc.every((c, k) => chars[i + k] === c)
+        if (!matches) continue
+        if (pc.length === 2 && pc[0] === '可' && pc[1] === '以') {
+          const after = nextMeaningful(i + 2)
+          if (after < 0 || CHINESE_STRUCTURAL[chars[after]!] !== undefined) {
             hasMandarinFunction = true
             break
           }
-          idx = text.indexOf(phrase, idx + 1)
+        } else {
+          hasMandarinFunction = true
+          break
         }
-      } else if (text.includes(phrase)) {
-        hasMandarinFunction = true
-        break
       }
+      if (hasMandarinFunction) break
     }
   }
 
