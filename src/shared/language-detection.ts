@@ -140,28 +140,35 @@ const CHINESE_MARKER_SET = new Set(CHINESE_LANGUAGE_MARKERS)
  * by how strongly it signals Chinese rather than kana-less Japanese:
  *
  * Weight 3 (strong Mandarin structural signal):
- * - 這/这/個/个 are demonstratives with no ordinary standalone Japanese
+ * - 這/这 are Mandarin demonstratives with no ordinary standalone Japanese
  *   equivalent.
  * - 啦 is a colloquial Mandarin sentence-final particle.
  * - 對/对 as a response word ("yes/right") is distinctively Mandarin; in
  *   Japanese 対 is only an affix in on-yomi compounds.
- * - 沒/没 negates existence in Mandarin and is not ordinary Japanese usage.
+ * - 沒 (U+6C92) negates existence in Mandarin; the Traditional glyph is not
+ *   ordinary modern Japanese usage. (Simplified 没 U+6CA1 is weight 1 — it is
+ *   also ordinary Japanese Kanji in 没収/水没/没入.)
  * - 嗎/吗/呢/吧 are Mandarin sentence-final particles.
- * - 什/麼/么 form the Mandarin interrogative 什麼/什么 ("what").
+ * - 麼/么 form the Mandarin interrogative 什麼/什么 ("what").
+ * - 們/们 is the Mandarin plural suffix.
+ * - 啊 is a Mandarin sentence-final particle.
  *
  * Weight 2 (common Mandarin grammar, with real kana-less Japanese
  * homographs that weaken the signal):
  * - 很 (Mandarin degree adverb 很熱/很好).
  * - 是 (Mandarin copula 是/不是/那是; rare as standalone Japanese).
- * - 會/会 (future/modal 不會/会; Japanese 会 is 会う in kun-yomi, a
- *   different sense and common enough to count as Japanese-risk).
- * - 能/可 (can/may; Japanese 能/可 are affixes in 可能, 能力).
+ * - 個/个 are Mandarin demonstratives/counters (這個/那个) but ordinary
+ *   Japanese Kanji in on-yomi compounds (個人, 個別).
  *
  * Weight 1 (weak, but accumulate with other evidence):
  * - 不 (Mandarin negation 不客氣/不會; Japanese 不 is an affix in 不安/不明),
  * - 的 (Japanese homograph 目的/個人的), 好 (Japanese 好む is rarer),
  * - 我/你/他/她/它 (Mandarin pronouns; Japanese uses 私/あなた/彼/彼女),
- * - 要/用, 了 (Mandarin aspect particle; Japanese homograph 了 in 了解).
+ * - 要/用, 了 (Mandarin aspect particle; Japanese homograph 了 in 了解),
+ * - 會/会 (Mandarin modal 會/不会; Japanese 会 is 会う in kun-yomi),
+ * - 可/能 (can/may; Japanese 能/可 are affixes in 可能, 能力),
+ * - 没 (U+6CA1, Simplified and ordinary Japanese Kanji in 没収/水没/没入),
+ * - 什 (U+4EC0, ordinary Japanese Kanji in 什器).
  *
  * The list is deliberately conservative: characters are only added when they
  * accumulate across a sentence and cannot flip a short kana-less Japanese word
