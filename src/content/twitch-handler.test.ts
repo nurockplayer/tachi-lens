@@ -1071,6 +1071,21 @@ describe('TwitchMessageHandler', () => {
       },
     )
 
+    it.each(['可以', '好的', '知道了'])(
+      'does not send translate_request for common weak-only Mandarin %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      },
+    )
+
     it('sends translate_request for mixed Latin and Han text against a zh-TW skip_all_chinese target', async () => {
       const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
       sendMessageMock.mockResolvedValue({

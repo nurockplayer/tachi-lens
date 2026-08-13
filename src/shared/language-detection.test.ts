@@ -691,12 +691,20 @@ describe('shouldSkipMessage — common courtesy phrases skip', () => {
   // #182 follow-up: 謝謝/谢谢 are extremely common Chinese chat messages with
   // no marker/structural/Mandarin-context evidence; they belong in the
   // exact-phrase fallback.
-  it.each(['謝謝', '谢谢'])('skips %s for zh-TW in skip_all_chinese', (text) => {
-    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(true)
-  })
+  it.each(['謝謝', '谢谢', '可以', '好的', '知道了'])(
+    'skips %s for zh-TW in skip_all_chinese',
+    (text) => {
+      expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(true)
+    },
+  )
 
   it('still does not skip 謝謝です (kana suffix)', () => {
     expect(shouldSkipMessage('謝謝です', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('does not skip 可以做 (可以 as a prefix is not an exact phrase match)', () => {
+    // 可以 is only skipped as an exact message; 可以做 is a longer utterance.
+    expect(shouldSkipMessage('可以做', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 })
 
