@@ -200,6 +200,20 @@ const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
 const HAN_FOREIGN_DOMINANCE_RATIO = 4
 
 /**
+ * Minimum absolute Han count before the mixed-letter branch may trust the
+ * aggregate structural score.
+ *
+ * The ratio gate alone is defeated by a single Latin letter: 使用不可能w
+ * (5 Han vs 1 Latin) and 個人利用不可w (6 Han vs 1 Latin) would pass
+ * hanCount >= 4 * 1 and skip on weak Kanji accumulation. The weak-aggregate
+ * path must therefore also require a substantial Han run, representing a long
+ * Chinese sentence with an embedded acronym rather than a short Japanese
+ * phrase with one trailing Latin character. 把手機的畫面傳到電腦用OBS開台就可
+ * 以不用斷 (19 Han) clears it; the 5-6 Han Japanese phrases do not.
+ */
+const MIN_HAN_COUNT_FOR_WEAK_MIXED = 12
+
+/**
  * Strong structural score required before Han-only text is considered
  * confidently Chinese by strong characters alone.
  *
@@ -460,11 +474,12 @@ export function shouldSkipMessage(
     // embedded acronym rather than mixed language.
     //  - Strong Mandarin evidence (marker / weight-3 char) is decisive:
     //    e.g. 這個很熱OBS.
-    //  - A weak aggregate score is trusted only at high Han dominance
-    //    (hanCount >= 4 * foreignLetterCount): 把手機的畫面傳到電腦用OBS開台就
-    //    可以不用斷 has 19 Han vs 3 Latin and correctly skips, while
-    //    個人利用不可OBS (6 Han vs 3 Latin) and 使用不可能OBS (5 vs 3) must
-    //    not skip on weak Kanji accumulation.
+    //  - A weak aggregate score is trusted only at high Han dominance in both
+    //    ratio (hanCount >= 4 * foreignLetterCount) and absolute Han count
+    //    (hanCount >= 12): 把手機的畫面傳到電腦用OBS開台就可以不用斷 has 19
+    //    Han vs 3 Latin and correctly skips, while 個人利用不可OBS (6 Han vs 3
+    //    Latin), 使用不可能OBS (5 vs 3), 使用不可能w (5 vs 1) and
+    //    個人利用不可w (6 vs 1) must not skip on weak Kanji accumulation.
     //  - Mixed or foreign-dominated messages stay translatable
     //    (hello 大家好, é国, Ａ国).
     if (evidence.hasForeignLetter) {
@@ -476,6 +491,7 @@ export function shouldSkipMessage(
       }
       return (
         evidence.hanCount >= HAN_FOREIGN_DOMINANCE_RATIO * evidence.foreignLetterCount &&
+        evidence.hanCount >= MIN_HAN_COUNT_FOR_WEAK_MIXED &&
         evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
       )
     }

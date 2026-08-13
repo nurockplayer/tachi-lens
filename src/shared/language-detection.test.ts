@@ -530,6 +530,20 @@ describe('shouldSkipMessage — weak Kanji must not skip in mixed-letter message
     expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
+  // A single trailing Latin letter (halfwidth w or fullwidth ｗ U+FF57) is a
+  // foreign letter too; it must not let short Japanese phrases skip on weak
+  // Kanji accumulation. The absolute Han-count floor rejects these.
+  it.each([
+    '使用不可能w',
+    '個人利用不可w',
+    '使用不可能ｗ',
+    '個人利用不可ｗ',
+    '不可能w',
+    '個人情報w',
+  ])('does not skip kana-less Japanese with a trailing Latin letter %s for zh-TW', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   it('still skips the Han-dominant Chinese OBS message for zh-TW in skip_all_chinese', () => {
     expect(
       shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
