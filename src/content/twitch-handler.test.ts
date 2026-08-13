@@ -1088,6 +1088,32 @@ describe('TwitchMessageHandler', () => {
       },
     )
 
+    it('does not send translate_request for 我真的不可以 against a zh-TW target', async () => {
+      // 我→真 is a pronoun followed by a Mandarin degree modifier.
+      const el = createMessageElement({ text: '我真的不可以', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('does not send translate_request for the 把-construction OBS message against a zh-TW target', async () => {
+      // 把手機畫面傳到電腦用OBS開台可以不用斷: 把 introduces a noun phrase.
+      const el = createMessageElement({ text: '把手機畫面傳到電腦用OBS開台可以不用斷', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
     it('sends translate_request for mixed Latin and Han text against a zh-TW skip_all_chinese target', async () => {
       const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
       sendMessageMock.mockResolvedValue({

@@ -222,6 +222,8 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
   '要', '是', '會', '会', '能', '可', '有', '在', '想', '說', '说', '看', '走', '去', '來', '来',
   // aspect / possessive / structural particles
   '的', '了', '很', '好', '不', '就', '都', '還', '还', '也', '才', '吧', '嗎', '吗', '呢', '啊', '啦',
+  // Mandarin degree modifiers (我真/我太/我最/我更/我挺/我超)
+  '真', '太', '最', '更', '挺', '超',
   // plural suffix
   '們', '们',
 ])
@@ -229,13 +231,10 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
 /**
  * Mandarin function words used for mixed-branch context.
  *
- * 就 (adverb "then") and 把 (ba-construction) are Mandarin function words. The
- * same glyphs occur inside kana-less Japanese compounds (就業, 把握) where they
- * are followed by a noun rather than a structural character, so the follower
- * must be a CHINESE_STRUCTURAL character (就可, 就把) for the Mandarin reading
- * to count.
+ * 把 (ba-construction) always introduces a noun phrase (把手機), so its
+ * presence alone is the Mandarin signal. 就 (adverb "then") needs a structural
+ * follower (就可) to avoid the ordinary Japanese compound 就業.
  */
-const MANDARIN_FUNCTION_WORDS = new Set(['就', '把'])
 
 /**
  * Structural score required before Han-only text is considered confidently
@@ -451,10 +450,13 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       if (MANDARIN_PRONOUNS.has(char) && MANDARIN_PRONOUN_FOLLOWERS.has(next)) {
         hasMandarinPronoun = true
       }
-      // 就/把 count as Mandarin function words only when followed by a
-      // structural character (就可, 就把); inside Japanese compounds (就業,
-      // 把握) the follower is a noun and the glyph is not a function word.
-      if (MANDARIN_FUNCTION_WORDS.has(char) && CHINESE_STRUCTURAL[next] !== undefined) {
+      // 就/把 count as Mandarin function words. 把 (ba-construction) always
+      // introduces a noun phrase (把手機), so its presence alone is the
+      // Mandarin signal — Japanese 把握/把持 are rare compounds whose 把 is
+      // weight 0 and whose aggregate stays below the skip threshold. 就 needs
+      // a structural follower (就可) to avoid the ordinary Japanese compound
+      // 就業.
+      if (char === '把' || (char === '就' && CHINESE_STRUCTURAL[next] !== undefined)) {
         hasMandarinFunction = true
       }
       const weight = CHINESE_STRUCTURAL[char] ?? 0

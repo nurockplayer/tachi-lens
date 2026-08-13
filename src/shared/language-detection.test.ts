@@ -582,6 +582,12 @@ describe('shouldSkipMessage — Mandarin pronouns unlock Han-only aggregate', ()
     expect(shouldSkipMessage('我要用你的', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
+  it('skips 我真的不可以 for zh-TW in skip_all_chinese', () => {
+    // 我→真 is a pronoun followed by a Mandarin degree modifier, so the
+    // aggregate path unlocks; total = 我1+真0+的1+不1+可1+以0 = 4.
+    expect(shouldSkipMessage('我真的不可以', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
   it('skips 你要好好的 for zh-TW in skip_all_chinese', () => {
     // 你1+要1+好1+好1+的1 = 5 with a Mandarin pronoun → aggregate path.
     expect(shouldSkipMessage('你要好好的', 'zh-TW', 'skip_all_chinese')).toBe(true)
@@ -646,6 +652,15 @@ describe('shouldSkipMessage — long Japanese mixed message needs Mandarin conte
   it('still skips 把手機的畫面傳到電腦用OBS開台就可以不用斷 for zh-CN', () => {
     expect(
       shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-CN', 'skip_all_chinese'),
+    ).toBe(true)
+  })
+
+  it('still skips the 把-construction OBS message without 的 for zh-TW', () => {
+    // 把手機畫面傳到電腦用OBS開台可以不用斷: 把 introduces a noun phrase
+    // (把手機), so hasMandarinFunction is set even though 把 is not followed
+    // by a structural character. Han-dominant mixed message.
+    expect(
+      shouldSkipMessage('把手機畫面傳到電腦用OBS開台可以不用斷', 'zh-TW', 'skip_all_chinese'),
     ).toBe(true)
   })
 })
