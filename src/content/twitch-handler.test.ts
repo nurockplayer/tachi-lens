@@ -1042,7 +1042,7 @@ describe('TwitchMessageHandler', () => {
     // #182 follow-up: 個人的使用不可 (的 followed by 使, weak=4), 他用途不可
     // (他 = Japanese "other" prefix), and the common courtesy phrase 謝謝.
     // The former two must translate; 謝謝 must skip.
-    it.each(['個人的使用不可', '他用途不可', '他利用不可', '他会場利用不可'])(
+    it.each(['個人的使用不可', '他用途不可', '他利用不可', '他会場利用不可', '他有地利用不可'])(
       'sends translate_request for kana-less Japanese %s against a zh-TW target',
       async (text) => {
         const el = createMessageElement({ text, username: 'user' })
