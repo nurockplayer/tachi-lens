@@ -645,6 +645,7 @@ describe('shouldSkipMessage — long Japanese mixed message needs Mandarin conte
     '個人的使用不可OBS',
     '就業規則個人情報無断利用不可w',
     '把握事項個人情報利用不可禁止w',
+    '不用品個人情報無断利用禁止w',
     '各種情報利用不可禁止',
   ])('does not skip long kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
     expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)

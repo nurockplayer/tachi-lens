@@ -237,7 +237,7 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
  * A bare 把/就 occurrence is NOT sufficient — Japanese compounds 把握/把持
  * must stay translatable.
  */
-const MANDARIN_FUNCTION_PHRASES = ['可以', '不用', '就是', '就好', '就會']
+const MANDARIN_FUNCTION_PHRASES = ['可以', '就是', '就好', '就會']
 
 /**
  * Structural score required before Han-only text is considered confidently
