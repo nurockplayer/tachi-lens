@@ -229,6 +229,18 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
 ])
 
 /**
+ * Mandarin numerals (including 兩/两). Mandarin predicates can take a
+ * numeral/classifier + noun object (我要一個手機, 他有兩本書), so a numeral is
+ * acceptable immediately after a pronoun predicate. Japanese 他X prefixes use
+ * nouns after the predicate (他有地, 他会場), which are not numerals, so the
+ * guard still excludes them.
+ */
+const MANDARIN_NUMERALS = new Set([
+  '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
+  '百', '千', '萬', '万', '兩', '两', '零', '半',
+])
+
+/**
  * Mandarin function-word / short-phrase contexts used for the mixed branch.
  *
  * These Mandarin grammatical collocations (可以, 不用, 就是, 就好, 就會) do not
@@ -463,10 +475,11 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       // is followed by a Mandarin predicate/particle (我要, 你的, 他是),
       // skipping any separators (我，真的不可以). The glyph after that
       // predicate must itself be a Mandarin structural character, another
-      // follower, or the end of the message, so Japanese 他X prefixes are
-      // excluded: 他会場利用不可 (他→会→場) and 他有地利用不可 (他→有→地) are
-      // "other venue/other's land" and must not be a pronoun, while 他很好
-      // (他→很→好) and 我真的不可以 (我→真→的) are. A short clause whose
+      // follower, a Mandarin numeral (我要一個手機: 要→一), or the end of the
+      // message, so Japanese 他X prefixes are excluded: 他会場利用不可
+      // (他→会→場) and 他有地利用不可 (他→有→地) are "other venue/other's land"
+      // and must not be a pronoun, while 他很好 (他→很→好), 我真的不可以
+      // (我→真→的), and 我要一個手機 (我→要→一) are. A short clause whose
       // object is not structural (我要手機, 他有時間) keeps no pronoun context
       // but its aggregate stays below the skip threshold, so it still
       // translates conservatively.
@@ -477,7 +490,8 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
           if (
             second < 0 ||
             CHINESE_STRUCTURAL[chars[second]!] !== undefined ||
-            MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!)
+            MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!) ||
+            MANDARIN_NUMERALS.has(chars[second]!)
           ) {
             hasMandarinPronoun = true
           }

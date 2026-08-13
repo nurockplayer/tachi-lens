@@ -800,6 +800,32 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
     expect(shouldSkipMessage('他很好', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
+  // #182 follow-up: Mandarin predicates can take a numeral/classifier + noun
+  // object (我要一個手機). The numeral after the predicate is acceptable
+  // pronoun context; the Japanese 他X prefixes (他有地, 他会場) are not.
+  it('skips 我要一個手機 (numeral/classifier object) for zh-TW', () => {
+    expect(shouldSkipMessage('我要一個手機', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('recognizes numeral objects after pronoun predicates as context', () => {
+    expect(analyzeMessageScript('我要一個手機').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('我要兩台電腦').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('他要一本書').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('他很好').hasMandarinPronoun).toBe(true)
+  })
+
+  it('keeps Japanese 他X prefixes out of numeral-object context', () => {
+    // 地/場 are nouns, not numerals — the second lookahead still rejects them.
+    expect(analyzeMessageScript('他有地利用不可').hasMandarinPronoun).toBe(false)
+    expect(analyzeMessageScript('他会場利用不可').hasMandarinPronoun).toBe(false)
+    expect(analyzeMessageScript('他人使用不可').hasMandarinPronoun).toBe(false)
+    expect(analyzeMessageScript('他用途不可').hasMandarinPronoun).toBe(false)
+    expect(shouldSkipMessage('他有地利用不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('他会場利用不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('他人使用不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    expect(shouldSkipMessage('他用途不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   it('excludes Japanese 他X prefixes while keeping structural pronoun contexts', () => {
     // 他→很→好, 我→真→的, 我→要→用 are Mandarin pronoun contexts.
     expect(analyzeMessageScript('他很好').hasMandarinPronoun).toBe(true)
