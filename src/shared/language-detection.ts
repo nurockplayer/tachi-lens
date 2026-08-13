@@ -51,14 +51,21 @@ export interface ScriptEvidence {
    */
   strongStructureScore: number
   /**
-   * Whether the message contains a Mandarin personal pronoun (我/你/他/她/它).
-   *
-   * Mandarin chat uses these as ordinary pronouns (我要用你的); modern
-   * kana-less Japanese does not (it uses 私/あなた/彼/彼女). Used to let an
-   * otherwise-weak Mandarin sentence clear the aggregate threshold without
-   * letting kana-less Japanese compounds (個人利用不可, 使用不可能) do the same.
+   * Whether a Mandarin personal pronoun (我/你/他/她/它) is used as an actual
+   * pronoun — i.e. immediately followed by a Mandarin structural character
+   * (我要, 你的, 他是). Bare presence is not enough: in 他人 (Japanese
+   * "other people") 他 precedes a noun and is part of a kana-less Japanese
+   * compound, not a Mandarin pronoun.
    */
   hasMandarinPronoun: boolean
+  /**
+   * Whether 的 (U+7684) is used as a Mandarin attributive particle — i.e.
+   * immediately followed by another Han character (手機的畫面). In kana-less
+   * Japanese, 的 is almost always word-final in on-yomi compounds (目的,
+   * 個人的), so 的-followed-by-Han is a strong Mandarin signal. Unlocks the
+   * aggregate score but never skips by itself.
+   */
+  hasMandarinParticle: boolean
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -187,13 +194,30 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
 }
 
 /**
- * Mandarin personal pronouns. These are ordinary first/second/third-person
- * pronouns in Mandarin chat (我要用你的) but are not used this way in modern
- * kana-less Japanese (which uses 私/あなた/彼/彼女), so their presence lets an
- * otherwise-weak Mandarin sentence clear the aggregate threshold without
- * letting kana-less Japanese compounds (個人利用不可, 使用不可能) do the same.
+ * Mandarin personal pronouns.
+ *
+ * A pronoun only counts as Mandarin evidence when it is actually used as a
+ * pronoun — immediately followed by a Mandarin structural character (我要,
+ * 你的, 他是, 我們). The bare glyph also occurs in kana-less Japanese
+ * compounds (他人 = "other people", 我慢 = "patience"), where it is followed
+ * by a noun, so the follower context is required (#182 follow-up).
  */
 const MANDARIN_PRONOUNS = new Set(['我', '你', '他', '她', '它'])
+
+/**
+ * Characters that can directly follow a Mandarin pronoun in ordinary chat:
+ * predicates, aspect/possessive particles, modals, and the plural suffix 們.
+ * If a pronoun is followed by anything else (a noun, as in Japanese 他人),
+ * it is treated as a kana-less Japanese compound instead.
+ */
+const MANDARIN_PRONOUN_FOLLOWERS = new Set([
+  // predicates / copula
+  '要', '是', '會', '会', '能', '可', '有', '在', '想', '說', '说', '看', '走', '去', '來', '来',
+  // aspect / possessive / structural particles
+  '的', '了', '很', '好', '不', '就', '都', '還', '还', '也', '才', '吧', '嗎', '吗', '呢', '啊', '啦',
+  // plural suffix
+  '們', '们',
+])
 
 /**
  * Structural score required before Han-only text is considered confidently
@@ -363,9 +387,12 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let chineseStructureScore = 0
   let strongStructureScore = 0
   let hasMandarinPronoun = false
+  let hasMandarinParticle = false
 
-  for (const char of text) {
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!
     const code = char.charCodeAt(0)
+    const next = text[i + 1] ?? ''
 
     if (isHiragana(code) || isKatakana(code)) {
       hasJapaneseKana = true
@@ -389,8 +416,19 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       if (CHINESE_MARKER_SET.has(char)) {
         hasChineseMarker = true
       }
-      if (MANDARIN_PRONOUNS.has(char)) {
+      // A Mandarin pronoun counts only with contextual evidence: the pronoun
+      // is followed by a Mandarin structural character (我要, 你的, 他是).
+      // Bare presence is not enough — 他人 (Japanese "other people") has 他
+      // followed by a noun and must not unlock the aggregate path.
+      if (MANDARIN_PRONOUNS.has(char) && MANDARIN_PRONOUN_FOLLOWERS.has(next)) {
         hasMandarinPronoun = true
+      }
+      // 的 used as a Mandarin attributive particle is followed by a Han
+      // character (手機的畫面). In kana-less Japanese, 的 is almost always
+      // word-final in on-yomi compounds (目的, 個人的), so the follower
+      // distinguishes the Mandarin particle usage.
+      if (char === '的' && next !== '' && isCJK(next.charCodeAt(0))) {
+        hasMandarinParticle = true
       }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
       chineseStructureScore += weight
@@ -430,6 +468,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     chineseStructureScore,
     strongStructureScore,
     hasMandarinPronoun,
+    hasMandarinParticle,
   }
 }
 
@@ -492,13 +531,26 @@ export function shouldSkipMessage(
     const phraseStripped = text.replace(/[\p{P}\p{S}\p{M}\s]/gu, '')
     const isChinesePhrase = CHINESE_PHRASES.has(phraseStripped)
 
+    // Mandarin-specific contextual evidence that unlocks the weak aggregate
+    // path. A bare aggregate of ambiguous Kanji (個/用/不/可/能) is never
+    // enough — kana-less Japanese compounds reach 4+ the same way (個人利用不
+    // 可 = 5). The aggregate is trusted only when the text also contains a
+    // Mandarin pronoun used as a pronoun (我要, 你的, 他是) or 的 used as an
+    // attributive particle (手機的畫面).
+    const hasMandarinContext =
+      evidence.hasMandarinPronoun || evidence.hasMandarinParticle
+
     // Foreign letters are tolerated only when Han overwhelmingly dominates
     // the foreign letters so they read as an embedded acronym rather than
     // mixed language. The dominance gate applies uniformly — before marker,
     // strong, or weak evidence — so genuinely mixed chat (hello 這個,
     // English 對啊) stays translatable even when the Chinese segment contains
     // a marker, while the Han-dominant real Chinese OBS message
-    // (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3 Latin) skips.
+    // (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3 Latin, with 的
+    // as an attributive particle) skips. The weak aggregate in the mixed
+    // branch is gated by the same Mandarin contextual evidence as the Han-only
+    // path, so a long Japanese signage sentence with an acronym (個人情報利用不
+    // 可無断転載禁止w: 14 Han vs 1 Latin) never skips.
     if (evidence.hasForeignLetter) {
       const hanDominates =
         evidence.hanCount >= HAN_FOREIGN_DOMINANCE_RATIO * evidence.foreignLetterCount &&
@@ -507,7 +559,8 @@ export function shouldSkipMessage(
       return (
         evidence.hasChineseMarker ||
         evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD ||
-        evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
+        (hasMandarinContext &&
+          evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD)
       )
     }
 
@@ -517,19 +570,21 @@ export function shouldSkipMessage(
     // - it contains a strong Mandarin structural character (weight 3,
     //   e.g. 那是肯定沒有 → 沒, 那要打訊號什麼的 → 麼), or
     // - the whole message is a known Chinese phrase (e.g. 不客氣, 我才), or
-    // - a Mandarin personal pronoun (我/你/他/她/它) pushes an otherwise-weak
-    //   sentence past the aggregate threshold (e.g. 我要用你的 = 5).
+    // - Mandarin contextual evidence (a pronoun used as a pronoun, or 的 as an
+    //   attributive particle) pushes an otherwise-weak sentence past the
+    //   aggregate threshold (e.g. 我要用你的 = 5, 他很好 = 4).
     // Weak/ambiguous Kanji (weight 1–2: 個/用/不/可/能/是) are excluded here
     // because they also appear in ordinary kana-less Japanese words, so
-    // 個人利用不可, 使用不可能, 什器 and 沒収 never reach confidence on their
-    // own — a Mandarin pronoun is required for the aggregate path.
+    // 個人利用不可, 使用不可能, 什器, 沒収, 他人使用不可 and 他人利用不可 never
+    // reach confidence on their own — Mandarin context is required for the
+    // aggregate path.
     // S/T glyph evidence alone (手紙, 電話) or a couple of shared characters
     // (目的, 終了, 大人山水) clears none of these and stays translatable.
     return (
       evidence.hasChineseMarker ||
-      isChinesePhrase ||
       evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD ||
-      (evidence.hasMandarinPronoun &&
+      isChinesePhrase ||
+      (hasMandarinContext &&
         evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD)
     )
   }

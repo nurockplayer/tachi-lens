@@ -951,6 +951,44 @@ describe('TwitchMessageHandler', () => {
       },
     )
 
+    // #182 follow-up: 他 in 他人 is a kana-less Japanese compound, not a
+    // Mandarin pronoun, and long Japanese signage with an acronym must not
+    // skip on length/dominance + weak aggregate alone. These must translate.
+    it.each([
+      '他人使用不可',
+      '他人利用不可',
+      '個人情報利用不可無断転載禁止w',
+      '個人情報利用不可無断転載禁止',
+    ])('sends translate_request for Japanese %s against a zh-TW skip_all_chinese target', async (text) => {
+      const el = createMessageElement({ text, username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '（日文）' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
+    it('does not send translate_request for 他很好 against a zh-TW target', async () => {
+      // 他→很 is a Mandarin pronoun in context; the aggregate path skips it.
+      const el = createMessageElement({ text: '他很好', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
     it('sends translate_request for mixed Latin and Han text against a zh-TW skip_all_chinese target', async () => {
       const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
       sendMessageMock.mockResolvedValue({

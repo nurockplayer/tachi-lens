@@ -594,6 +594,56 @@ describe('shouldSkipMessage — Mandarin pronouns unlock Han-only aggregate', ()
   it('does not skip pronoun-free 使用不可能 for zh-TW in skip_all_chinese', () => {
     expect(shouldSkipMessage('使用不可能', 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
+
+  // #182 follow-up: the pronoun must be used AS a pronoun (followed by a
+  // Mandarin predicate/particle). Bare presence is not enough — in 他人
+  // (Japanese "other people") 他 precedes a noun and must not unlock the
+  // aggregate path.
+  it.each([
+    '他人使用不可',
+    '他人利用不可',
+    '他人',
+    '自己',
+    '我慢',
+  ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips Mandarin pronoun-in-context 他很好 for zh-TW in skip_all_chinese', () => {
+    // 他→很 is a pronoun followed by a Mandarin predicate → aggregate unlocks.
+    expect(shouldSkipMessage('他很好', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+})
+
+describe('shouldSkipMessage — long Japanese mixed message needs Mandarin context', () => {
+  // #182 follow-up: a long kana-less Japanese signage sentence with an acronym
+  // (個人情報利用不可無断転載禁止w: 14 Han vs 1 Latin) passes the dominance gate
+  // and reaches a weak aggregate of 5, but must not skip. The mixed branch
+  // requires the same Mandarin-specific context as the Han-only weak path
+  // (pronoun-as-pronoun or 的-as-attributive-particle); the real Chinese OBS
+  // message skips via 的 in 手機的畫面.
+  it.each([
+    '個人情報利用不可無断転載禁止w',
+    '個人情報利用不可無断転載禁止',
+    '個人情報利用不可無断転載禁止OBS',
+    '各種情報利用不可禁止',
+  ])('does not skip long kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips the Han-dominant Chinese OBS message via 的-particle for zh-TW', () => {
+    // 把手機的畫面傳到電腦用OBS開台就可以不用斷: 的 followed by 畫 is an
+    // attributive particle, so the Mandarin context unlocks the aggregate path.
+    expect(
+      shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
+    ).toBe(true)
+  })
+
+  it('still skips 把手機的畫面傳到電腦用OBS開台就可以不用斷 for zh-CN', () => {
+    expect(
+      shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-CN', 'skip_all_chinese'),
+    ).toBe(true)
+  })
 })
 
 describe('shouldSkipMessage — mixed strong/marker evidence requires Han dominance', () => {
