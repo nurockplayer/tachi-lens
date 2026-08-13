@@ -1120,6 +1120,37 @@ describe('TwitchMessageHandler', () => {
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
 
+    it('does not send translate_request for 我要再買一個手機 (adverb+verb) against a zh-TW target', async () => {
+      // 我→要→再→買→一: adverb and lexical verb before the numeral object.
+      const el = createMessageElement({ text: '我要再買一個手機', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('sends translate_request for Japanese 他不用品買取不可 against a zh-TW target', async () => {
+      // 用 is structural but 品 is a bare noun → the tail walk rejects it.
+      const el = createMessageElement({ text: '他不用品買取不可', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '（日文）' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
     it('does not send translate_request for 我真的不可以 against a zh-TW target', async () => {
       // 我→真 is a pronoun followed by a Mandarin degree modifier.
       const el = createMessageElement({ text: '我真的不可以', username: 'user' })

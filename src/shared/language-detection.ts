@@ -256,6 +256,15 @@ const MANDARIN_OBJECT_VERBS = new Set([
 ])
 
 /**
+ * Mandarin adverbs that can appear between a predicate and an object verb
+ * (我要再買一個手機: 要→再→買→一). These are not verbs themselves but
+ * participate in the same intervening chain.
+ */
+const MANDARIN_OBJECT_ADVERBS = new Set([
+  '再', '又', '先', '剛', '刚', '還', '还', '也', '都', '才', '就',
+])
+
+/**
  * Mandarin function-word / short-phrase contexts used for the mixed branch.
  *
  * These Mandarin grammatical collocations (可以, 不用, 就是, 就好, 就會) do not
@@ -491,37 +500,50 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       // skipping any separators (我，真的不可以). The glyph after that
       // predicate must itself be a Mandarin structural character, another
       // follower, a Mandarin numeral (我要一個手機: 要→一), or the end of the
-      // message; a common Mandarin lexical verb may intervene before the
-      // numeral (我要買一個手機: 要→買→一). Japanese 他X prefixes are excluded:
-      // 他会場利用不可 (他→会→場) and 他有地利用不可 (他→有→地) are "other
-      // venue/other's land" and must not be a pronoun, while 他很好 (他→很→好),
-      // 我真的不可以 (我→真→的), and 我要買一個手機 (我→要→買→一) are. A short
-      // clause whose object is not structural (我要手機, 他有時間) keeps no
-      // pronoun context but its aggregate stays below the skip threshold, so
-      // it still translates conservatively.
+      // message. Structural chars, verbs, and adverbs may continue a tail that
+      // eventually lands on a numeral/follower or the end: 我要買一個手機
+      // (要→買→一), 我要再買一個手機 (要→再→買→一), 我要用你的 (要→用→你). A
+      // bare noun after the predicate is rejected, so Japanese 他X prefixes are
+      // excluded: 他会場利用不可 (他→会→場), 他有地利用不可 (他→有→地), and
+      // 他不用品買取不可 (他→不→用→品, "other unwanted goods") must not be a
+      // pronoun, while 他很好 (他→很→好), 我真的不可以 (我→真→的), and
+      // 我要買一個手機 (我→要→買→一) are. A short clause whose object is not
+      // structural (我要手機, 他有時間) keeps no pronoun context but its
+      // aggregate stays below the skip threshold, so it still translates
+      // conservatively.
       if (MANDARIN_PRONOUNS.has(char)) {
         const first = nextMeaningful(i + 1)
         if (first >= 0 && MANDARIN_PRONOUN_FOLLOWERS.has(chars[first]!)) {
-          const second = nextMeaningful(first + 1)
-          if (second < 0) {
-            hasMandarinPronoun = true
-          } else if (
-            CHINESE_STRUCTURAL[chars[second]!] !== undefined ||
-            MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!) ||
-            MANDARIN_NUMERALS.has(chars[second]!)
-          ) {
-            hasMandarinPronoun = true
-          } else if (MANDARIN_OBJECT_VERBS.has(chars[second]!)) {
-            // 我要買一個手機: 要→買 (lexical verb) → 一 (numeral) → 個 → 手機
-            const third = nextMeaningful(second + 1)
+          let tail = first + 1
+          while (tail >= 0) {
+            const next = nextMeaningful(tail)
+            if (next < 0) {
+              hasMandarinPronoun = true
+              break
+            }
+            const nextChar = chars[next]!
+            // Follower or numeral after the predicate is conclusive Mandarin
+            // pronoun context (我要用你的, 我要一個手機).
             if (
-              third < 0 ||
-              CHINESE_STRUCTURAL[chars[third]!] !== undefined ||
-              MANDARIN_PRONOUN_FOLLOWERS.has(chars[third]!) ||
-              MANDARIN_NUMERALS.has(chars[third]!)
+              MANDARIN_PRONOUN_FOLLOWERS.has(nextChar) ||
+              MANDARIN_NUMERALS.has(nextChar)
             ) {
               hasMandarinPronoun = true
+              break
             }
+            // Structural chars, object verbs, and adverbs continue the tail
+            // (我要買一個手機: 要→買→一; 我要再買一個手機: 要→再→買→一). A
+            // bare noun after a structural char (他不用品: 不→用→品) or right
+            // after the predicate (他有地: 有→地) is rejected.
+            if (
+              CHINESE_STRUCTURAL[nextChar] !== undefined ||
+              MANDARIN_OBJECT_VERBS.has(nextChar) ||
+              MANDARIN_OBJECT_ADVERBS.has(nextChar)
+            ) {
+              tail = next + 1
+              continue
+            }
+            break
           }
         }
       }

@@ -813,6 +813,18 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
     expect(shouldSkipMessage('我要買一個手機', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
+  it('skips 我要再買一個手機 (adverb + verb before numeral object) for zh-TW', () => {
+    // 我→要→再→買→一: an adverb and a lexical verb may both intervene.
+    expect(shouldSkipMessage('我要再買一個手機', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('rejects Japanese 不用品 after 他', () => {
+    // 他不用品買取不可 ("other unwanted goods purchase not accepted") is
+    // kana-less Japanese; 用 is a structural char but 品 is a bare noun, so
+    // the tail walk rejects it.
+    expect(shouldSkipMessage('他不用品買取不可', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
   it('recognizes numeral objects after pronoun predicates as context', () => {
     expect(analyzeMessageScript('我要一個手機').hasMandarinPronoun).toBe(true)
     expect(analyzeMessageScript('我要兩台電腦').hasMandarinPronoun).toBe(true)
