@@ -157,9 +157,14 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
   // Strong Mandarin structural particles (weight 3). None of these is
   // ordinary standalone kana-less Japanese usage, so a single occurrence is
   // already strong Chinese evidence.
-  這: 3, 这: 3, 啦: 3, 對: 3, 对: 3, 沒: 3, 没: 3,
-  嗎: 3, 吗: 3, 呢: 3, 吧: 3, 什: 3, 麼: 3, 么: 3,
-  們: 3, 们: 3, 啊: 3,
+  //
+  // Note 沒 (U+6C92, Traditional) is strong while 没 (U+6CA1, Simplified /
+  // Japanese shinjitai) is weight 1: 没収/水没/没入 are ordinary kana-less
+  // Japanese words using the Simplified/shinjitai glyph, so 没 must not act
+  // as decisive Mandarin evidence. 沒 stays strong because Traditional 沒 is
+  // not an ordinary modern Japanese usage.
+  這: 3, 这: 3, 啦: 3, 對: 3, 对: 3, 沒: 3, 嗎: 3, 吗: 3, 呢: 3, 吧: 3,
+  什: 3, 麼: 3, 么: 3, 們: 3, 们: 3, 啊: 3,
   // Common Mandarin grammar (weight 2). 個/个 are ordinary Japanese Kanji in
   // on-yomi compounds (個人, 個別) but the demonstrative-sense 這個/那个 is
   // distinctively Mandarin, so they stay at 2.
@@ -169,7 +174,7 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
   // occurrence never clears the threshold; they only accumulate with stronger
   // evidence.
   不: 1, 的: 1, 了: 1, 好: 1, 我: 1, 你: 1, 他: 1, 她: 1, 它: 1,
-  要: 1, 用: 1, 會: 1, 会: 1, 可: 1, 能: 1,
+  要: 1, 用: 1, 會: 1, 会: 1, 可: 1, 能: 1, 没: 1,
 }
 
 /**
@@ -179,6 +184,20 @@ const CHINESE_STRUCTURAL: Record<string, number> = {
  * it, and the #182 observed Chinese messages which all clear it.
  */
 const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
+
+/**
+ * Minimum Han-to-foreign-letter ratio before the mixed-letter branch may trust
+ * the aggregate structural score.
+ *
+ * A Latin acronym embedded in a long Chinese sentence is fine to skip on weak
+ * structural evidence (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3
+ * Latin, ratio ≈ 6.3). But a short kana-less Japanese phrase followed by an
+ * acronym (個人利用不可OBS: 6 Han vs 3 Latin, ratio 2) must not let the same
+ * weak/ambiguous Kanji accumulate into Chinese confidence. Requiring Han to
+ * dominate by at least 4× the foreign letters keeps the weak-accumulation path
+ * reserved for clearly Han-dominant messages only.
+ */
+const HAN_FOREIGN_DOMINANCE_RATIO = 4
 
 /**
  * Strong structural score required before Han-only text is considered
@@ -435,12 +454,28 @@ export function shouldSkipMessage(
     const phraseStripped = text.replace(/[\p{P}\p{S}\s]/gu, '')
     const isChinesePhrase = CHINESE_PHRASES.has(phraseStripped)
 
-    // Foreign letters are tolerated only when Han dominates and the Chinese
-    // structure evidence is strong (e.g. 把手機的畫面傳到電腦用OBS開台就可以不用斷).
-    // Mixed or foreign-dominated messages stay translatable (hello 大家好, é国).
+    // Foreign letters are tolerated only when the message is confidently
+    // Chinese by the same conservative evidence as the Han-only path, OR when
+    // Han overwhelmingly dominates the foreign letters so they read as an
+    // embedded acronym rather than mixed language.
+    //  - Strong Mandarin evidence (marker / weight-3 char) is decisive:
+    //    e.g. 這個很熱OBS.
+    //  - A weak aggregate score is trusted only at high Han dominance
+    //    (hanCount >= 4 * foreignLetterCount): 把手機的畫面傳到電腦用OBS開台就
+    //    可以不用斷 has 19 Han vs 3 Latin and correctly skips, while
+    //    個人利用不可OBS (6 Han vs 3 Latin) and 使用不可能OBS (5 vs 3) must
+    //    not skip on weak Kanji accumulation.
+    //  - Mixed or foreign-dominated messages stay translatable
+    //    (hello 大家好, é国, Ａ国).
     if (evidence.hasForeignLetter) {
+      if (
+        evidence.hasChineseMarker ||
+        evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD
+      ) {
+        return true
+      }
       return (
-        evidence.hanCount > evidence.foreignLetterCount &&
+        evidence.hanCount >= HAN_FOREIGN_DOMINANCE_RATIO * evidence.foreignLetterCount &&
         evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD
       )
     }

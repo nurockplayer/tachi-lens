@@ -489,6 +489,60 @@ describe('shouldSkipMessage — weak Kanji do not accumulate into Chinese', () =
   })
 })
 
+describe('shouldSkipMessage — Japanese-use Kanji is not strong Mandarin evidence', () => {
+  // #182 follow-up: 没 (U+6CA1) is both Simplified Chinese and ordinary modern
+  // Japanese Kanji (没収/水没/没入), so it must not act as decisive Mandarin
+  // evidence. Traditional 沒 (U+6C92) stays strong because it is not a
+  // Simplified-Chinese glyph and is not ordinary modern Japanese usage.
+  it.each([
+    '没収',
+    '水没',
+    '没入',
+  ])('does not skip kana-less Japanese %s (simplified 没) for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it.each([
+    '没収',
+    '水没',
+    '没入',
+  ])('does not skip kana-less Japanese %s (simplified 没) for zh-CN in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-CN', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips Traditional Chinese 那是肯定沒有 with 沒 (U+6C92) for zh-TW', () => {
+    expect(shouldSkipMessage('那是肯定沒有', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+})
+
+describe('shouldSkipMessage — weak Kanji must not skip in mixed-letter messages', () => {
+  // #182 follow-up: the foreign-letter branch must obey the same conservative
+  // principle as the Han-only branch. A short kana-less Japanese phrase with a
+  // Latin acronym (個人利用不可OBS: 6 Han vs 3 Latin) must not skip on weak
+  // accumulation, while the Han-dominant real Chinese OBS message does.
+  it.each([
+    '個人利用不可OBS',
+    '使用不可能OBS',
+    '不可能OBS',
+    '再利用不可OBS',
+    '個人情報OBS',
+  ])('does not skip kana-less Japanese with acronym %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  it('still skips the Han-dominant Chinese OBS message for zh-TW in skip_all_chinese', () => {
+    expect(
+      shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
+    ).toBe(true)
+  })
+
+  it('still skips the Han-dominant Chinese OBS message for zh-CN in skip_all_chinese', () => {
+    expect(
+      shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-CN', 'skip_all_chinese'),
+    ).toBe(true)
+  })
+})
+
 describe('shouldSkipMessage — translate_other_script mode', () => {
   // Requirements from #46: 今天真的很熱 → skip, 今天真的很热 → translate, 今天很好 → skip
   // Targets from #51: traditional, simplified, generic, mixed

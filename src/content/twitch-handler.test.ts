@@ -848,6 +848,29 @@ describe('TwitchMessageHandler', () => {
       },
     )
 
+    // #182 follow-up: Japanese-use Kanji (simplified 没 U+6CA1) must not act as
+    // decisive Mandarin evidence, and short Japanese phrases with a Latin
+    // acronym must not skip on weak accumulation.
+    it.each(['没収', '水没', '没入', '個人利用不可OBS', '使用不可能OBS'])(
+      'sends translate_request for Japanese %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
     it('sends translate_request for mixed Latin and Han text against a zh-TW skip_all_chinese target', async () => {
       const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
       sendMessageMock.mockResolvedValue({
