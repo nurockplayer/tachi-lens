@@ -1102,6 +1102,19 @@ describe('TwitchMessageHandler', () => {
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
 
+    it('does not send translate_request for 我，真的不可以 (separator) against a zh-TW target', async () => {
+      // Separators between a pronoun and its predicate are skipped.
+      const el = createMessageElement({ text: '我，真的不可以', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
     it('does not send translate_request for the 把-construction OBS message against a zh-TW target', async () => {
       // 把手機畫面傳到電腦用OBS開台可以不用斷: 把 introduces a noun phrase.
       const el = createMessageElement({ text: '把手機畫面傳到電腦用OBS開台可以不用斷', username: 'user' })

@@ -419,10 +419,23 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   // string yields isolated halves that never match \p{L}. Array.from splits
   // into full code points so foreign letters are detected correctly.
   const chars = Array.from(text)
+
+  // Return the index of the next meaningful (non-separator) code point after
+  // `from`, or -1. Punctuation/whitespace/marks/format between a Mandarin
+  // pronoun and its predicate (我，真的不可以) must be skipped, matching the
+  // phrase-strip regex.
+  const nextMeaningful = (from: number): number => {
+    for (let j = from; j < chars.length; j++) {
+      if (!/[\p{P}\p{S}\p{M}\p{Cf}\s]/u.test(chars[j]!)) {
+        return j
+      }
+    }
+    return -1
+  }
+
   for (let i = 0; i < chars.length; i++) {
     const char = chars[i]!
     const code = char.charCodeAt(0)
-    const next = chars[i + 1] ?? ''
 
     if (isHiragana(code) || isKatakana(code)) {
       hasJapaneseKana = true
@@ -447,22 +460,23 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
         hasChineseMarker = true
       }
       // A Mandarin pronoun counts only with contextual evidence: the pronoun
-      // is followed by a Mandarin predicate/particle (我要, 你的, 他是). The
-      // glyph after that predicate must itself be a Mandarin structural
-      // character or the end of the message, so Japanese 他X prefixes are
-      // excluded: 他会場利用不可 (他→会→場) is "other venue" and must not be a
-      // pronoun, while 他很好 (他→很→好) and 我真的不可以 (我→真→的) are.
-      if (
-        MANDARIN_PRONOUNS.has(char) &&
-        MANDARIN_PRONOUN_FOLLOWERS.has(next)
-      ) {
-        const secondNext = chars[i + 2] ?? ''
-        if (
-          secondNext === '' ||
-          CHINESE_STRUCTURAL[secondNext] !== undefined ||
-          MANDARIN_PRONOUN_FOLLOWERS.has(secondNext)
-        ) {
-          hasMandarinPronoun = true
+      // is followed by a Mandarin predicate/particle (我要, 你的, 他是),
+      // skipping any separators (我，真的不可以). The glyph after that
+      // predicate must itself be a Mandarin structural character or the end of
+      // the message, so Japanese 他X prefixes are excluded: 他会場利用不可
+      // (他→会→場) is "other venue" and must not be a pronoun, while 他很好
+      // (他→很→好) and 我真的不可以 (我→真→的) are.
+      if (MANDARIN_PRONOUNS.has(char)) {
+        const first = nextMeaningful(i + 1)
+        if (first >= 0 && MANDARIN_PRONOUN_FOLLOWERS.has(chars[first]!)) {
+          const second = nextMeaningful(first + 1)
+          if (
+            second < 0 ||
+            CHINESE_STRUCTURAL[chars[second]!] !== undefined ||
+            MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!)
+          ) {
+            hasMandarinPronoun = true
+          }
         }
       }
       // 就/把 count as Mandarin function words. 就 needs a structural
@@ -470,8 +484,11 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       // compound 就業. A bare 把 is not enough — Japanese 把握/把持 are
       // ordinary compounds; Mandarin ba-constructions are covered via the
       // MANDARIN_FUNCTION_PHRASES scan below.
-      if (char === '就' && CHINESE_STRUCTURAL[next] !== undefined) {
-        hasMandarinFunction = true
+      if (char === '就') {
+        const follower = nextMeaningful(i + 1)
+        if (follower >= 0 && CHINESE_STRUCTURAL[chars[follower]!] !== undefined) {
+          hasMandarinFunction = true
+        }
       }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
       chineseStructureScore += weight

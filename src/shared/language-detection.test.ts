@@ -588,6 +588,15 @@ describe('shouldSkipMessage — Mandarin pronouns unlock Han-only aggregate', ()
     expect(shouldSkipMessage('我真的不可以', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
+  it('skips 我，真的不可以 (separator between pronoun and predicate) for zh-TW', () => {
+    // Punctuation between the pronoun and its predicate must be skipped.
+    expect(shouldSkipMessage('我，真的不可以', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('skips 我 真的不可以 (space between pronoun and predicate) for zh-TW', () => {
+    expect(shouldSkipMessage('我 真的不可以', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
   it('skips 你要好好的 for zh-TW in skip_all_chinese', () => {
     // 你1+要1+好1+好1+的1 = 5 with a Mandarin pronoun → aggregate path.
     expect(shouldSkipMessage('你要好好的', 'zh-TW', 'skip_all_chinese')).toBe(true)
