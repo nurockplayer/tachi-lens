@@ -565,13 +565,15 @@ export function shouldSkipMessage(
     const isChinesePhrase = CHINESE_PHRASES.has(phraseStripped)
 
     // Mandarin-specific contextual evidence that unlocks the weak aggregate
-    // path. A bare aggregate of ambiguous Kanji (個/用/不/可/能) is never
-    // enough — kana-less Japanese compounds reach 4+ the same way (個人利用不
-    // 可 = 5). The aggregate is trusted only when the text also contains a
-    // Mandarin pronoun used as a pronoun (我要, 你的, 他是) or 的 used as an
-    // attributive particle (手機的畫面) supported by enough weak structural
-    // characters — 個人的使用禁止 also has 的 followed by 使, but only 2 weak
-    // chars, so the particle alone does not unlock the path.
+    // path in the MIXED branch only. A bare aggregate of ambiguous Kanji
+    // (個/用/不/可/能) is never enough — kana-less Japanese compounds reach
+    // 4+ the same way (個人利用不可 = 5). The aggregate is trusted only when
+    // the text also contains a Mandarin pronoun used as a pronoun (我要, 你的,
+    // 他是) or 的 used as an attributive particle (手機的畫面) supported by
+    // enough weak structural characters, AND the message is Han-dominant (the
+    // dominance gate below). The particle alone does not unlock the Han-only
+    // path: 個人的利用不可 (kana-less Japanese "personal use not permitted")
+    // has 的 + 4 weak chars and must stay translatable.
     const hasMandarinContext =
       evidence.hasMandarinPronoun ||
       (evidence.hasMandarinParticle &&
@@ -585,9 +587,9 @@ export function shouldSkipMessage(
     // a marker, while the Han-dominant real Chinese OBS message
     // (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3 Latin, with 的
     // as an attributive particle) skips. The weak aggregate in the mixed
-    // branch is gated by the same Mandarin contextual evidence as the Han-only
-    // path, so a long Japanese signage sentence with an acronym (個人情報利用不
-    // 可無断転載禁止w: 14 Han vs 1 Latin) never skips.
+    // branch is gated by the same Mandarin contextual evidence, so a long
+    // Japanese signage sentence with an acronym (個人情報利用不可無断転載禁止w:
+    // 14 Han vs 1 Latin, no 的 / no pronoun) never skips.
     if (evidence.hasForeignLetter) {
       const hanDominates =
         evidence.hanCount >= HAN_FOREIGN_DOMINANCE_RATIO * evidence.foreignLetterCount &&
@@ -607,21 +609,19 @@ export function shouldSkipMessage(
     // - it contains a strong Mandarin structural character (weight 3,
     //   e.g. 那是肯定沒有 → 沒, 那要打訊號什麼的 → 麼), or
     // - the whole message is a known Chinese phrase (e.g. 不客氣, 我才), or
-    // - Mandarin contextual evidence (a pronoun used as a pronoun, or 的 as an
-    //   attributive particle) pushes an otherwise-weak sentence past the
-    //   aggregate threshold (e.g. 我要用你的 = 5, 他很好 = 4).
-    // Weak/ambiguous Kanji (weight 1–2: 個/用/不/可/能/是) are excluded here
-    // because they also appear in ordinary kana-less Japanese words, so
-    // 個人利用不可, 使用不可能, 什器, 沒収, 他人使用不可 and 他人利用不可 never
-    // reach confidence on their own — Mandarin context is required for the
-    // aggregate path.
+    // - a Mandarin pronoun used as a pronoun pushes an otherwise-weak sentence
+    //   past the aggregate threshold (e.g. 我要用你的 = 5, 他很好 = 4).
+    // The Han-only path does NOT trust the 的-particle or a bare aggregate of
+    // weak characters: kana-less Japanese compounds of the 個人的+X{不可/可能/
+    // 不可能} family (個人的利用不可, 個人的使用不可能) have 的 + several weak
+    // chars but no Mandarin pronoun and must stay translatable.
     // S/T glyph evidence alone (手紙, 電話) or a couple of shared characters
     // (目的, 終了, 大人山水) clears none of these and stays translatable.
     return (
       evidence.hasChineseMarker ||
       evidence.strongStructureScore >= STRONG_STRUCTURE_CONFIDENCE_THRESHOLD ||
       isChinesePhrase ||
-      (hasMandarinContext &&
+      (evidence.hasMandarinPronoun &&
         evidence.chineseStructureScore >= CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD)
     )
   }

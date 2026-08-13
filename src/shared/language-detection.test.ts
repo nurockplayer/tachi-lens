@@ -700,24 +700,39 @@ describe('shouldSkipMessage — astral-plane letters are detected as foreign', (
   })
 })
 
-describe('shouldSkipMessage — 的-particle needs enough weak context', () => {
-  // #182 follow-up: 個人的使用禁止 (kana-less Japanese) has 的 followed by 使,
-  // but only 2 weak structural chars, so the particle alone must not unlock the
-  // aggregate skip path. The real Chinese OBS message has 5 weak chars around
-  // its 的 and still skips.
+describe('shouldSkipMessage — Han-only path does not trust 的-particle', () => {
+  // #182 follow-up: kana-less Japanese compounds of the 個人的+X{不可/可能/不
+  // 可能} family (個人的利用不可, 個人的使用不可能) have 的 followed by a Han
+  // character and several weak structural chars, but no Mandarin pronoun. The
+  // Han-only aggregate path trusts only a pronoun used as a pronoun (我要,
+  // 你的, 他是), never the 的-particle or a bare weak-char aggregate, so all of
+  // these stay translatable. The real Chinese OBS message skips via the MIXED
+  // branch (foreign letters + dominance + particle context).
   it.each([
     '個人的使用禁止',
     '個人的利用禁止',
+    '個人的利用不可',
+    '個人的使用不可',
+    '個人的利用可能',
+    '個人的使用不可能',
     '個人の使用禁止',
     '目的的利用',
   ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
     expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
-  it('still skips the Han-dominant Chinese OBS message via enough weak context', () => {
+  it('still skips the Han-dominant Chinese OBS message via the mixed branch', () => {
     expect(
       shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
     ).toBe(true)
+  })
+
+  it('still skips 我要用你的 (Han-only, Mandarin pronoun context)', () => {
+    expect(shouldSkipMessage('我要用你的', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('still skips 他很好 (Han-only, 他→很 pronoun context)', () => {
+    expect(shouldSkipMessage('他很好', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 })
 

@@ -992,7 +992,15 @@ describe('TwitchMessageHandler', () => {
     // #182 follow-up: 個人的使用禁止 is kana-less Japanese despite the 的
     // followed by 使, and astral-plane foreign letters must be detected. These
     // must still translate.
-    it.each(['個人的使用禁止', '個人的利用禁止', '𝕙𝕖𝕝𝕝𝕠 這個'])(
+    it.each([
+      '個人的使用禁止',
+      '個人的利用禁止',
+      '個人的利用不可',
+      '個人的使用不可',
+      '個人的利用可能',
+      '個人的使用不可能',
+      '𝕙𝕖𝕝𝕝𝕠 這個',
+    ])(
       'sends translate_request for Japanese/mixed %s against a zh-TW skip_all_chinese target',
       async (text) => {
         const el = createMessageElement({ text, username: 'user' })
