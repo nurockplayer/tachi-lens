@@ -58,6 +58,14 @@ export interface ScriptEvidence {
    * compound, not a Mandarin pronoun.
    */
   hasMandarinPronoun: boolean
+  /**
+   * Whether 就 or 把 is used as a Mandarin function word — i.e. immediately
+   * followed by a Mandarin structural character (就可, 就把). These glyphs
+   * also occur inside kana-less Japanese compounds (就業, 把握) where they are
+   * followed by a non-structural noun; the follower context distinguishes the
+   * Mandarin usage.
+   */
+  hasMandarinFunction: boolean
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -210,6 +218,17 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
   // plural suffix
   '們', '们',
 ])
+
+/**
+ * Mandarin function words used for mixed-branch context.
+ *
+ * 就 (adverb "then") and 把 (ba-construction) are Mandarin function words. The
+ * same glyphs occur inside kana-less Japanese compounds (就業, 把握) where they
+ * are followed by a noun rather than a structural character, so the follower
+ * must be a CHINESE_STRUCTURAL character (就可, 就把) for the Mandarin reading
+ * to count.
+ */
+const MANDARIN_FUNCTION_WORDS = new Set(['就', '把'])
 
 /**
  * Structural score required before Han-only text is considered confidently
@@ -384,6 +403,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let chineseStructureScore = 0
   let strongStructureScore = 0
   let hasMandarinPronoun = false
+  let hasMandarinFunction = false
 
   // Iterate by code point (not UTF-16 index): astral-plane letters such as the
   // stylized 𝕙𝕖𝕝𝕝𝕠 used in Twitch text are surrogate pairs, and indexing the
@@ -424,6 +444,12 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       if (MANDARIN_PRONOUNS.has(char) && MANDARIN_PRONOUN_FOLLOWERS.has(next)) {
         hasMandarinPronoun = true
       }
+      // 就/把 count as Mandarin function words only when followed by a
+      // structural character (就可, 就把); inside Japanese compounds (就業,
+      // 把握) the follower is a noun and the glyph is not a function word.
+      if (MANDARIN_FUNCTION_WORDS.has(char) && CHINESE_STRUCTURAL[next] !== undefined) {
+        hasMandarinFunction = true
+      }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
       chineseStructureScore += weight
       if (weight >= 3) {
@@ -462,6 +488,7 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     chineseStructureScore,
     strongStructureScore,
     hasMandarinPronoun,
+    hasMandarinFunction,
   }
 }
 
@@ -530,14 +557,16 @@ export function shouldSkipMessage(
     // (個/用/不/可/能) is never enough — kana-less Japanese compounds reach
     // 4+ the same way (個人利用不可 = 5). The aggregate is trusted only when
     // the text also contains a Mandarin pronoun used as a pronoun (我要, 你的,
-    // 他是) or a Mandarin function word (把 = ba-construction, 就 = adverb),
-    // AND the message is Han-dominant (the dominance gate below).
+    // 他是) or a Mandarin function word (就可, 就把), AND the message is
+    // Han-dominant (the dominance gate below).
     //
     // The 的-attributive-particle is deliberately NOT used as context here:
     // kana-less Japanese also forms 的 + Han (個人的使用不可, 個人的利用不可),
     // so a 的 followed by Han cannot distinguish Mandarin from Japanese.
+    // Likewise 就/把 only count when followed by a structural character — the
+    // same glyphs inside Japanese compounds (就業, 把握) are not function words.
     const hasMandarinContext =
-      evidence.hasMandarinPronoun || /[把就]/.test(text)
+      evidence.hasMandarinPronoun || evidence.hasMandarinFunction
 
     // Foreign letters are tolerated only when Han overwhelmingly dominates
     // the foreign letters so they read as an embedded acronym rather than
