@@ -12,8 +12,13 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.classify.outputs.e2e }}
     steps:
+      # Fetch full history so scripts/classify-risk.mjs can diff against origin/main.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.21.0
@@ -27,9 +32,17 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Test risk classifier
+        run: node --test scripts/classify-risk.test.mjs
+      - name: Classify change risk
+        id: classify
+        run: node scripts/classify-risk.mjs
 
   e2e:
     needs: check
+    # Full Playwright E2E runs only for runtime-affecting changes; docs-only
+    # changes skip it (classified deterministically by scripts/classify-risk.mjs).
+    if: needs.check.outputs.e2e == 'run'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -11,10 +11,12 @@
     "test": "vitest run",
     "test:e2e": "pnpm build && playwright test",
     "test:e2e:canary": "pnpm build && playwright test --config=playwright.canary.config.ts",
+    "test:full": "pnpm test && pnpm test:e2e",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "check:agent-docs": "node scripts/check-agent-doc-sync.mjs"
+    "check:agent-docs": "node scripts/check-agent-doc-sync.mjs",
+    "classify:risk": "node scripts/classify-risk.mjs"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.0",
