@@ -616,24 +616,27 @@ describe('shouldSkipMessage — Mandarin pronouns unlock Han-only aggregate', ()
 })
 
 describe('shouldSkipMessage — long Japanese mixed message needs Mandarin context', () => {
-  // #182 follow-up: a long kana-less Japanese signage sentence with an acronym
-  // (個人情報利用不可無断転載禁止w: 14 Han vs 1 Latin) passes the dominance gate
-  // and reaches a weak aggregate of 5, but must not skip. The mixed branch
-  // requires the same Mandarin-specific context as the Han-only weak path
-  // (pronoun-as-pronoun or 的-as-attributive-particle); the real Chinese OBS
-  // message skips via 的 in 手機的畫面.
+  // #182 follow-up: long kana-less Japanese signage sentences with an acronym
+  // (個人情報利用不可無断転載禁止w, 個人的使用不可無断転載禁止w) pass the
+  // dominance gate and reach a weak aggregate of 4-5, but must not skip. The
+  // mixed branch requires Mandarin-specific context (pronoun-as-pronoun or a
+  // Mandarin function word 把/就); the real Chinese OBS message skips via 把
+  // and 就 in 把手機的畫面傳到電腦用OBS開台就可以不用斷.
   it.each([
     '個人情報利用不可無断転載禁止w',
     '個人情報利用不可無断転載禁止',
     '個人情報利用不可無断転載禁止OBS',
+    '個人的使用不可無断転載禁止w',
+    '個人的使用不可OBS',
     '各種情報利用不可禁止',
   ])('does not skip long kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
     expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
 
-  it('still skips the Han-dominant Chinese OBS message via 的-particle for zh-TW', () => {
-    // 把手機的畫面傳到電腦用OBS開台就可以不用斷: 的 followed by 畫 is an
-    // attributive particle, so the Mandarin context unlocks the aggregate path.
+  it('still skips the Han-dominant Chinese OBS message via 把/就 for zh-TW', () => {
+    // 把手機的畫面傳到電腦用OBS開台就可以不用斷: contains 把 (ba-construction)
+    // and 就 (adverb), so the Mandarin function-word context unlocks the
+    // aggregate path in the mixed branch.
     expect(
       shouldSkipMessage('把手機的畫面傳到電腦用OBS開台就可以不用斷', 'zh-TW', 'skip_all_chinese'),
     ).toBe(true)

@@ -58,22 +58,6 @@ export interface ScriptEvidence {
    * compound, not a Mandarin pronoun.
    */
   hasMandarinPronoun: boolean
-  /**
-   * Whether 的 (U+7684) is used as a Mandarin attributive particle — i.e.
-   * immediately followed by another Han character (手機的畫面). On its own this
-   * is too weak to discriminate Mandarin from kana-less Japanese (個人的使用禁
-   * 止 also has 的 followed by Han), so it only unlocks the aggregate path when
-   * the message also has a sufficient run of weak Mandarin structural
-   * characters (see WEAK_MANDARIN_CONTEXT_MIN).
-   */
-  hasMandarinParticle: boolean
-  /**
-   * Number of weak Mandarin structural characters (weight 1 in
-   * CHINESE_STRUCTURAL: 不/的/了/好/我/你/要/用/可/能/…). Used to require
-   * stronger context before the 的-particle or a bare pronoun unlocks the
-   * aggregate skip path.
-   */
-  weakStructureCount: number
 }
 
 // ─── Curated evidence tables ─────────────────────────────────────────────────
@@ -234,19 +218,6 @@ const MANDARIN_PRONOUN_FOLLOWERS = new Set([
  * it, and the #182 observed Chinese messages which all clear it.
  */
 const CHINESE_STRUCTURE_CONFIDENCE_THRESHOLD = 4
-
-/**
- * Minimum count of weak (weight-1) Mandarin structural characters required for
- * the 的-attributive-particle context to unlock the aggregate skip path.
- *
- * 的 followed by a Han character is not discriminating enough on its own:
- * 個人的使用禁止 (kana-less Japanese "personal use prohibited") also has 的
- * followed by 使, but only 2 weak structural chars (的 + 用) and must stay
- * translatable. A long Mandarin sentence such as 把手機的畫面傳到電腦用OBS開台
- * 就可以不用斷 has 5 weak structural chars (的/用/可/不/用) around its 的, so
- * the aggregate path unlocks there.
- */
-const WEAK_MANDARIN_CONTEXT_MIN = 3
 
 /**
  * Minimum Han-to-foreign-letter ratio before the mixed-letter branch may trust
@@ -413,8 +384,6 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   let chineseStructureScore = 0
   let strongStructureScore = 0
   let hasMandarinPronoun = false
-  let hasMandarinParticle = false
-  let weakStructureCount = 0
 
   // Iterate by code point (not UTF-16 index): astral-plane letters such as the
   // stylized 𝕙𝕖𝕝𝕝𝕠 used in Twitch text are surrogate pairs, and indexing the
@@ -455,19 +424,8 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       if (MANDARIN_PRONOUNS.has(char) && MANDARIN_PRONOUN_FOLLOWERS.has(next)) {
         hasMandarinPronoun = true
       }
-      // 的 used as a Mandarin attributive particle is followed by a Han
-      // character (手機的畫面). On its own this is too weak — 個人的使用禁止
-      // (Japanese) also has 的 followed by 使 — so it only unlocks the
-      // aggregate path when weakStructureCount is high enough (checked in
-      // shouldSkipMessage via WEAK_MANDARIN_CONTEXT_MIN).
-      if (char === '的' && next !== '' && isCJK(next.charCodeAt(0))) {
-        hasMandarinParticle = true
-      }
       const weight = CHINESE_STRUCTURAL[char] ?? 0
       chineseStructureScore += weight
-      if (weight === 1) {
-        weakStructureCount++
-      }
       if (weight >= 3) {
         strongStructureScore += weight
       }
@@ -504,8 +462,6 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
     chineseStructureScore,
     strongStructureScore,
     hasMandarinPronoun,
-    hasMandarinParticle,
-    weakStructureCount,
   }
 }
 
@@ -574,15 +530,14 @@ export function shouldSkipMessage(
     // (個/用/不/可/能) is never enough — kana-less Japanese compounds reach
     // 4+ the same way (個人利用不可 = 5). The aggregate is trusted only when
     // the text also contains a Mandarin pronoun used as a pronoun (我要, 你的,
-    // 他是) or 的 used as an attributive particle (手機的畫面) supported by
-    // enough weak structural characters, AND the message is Han-dominant (the
-    // dominance gate below). The particle alone does not unlock the Han-only
-    // path: 個人的利用不可 (kana-less Japanese "personal use not permitted")
-    // has 的 + 4 weak chars and must stay translatable.
+    // 他是) or a Mandarin function word (把 = ba-construction, 就 = adverb),
+    // AND the message is Han-dominant (the dominance gate below).
+    //
+    // The 的-attributive-particle is deliberately NOT used as context here:
+    // kana-less Japanese also forms 的 + Han (個人的使用不可, 個人的利用不可),
+    // so a 的 followed by Han cannot distinguish Mandarin from Japanese.
     const hasMandarinContext =
-      evidence.hasMandarinPronoun ||
-      (evidence.hasMandarinParticle &&
-        evidence.weakStructureCount >= WEAK_MANDARIN_CONTEXT_MIN)
+      evidence.hasMandarinPronoun || /[把就]/.test(text)
 
     // Foreign letters are tolerated only when Han overwhelmingly dominates
     // the foreign letters so they read as an embedded acronym rather than
@@ -590,11 +545,11 @@ export function shouldSkipMessage(
     // strong, or weak evidence — so genuinely mixed chat (hello 這個,
     // English 對啊) stays translatable even when the Chinese segment contains
     // a marker, while the Han-dominant real Chinese OBS message
-    // (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3 Latin, with 的
-    // as an attributive particle) skips. The weak aggregate in the mixed
-    // branch is gated by the same Mandarin contextual evidence, so a long
-    // Japanese signage sentence with an acronym (個人情報利用不可無断転載禁止w:
-    // 14 Han vs 1 Latin, no 的 / no pronoun) never skips.
+    // (把手機的畫面傳到電腦用OBS開台就可以不用斷: 19 Han vs 3 Latin, with 把
+    // and 就) skips. The weak aggregate in the mixed branch is gated by the
+    // same Mandarin contextual evidence, so a long Japanese signage sentence
+    // with an acronym (個人情報利用不可無断転載禁止w: 14 Han vs 1 Latin, no 把/
+    // 就, no pronoun) never skips.
     if (evidence.hasForeignLetter) {
       const hanDominates =
         evidence.hanCount >= HAN_FOREIGN_DOMINANCE_RATIO * evidence.foreignLetterCount &&
