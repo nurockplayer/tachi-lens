@@ -807,10 +807,17 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
     expect(shouldSkipMessage('我要一個手機', 'zh-TW', 'skip_all_chinese')).toBe(true)
   })
 
+  it('skips 我要買一個手機 (intervening verb before numeral object) for zh-TW', () => {
+    // 我→要→買→一: an ordinary lexical verb may intervene between the
+    // predicate and the numeral/classifier object.
+    expect(shouldSkipMessage('我要買一個手機', 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
   it('recognizes numeral objects after pronoun predicates as context', () => {
     expect(analyzeMessageScript('我要一個手機').hasMandarinPronoun).toBe(true)
     expect(analyzeMessageScript('我要兩台電腦').hasMandarinPronoun).toBe(true)
     expect(analyzeMessageScript('他要一本書').hasMandarinPronoun).toBe(true)
+    expect(analyzeMessageScript('我要買一個手機').hasMandarinPronoun).toBe(true)
     expect(analyzeMessageScript('他很好').hasMandarinPronoun).toBe(true)
   })
 

@@ -1106,6 +1106,20 @@ describe('TwitchMessageHandler', () => {
       expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
     })
 
+    it('does not send translate_request for 我要買一個手機 (verb + numeral object) against a zh-TW target', async () => {
+      // 我→要→買→一: an intervening lexical verb before the numeral object is
+      // still valid Mandarin pronoun context.
+      const el = createMessageElement({ text: '我要買一個手機', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
     it('does not send translate_request for 我真的不可以 against a zh-TW target', async () => {
       // 我→真 is a pronoun followed by a Mandarin degree modifier.
       const el = createMessageElement({ text: '我真的不可以', username: 'user' })

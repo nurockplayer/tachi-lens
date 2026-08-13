@@ -241,6 +241,21 @@ const MANDARIN_NUMERALS = new Set([
 ])
 
 /**
+ * Common Mandarin lexical verbs that can intervene between a predicate and a
+ * numeral/classifier object (我要買一個手機: 要→買→一). Japanese 他X prefixes
+ * use a noun after the predicate (他有地, 他会場), not one of these verbs, so
+ * the Japanese-prefix guard still holds.
+ */
+const MANDARIN_OBJECT_VERBS = new Set([
+  '買', '买', '賣', '卖', '看', '聽', '听', '說', '说', '吃', '喝', '走', '來', '来',
+  '去', '想', '要', '拿', '放', '找', '給', '给', '打', '玩', '做', '學', '学', '教',
+  '寫', '写', '讀', '读', '用', '開', '开', '關', '关', '傳', '传', '送', '收', '發',
+  '发', '洗', '煮', '修', '畫', '画', '唱', '跳', '跑', '問', '问', '答', '幫', '帮',
+  '帶', '带', '等', '抱', '親', '亲', '摸', '聞', '闻', '嘗', '尝', '花', '換', '换',
+  '選', '选', '挑', '查', '約', '约',
+])
+
+/**
  * Mandarin function-word / short-phrase contexts used for the mixed branch.
  *
  * These Mandarin grammatical collocations (可以, 不用, 就是, 就好, 就會) do not
@@ -476,24 +491,37 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
       // skipping any separators (我，真的不可以). The glyph after that
       // predicate must itself be a Mandarin structural character, another
       // follower, a Mandarin numeral (我要一個手機: 要→一), or the end of the
-      // message, so Japanese 他X prefixes are excluded: 他会場利用不可
-      // (他→会→場) and 他有地利用不可 (他→有→地) are "other venue/other's land"
-      // and must not be a pronoun, while 他很好 (他→很→好), 我真的不可以
-      // (我→真→的), and 我要一個手機 (我→要→一) are. A short clause whose
-      // object is not structural (我要手機, 他有時間) keeps no pronoun context
-      // but its aggregate stays below the skip threshold, so it still
-      // translates conservatively.
+      // message; a common Mandarin lexical verb may intervene before the
+      // numeral (我要買一個手機: 要→買→一). Japanese 他X prefixes are excluded:
+      // 他会場利用不可 (他→会→場) and 他有地利用不可 (他→有→地) are "other
+      // venue/other's land" and must not be a pronoun, while 他很好 (他→很→好),
+      // 我真的不可以 (我→真→的), and 我要買一個手機 (我→要→買→一) are. A short
+      // clause whose object is not structural (我要手機, 他有時間) keeps no
+      // pronoun context but its aggregate stays below the skip threshold, so
+      // it still translates conservatively.
       if (MANDARIN_PRONOUNS.has(char)) {
         const first = nextMeaningful(i + 1)
         if (first >= 0 && MANDARIN_PRONOUN_FOLLOWERS.has(chars[first]!)) {
           const second = nextMeaningful(first + 1)
-          if (
-            second < 0 ||
+          if (second < 0) {
+            hasMandarinPronoun = true
+          } else if (
             CHINESE_STRUCTURAL[chars[second]!] !== undefined ||
             MANDARIN_PRONOUN_FOLLOWERS.has(chars[second]!) ||
             MANDARIN_NUMERALS.has(chars[second]!)
           ) {
             hasMandarinPronoun = true
+          } else if (MANDARIN_OBJECT_VERBS.has(chars[second]!)) {
+            // 我要買一個手機: 要→買 (lexical verb) → 一 (numeral) → 個 → 手機
+            const third = nextMeaningful(second + 1)
+            if (
+              third < 0 ||
+              CHINESE_STRUCTURAL[chars[third]!] !== undefined ||
+              MANDARIN_PRONOUN_FOLLOWERS.has(chars[third]!) ||
+              MANDARIN_NUMERALS.has(chars[third]!)
+            ) {
+              hasMandarinPronoun = true
+            }
           }
         }
       }
