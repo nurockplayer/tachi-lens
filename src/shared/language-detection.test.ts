@@ -687,6 +687,19 @@ describe('shouldSkipMessage — emoji variation selectors do not break phrase ma
   })
 })
 
+describe('shouldSkipMessage — common courtesy phrases skip', () => {
+  // #182 follow-up: 謝謝/谢谢 are extremely common Chinese chat messages with
+  // no marker/structural/Mandarin-context evidence; they belong in the
+  // exact-phrase fallback.
+  it.each(['謝謝', '谢谢'])('skips %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(true)
+  })
+
+  it('still does not skip 謝謝です (kana suffix)', () => {
+    expect(shouldSkipMessage('謝謝です', 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+})
+
 describe('shouldSkipMessage — astral-plane letters are detected as foreign', () => {
   // #182 follow-up: stylized Twitch text uses astral-plane letters (surrogate
   // pairs). Iterating the UTF-16 string by index yields surrogate halves that
@@ -717,6 +730,16 @@ describe('shouldSkipMessage — Han-only path does not trust 的-particle', () =
     '個人的使用不可能',
     '個人の使用禁止',
     '目的的利用',
+  ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
+    expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
+  })
+
+  // 他用途不可: 他 is a Japanese prefix meaning "other" (他用途 = other use);
+  // 用 is not a Mandarin pronoun follower, so this is not a pronoun context.
+  it.each([
+    '他用途不可',
+    '他利用不可',
+    '他用途禁止',
   ])('does not skip kana-less Japanese %s for zh-TW in skip_all_chinese', (text) => {
     expect(shouldSkipMessage(text, 'zh-TW', 'skip_all_chinese')).toBe(false)
   })
