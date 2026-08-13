@@ -2,7 +2,11 @@
 // Run with: node --test scripts/classify-risk.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyChangedFiles, isStaticPath, normalizePath } from './classify-risk.mjs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { classifyChangedFiles, collectChangedFiles, isStaticPath, normalizePath } from './classify-risk.mjs'
 
 test('normalizePath trims, strips leading ./ and trailing CR, unifies slashes', () => {
   assert.equal(normalizePath('  ./src/foo.ts  '), 'src/foo.ts')
@@ -99,4 +103,86 @@ test('rejects a non-array input', () => {
   assert.throws(() => classifyChangedFiles(undefined), /must be an array/)
   assert.throws(() => classifyChangedFiles(null), /must be an array/)
   assert.throws(() => classifyChangedFiles('src/foo.ts'), /must be an array/)
+})
+
+// --- rename-safety regression (Codex P2) ---
+// A runtime file renamed into docs/ or to a Markdown path must never classify
+// as docs-only. These exercise the real `git diff --no-renames` invocation so
+// the source path is guaranteed to surface alongside the destination.
+
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'classify-risk-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+  execFileSync('git', ['config', 'user.name', 'test'], { cwd: dir })
+  return dir
+}
+
+function write(dir, rel, content = '') {
+  const abs = join(dir, rel)
+  mkdirSync(join(abs, '..'), { recursive: true })
+  writeFileSync(abs, content)
+}
+
+function commit(dir, message) {
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['commit', '-qm', message], { cwd: dir })
+}
+
+test('runtime file renamed into docs/*.md classifies runtime (both paths seen)', () => {
+  const dir = makeRepo()
+  try {
+    write(dir, 'src/foo.ts', 'export const x = 1\n')
+    write(dir, 'docs/a.md', '# old\n')
+    commit(dir, 'c1')
+    execFileSync('git', ['mv', 'src/foo.ts', 'docs/foo.md'], { cwd: dir })
+    commit(dir, 'rename src -> docs')
+
+    const files = collectChangedFiles('HEAD~1', { cwd: dir })
+    assert.ok(files.includes('src/foo.ts'), `expected source path, got: ${files.join(', ')}`)
+    assert.ok(files.includes('docs/foo.md'), `expected destination path, got: ${files.join(', ')}`)
+    const result = classifyChangedFiles(files)
+    assert.equal(result.tier, 'runtime')
+    assert.equal(result.e2e, 'run')
+    assert.ok(result.reasons.includes('src/foo.ts'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runtime file renamed to a Markdown path classifies runtime', () => {
+  const dir = makeRepo()
+  try {
+    write(dir, 'src/foo.ts', 'export const x = 1\n')
+    commit(dir, 'c1')
+    execFileSync('git', ['mv', 'src/foo.ts', 'README.md'], { cwd: dir })
+    commit(dir, 'rename src -> README.md')
+
+    const files = collectChangedFiles('HEAD~1', { cwd: dir })
+    assert.ok(files.includes('src/foo.ts'), `expected source path, got: ${files.join(', ')}`)
+    assert.ok(files.includes('README.md'), `expected destination path, got: ${files.join(', ')}`)
+    const result = classifyChangedFiles(files)
+    assert.equal(result.tier, 'runtime')
+    assert.equal(result.e2e, 'run')
+    assert.ok(result.reasons.includes('src/foo.ts'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('docs Markdown renamed within docs/static space classifies docs', () => {
+  const dir = makeRepo()
+  try {
+    write(dir, 'docs/a.md', '# old\n')
+    commit(dir, 'c1')
+    execFileSync('git', ['mv', 'docs/a.md', 'docs/b.md'], { cwd: dir })
+    commit(dir, 'rename docs')
+
+    const files = collectChangedFiles('HEAD~1', { cwd: dir })
+    assert.ok(files.includes('docs/a.md'), `expected source path, got: ${files.join(', ')}`)
+    assert.ok(files.includes('docs/b.md'), `expected destination path, got: ${files.join(', ')}`)
+    assert.deepEqual(classifyChangedFiles(files), { tier: 'docs', e2e: 'skip', reasons: [] })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

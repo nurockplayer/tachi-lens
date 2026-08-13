@@ -79,9 +79,16 @@ function emit(entries) {
   }
 }
 
-function getChangedFiles(base) {
-  const out = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {
+// Collect changed paths with rename detection disabled. `git diff` collapses a
+// rename to its destination path by default, so `src/foo.ts -> docs/foo.md`
+// would surface only `docs/foo.md` and be misread as docs-only. With
+// `--no-renames`, a rename yields both the old and new path, so any runtime
+// source path still escalates to the runtime tier.
+export function collectChangedFiles(base, { cwd } = {}) {
+  const args = ['diff', '--name-only', '--no-renames', `${base}...HEAD`]
+  const out = execFileSync('git', args, {
     encoding: 'utf8',
+    ...(cwd ? { cwd } : {}),
   })
   return out
     .split('\n')
@@ -97,7 +104,7 @@ if (isMain) {
 
   let result
   try {
-    result = classifyChangedFiles(getChangedFiles(base))
+    result = classifyChangedFiles(collectChangedFiles(base))
   } catch (error) {
     // A classifier failure must never skip validation: escalate to full E2E.
     result = {
