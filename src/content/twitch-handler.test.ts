@@ -352,6 +352,48 @@ describe('TwitchMessageHandler', () => {
       })
     })
 
+    describe('non-Chinese same-target skip (#183)', () => {
+      it('skips Japanese text with Kana for a ja target', () => {
+        const el = createMessageElement({ text: 'こんばんは', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'ja' })).toBe(false)
+      })
+
+      it('skips Han+Kana Japanese text for a ja-JP target', () => {
+        const el = createMessageElement({ text: '今日は暑い', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'ja-JP' })).toBe(false)
+      })
+
+      it('skips Korean text with Hangul for a ko target', () => {
+        const el = createMessageElement({ text: '안녕하세요', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'ko' })).toBe(false)
+      })
+
+      it('skips clearly English text for an en target', () => {
+        const el = createMessageElement({ text: 'the cat is on the mat', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'en' })).toBe(false)
+      })
+
+      it('translates mixed Japanese+Latin text for a ja target', () => {
+        const el = createMessageElement({ text: 'hello こんにちは', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'ja' })).toBe(true)
+      })
+
+      it('translates non-English Latin text for an en target', () => {
+        const el = createMessageElement({ text: 'Bonjour, comment allez-vous', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'en' })).toBe(true)
+      })
+
+      it('translates Japanese text for a zh target (Chinese path unchanged)', () => {
+        const el = createMessageElement({ text: 'こんばんは', username: 'user' })
+        expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+      })
+
+      it('translates Korean text for a ja target', () => {
+        const el = createMessageElement({ text: '안녕하세요', username: 'user' })
+        expect(handler.shouldTranslate(el, { ...DEFAULT_SETTINGS, targetLanguage: 'ja' })).toBe(true)
+      })
+    })
+
     describe('skipEmotesOnly with CJK text (issue #37)', () => {
       const createElementWithBadge = (bodyText: string): HTMLElement => {
         const el = document.createElement('div')
@@ -1257,6 +1299,58 @@ describe('TwitchMessageHandler', () => {
       expect(sendMessageMock).toHaveBeenCalledTimes(1)
       expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
     })
+
+    // Issue #183: non-Chinese same-target messages are skipped before
+    // translate_request and marked processed exactly once.
+    it.each([
+      ['こんばんは', 'ja'],
+      ['今日は暑い', 'ja-JP'],
+      ['ありがとうございます', 'ja'],
+      ['안녕하세요', 'ko'],
+      ['한국어測試', 'ko-KR'],
+      ['the cat is on the mat', 'en'],
+      ['I think this is great', 'en-US'],
+    ])(
+      'does not send translate_request for same-target %s against a %s target and marks it processed',
+      async (text, target) => {
+        const el = createMessageElement({ text, username: 'user' })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: target,
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+        expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+      },
+    )
+
+    it.each([
+      ['hello こんにちは', 'ja'],
+      ['안녕하세요', 'ja'],
+      ['Bonjour, comment allez-vous', 'en'],
+      ['Was ist das denn', 'en'],
+      ['这个很热', 'ja'],
+      ['こんばんは', 'zh-TW'],
+    ])(
+      'sends translate_request for %s against a %s target (not confidently same-target)',
+      async (text, target) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（翻譯）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: target,
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
   })
 
   describe('display modes', () => {
