@@ -41,7 +41,7 @@ describe('buildTranslationIdentity', () => {
   it('is a stable string with a stable shape', () => {
     const key = buildTranslationIdentity(BASE)
     // Length-prefixed: `${len}#${value}` per dimension, joined with '|'.
-    expect(key).toBe('5#Hello|5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#1')
+    expect(key).toBe('5#Hello|5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#2')
   })
 
   describe('isolation dimensions', () => {
@@ -76,8 +76,10 @@ describe('buildTranslationIdentity', () => {
     })
 
     it('distinguishes different translation-contract versions', () => {
+      // The current default is v2; an explicit v1 (a stale pre-#187 identity)
+      // must never collide with it, so old cache records stay unreachable.
       expect(buildTranslationIdentity(BASE))
-        .not.toBe(buildTranslationIdentity({ ...BASE, contractVersion: 2 }))
+        .not.toBe(buildTranslationIdentity({ ...BASE, contractVersion: 1 }))
     })
   })
 
@@ -100,9 +102,9 @@ describe('buildTranslationIdentity', () => {
   describe('length-prefixed collision safety', () => {
     it('uses the verbatim text in the identity so it matches the provider input', () => {
       expect(buildTranslationIdentity({ ...BASE, text: 'Hello' }))
-        .toBe('5#Hello|5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#1')
+        .toBe('5#Hello|5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#2')
       expect(buildTranslationIdentity({ ...BASE, text: ' Hello ' }))
-        .toBe('7# Hello |5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#1')
+        .toBe('7# Hello |5#zh-TW|8#deepseek|17#deepseek-v4-flash|0#|1#2')
     })
 
     it('keeps leading/trailing whitespace in the provider text and the identity identical', () => {
@@ -132,8 +134,8 @@ describe('buildTranslationIdentity', () => {
       const a = buildTranslationIdentity({ ...BASE, model: 'x|yz' })
       const b = buildTranslationIdentity({ ...BASE, model: 'x', sourceLang: 'yz' })
       expect(a).not.toBe(b)
-      expect(a).toBe('5#Hello|5#zh-TW|8#deepseek|4#x|yz|0#|1#1')
-      expect(b).toBe('5#Hello|5#zh-TW|8#deepseek|1#x|2#yz|1#1')
+      expect(a).toBe('5#Hello|5#zh-TW|8#deepseek|4#x|yz|0#|1#2')
+      expect(b).toBe('5#Hello|5#zh-TW|8#deepseek|1#x|2#yz|1#2')
     })
 
     it('cannot collide when the model contains the NUL character', () => {
