@@ -331,6 +331,14 @@ describe('TwitchMessageHandler', () => {
         expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
       })
 
+      it.each(['手紙', '電話', '自動車', '目的', '終了'])(
+        'does not skip kana-less Japanese %s for a zh-TW target in skip_all_chinese',
+        (text) => {
+          const el = createMessageElement({ text, username: 'user' })
+          expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
+        },
+      )
+
       it('does not skip non-Chinese text for a zh target', () => {
         const el = createMessageElement({ text: 'Hello world', username: 'user' })
         expect(handler.shouldTranslate(el, DEFAULT_SETTINGS)).toBe(true)
@@ -704,6 +712,47 @@ describe('TwitchMessageHandler', () => {
       expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
     })
 
+    // Issue #182: the exact observed live-chat messages must not emit a
+    // translate_request when the target language is Chinese.
+    it.each([
+      '那是肯定沒有',
+      '不客氣',
+      '我才',
+      '那要打訊號什麼的',
+      '把手機的畫面傳到電腦用OBS開台就可以不用斷',
+    ])('does not send translate_request for #182 message %s and marks it processed', async (text) => {
+      const el = createMessageElement({ text, username: 'user' })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      expect(el.querySelector('[data-tachi-lens-translated]')).toBeNull()
+    })
+
+    it.each([
+      '那是肯定沒有',
+      '不客氣',
+      '我才',
+      '那要打訊號什麼的',
+      '把手機的畫面傳到電腦用OBS開台就可以不用斷',
+    ])('does not send translate_request for #182 message %s against a zh-CN target', async (text) => {
+      const el = createMessageElement({ text, username: 'user' })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-CN',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
     it('does not send translate_request for same-script text in translate_other_script mode', async () => {
       const el = createMessageElement({ text: '這個很熱', username: 'user' })
 
@@ -748,6 +797,461 @@ describe('TwitchMessageHandler', () => {
         ...DEFAULT_SETTINGS,
         targetLanguage: 'zh-TW',
         chineseVariantMode: 'translate_other_script',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
+    // Conservative safeguards at the Content Script boundary: kana-less
+    // Japanese and mixed-language text must still emit translate_request even
+    // when the target language is Chinese.
+    it.each(['手紙', '電話', '自動車', '目的', '終了'])(
+      'sends translate_request for kana-less Japanese %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '手紙（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    // #182 follow-up: weak Kanji (個/用/不/可/能) must not accumulate into a
+    // confident-Chinese signal, so kana-less Japanese compounds still translate.
+    it.each(['個人利用不可', '使用不可能'])(
+      'sends translate_request for kana-less Japanese %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    // #182 follow-up: Japanese-use Kanji (simplified 没 U+6CA1) must not act as
+    // decisive Mandarin evidence, and short Japanese phrases with a Latin
+    // acronym must not skip on weak accumulation.
+    it.each(['没収', '水没', '没入', '個人利用不可OBS', '使用不可能OBS'])(
+      'sends translate_request for Japanese %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    it.each(['使用不可能w', '個人利用不可w', '使用不可能ｗ', '個人利用不可ｗ'])(
+      'sends translate_request for Japanese with a trailing Latin letter %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    // 什 (U+4EC0) is Japanese-use Kanji (什器): must still translate.
+    it.each(['什器', '什物', '什錦'])(
+      'sends translate_request for kana-less Japanese %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    // Foreign-dominant mixed messages with a marker/strong char must translate
+    // the foreign portion rather than skipping the whole message.
+    it.each(['hello 這個', 'English 對啊'])(
+      'sends translate_request for foreign-dominant mixed message %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（翻譯）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    // Han-only Mandarin built from weak chars plus a pronoun (我要用你的) and
+    // phrase-with-emoji (不客氣❤️) are confidently Chinese: no request.
+    it.each(['我要用你的', '不客氣❤️'])(
+      'does not send translate_request for confident Chinese %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      },
+    )
+
+    // #182 follow-up: 他 in 他人 is a kana-less Japanese compound, not a
+    // Mandarin pronoun, and long Japanese signage with an acronym must not
+    // skip on length/dominance + weak aggregate alone. These must translate.
+    it.each([
+      '他人使用不可',
+      '他人利用不可',
+      '個人情報利用不可無断転載禁止w',
+      '個人情報利用不可無断転載禁止',
+    ])('sends translate_request for Japanese %s against a zh-TW skip_all_chinese target', async (text) => {
+      const el = createMessageElement({ text, username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '（日文）' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
+    it('does not send translate_request for 他很好 against a zh-TW target', async () => {
+      // 他→很 is a Mandarin pronoun in context; the aggregate path skips it.
+      const el = createMessageElement({ text: '他很好', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    // #182 follow-up: 個人的使用禁止 is kana-less Japanese despite the 的
+    // followed by 使, and astral-plane foreign letters must be detected. These
+    // must still translate.
+    it.each([
+      '個人的使用禁止',
+      '個人的利用禁止',
+      '個人的利用不可',
+      '個人的使用不可',
+      '個人的利用可能',
+      '個人的使用不可能',
+      '個人的使用不可無断転載禁止w',
+      '就業規則個人情報無断利用不可w',
+      '把握事項個人情報利用不可禁止w',
+      '不用品個人情報無断利用禁止w',
+      '許可以外使用不可無断転載禁止w',
+      '📺📺許可以外使用不可無断転載禁止w',
+      '𝕙𝕖𝕝𝕝𝕠 這個',
+    ])(
+      'sends translate_request for Japanese/mixed %s against a zh-TW skip_all_chinese target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（翻譯）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    it('does not send translate_request for 不客氣👨👩👧 against a zh-TW target', async () => {
+      // Joined emoji ZWJ is a Cf format char; the phrase must still match.
+      const el = createMessageElement({ text: '不客氣👨👩👧', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    // #182 follow-up: 個人的使用不可 (的 followed by 使, weak=4), 他用途不可
+    // (他 = Japanese "other" prefix), and the common courtesy phrase 謝謝.
+    // The former two must translate; 謝謝 must skip.
+    it.each(['個人的使用不可', '他用途不可', '他利用不可', '他会場利用不可', '他有地利用不可'])(
+      'sends translate_request for kana-less Japanese %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        sendMessageMock.mockResolvedValue({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '（日文）' },
+        })
+
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1)
+        expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+      },
+    )
+
+    it.each(['謝謝', '谢谢'])(
+      'does not send translate_request for common courtesy %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      },
+    )
+
+    it.each(['可以', '好的', '知道了'])(
+      'does not send translate_request for common weak-only Mandarin %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      },
+    )
+
+    it.each(['没问题', '没有问题'])(
+      'does not send translate_request for Simplified %s against a zh-TW target',
+      async (text) => {
+        const el = createMessageElement({ text, username: 'user' })
+        await handler.translateAndInject(el, {
+          ...DEFAULT_SETTINGS,
+          targetLanguage: 'zh-TW',
+          chineseVariantMode: 'skip_all_chinese',
+        })
+
+        expect(sendMessageMock).not.toHaveBeenCalled()
+        expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      },
+    )
+
+    it('does not send translate_request for 我要一個手機 (numeral object) against a zh-TW target', async () => {
+      // 我→要→一: a numeral/classifier object after the predicate is valid
+      // Mandarin pronoun context, so this already-Chinese message skips.
+      const el = createMessageElement({ text: '我要一個手機', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('does not send translate_request for 我要買一個手機 (verb + numeral object) against a zh-TW target', async () => {
+      // 我→要→買→一: an intervening lexical verb before the numeral object is
+      // still valid Mandarin pronoun context.
+      const el = createMessageElement({ text: '我要買一個手機', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('does not send translate_request for 我要再買一個手機 (adverb+verb) against a zh-TW target', async () => {
+      // 我→要→再→買→一: adverb and lexical verb before the numeral object.
+      const el = createMessageElement({ text: '我要再買一個手機', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('sends translate_request for Japanese 他不用品買取不可 against a zh-TW target', async () => {
+      // 用 is structural but 品 is a bare noun → the tail walk rejects it.
+      const el = createMessageElement({ text: '他不用品買取不可', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '（日文）' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
+    it('sends translate_request for Japanese 他不要品買取不可 against a zh-TW target', async () => {
+      // 要 is a follower but 品 is a bare noun → the tail walk must continue
+      // past the follower chain and reject it.
+      const el = createMessageElement({ text: '他不要品買取不可', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '（日文）' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
+    it('does not send translate_request for 我真的不可以 against a zh-TW target', async () => {
+      // 我→真 is a pronoun followed by a Mandarin degree modifier.
+      const el = createMessageElement({ text: '我真的不可以', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('does not send translate_request for 我，真的不可以 (separator) against a zh-TW target', async () => {
+      // Separators between a pronoun and its predicate are skipped.
+      const el = createMessageElement({ text: '我，真的不可以', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('does not send translate_request for the 把-construction OBS message against a zh-TW target', async () => {
+      // 把手機畫面傳到電腦用OBS開台可以不用斷: 把 introduces a noun phrase.
+      const el = createMessageElement({ text: '把手機畫面傳到電腦用OBS開台可以不用斷', username: 'user' })
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    })
+
+    it('sends translate_request for mixed Latin and Han text against a zh-TW skip_all_chinese target', async () => {
+      const el = createMessageElement({ text: 'hello 大家好', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '哈囉大家好' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
+      })
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((sendMessageMock.mock.calls[0]![0] as { type: string }).type).toBe('translate_request')
+    })
+
+    it('sends translate_request for Japanese with Kana against a zh-TW skip_all_chinese target', async () => {
+      const el = createMessageElement({ text: '今天は暑い', username: 'user' })
+      sendMessageMock.mockResolvedValue({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '今天好熱' },
+      })
+
+      await handler.translateAndInject(el, {
+        ...DEFAULT_SETTINGS,
+        targetLanguage: 'zh-TW',
+        chineseVariantMode: 'skip_all_chinese',
       })
 
       expect(sendMessageMock).toHaveBeenCalledTimes(1)
