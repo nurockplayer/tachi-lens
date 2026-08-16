@@ -18,7 +18,7 @@
  * translation semantics change in a way that would make previously cached
  * results meaningfully stale. Included in every translation identity.
  */
-export const TRANSLATION_CONTRACT_VERSION = 1 as const
+export const TRANSLATION_CONTRACT_VERSION = 2 as const
 
 export interface TranslationIdentityInput {
   /** Source text exactly as the translator passes it to the provider (not trimmed). */
