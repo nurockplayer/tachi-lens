@@ -29,6 +29,25 @@ import type {
 } from '@/shared/messages'
 import type { SpeechPipelineState } from '@/shared/speech-state'
 import type { FilterConfig } from '@/content/message-filter'
+import {
+  Button,
+  Card,
+  CloseIcon,
+  EmptyState,
+  IconButton,
+  InlineNotice,
+  NumberField,
+  SectionHeader,
+  SecretInput,
+  SegmentedControl,
+  SelectField,
+  StatusBadge,
+  TextInput,
+  ToggleRow,
+} from './primitives'
+import type { Tone } from './primitives'
+import './tokens.css'
+import './popup.css'
 
 const SPEECH_LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'zh-TW', label: '繁體中文' },
@@ -85,37 +104,37 @@ const GEMINI_QUOTA_FIELDS: Array<{
 const QUOTA_HEALTH_STATUS_META: Record<QuotaHealthStatus, {
   labelKey: Parameters<typeof t>[0]
   descKey: Parameters<typeof t>[0]
-  color: string
+  tone: Tone
 }> = {
   healthy: {
     labelKey: 'quotaHealthStatusHealthy',
     descKey: 'quotaHealthDescHealthy',
-    color: '#2e7d32',
+    tone: 'success',
   },
   cooldown: {
     labelKey: 'quotaHealthStatusCooldown',
     descKey: 'quotaHealthDescCooldown',
-    color: '#b26a00',
+    tone: 'warning',
   },
   clock_rollback: {
     labelKey: 'quotaHealthStatusClockRollback',
     descKey: 'quotaHealthDescClockRollback',
-    color: '#c0392b',
+    tone: 'danger',
   },
   untrusted_migration: {
     labelKey: 'quotaHealthStatusUntrustedMigration',
     descKey: 'quotaHealthDescUntrustedMigration',
-    color: '#c0392b',
+    tone: 'danger',
   },
   malformed_snapshot: {
     labelKey: 'quotaHealthStatusMalformedSnapshot',
     descKey: 'quotaHealthDescMalformedSnapshot',
-    color: '#c0392b',
+    tone: 'danger',
   },
   unsupported_version: {
     labelKey: 'quotaHealthStatusUnsupportedVersion',
     descKey: 'quotaHealthDescUnsupportedVersion',
-    color: '#c0392b',
+    tone: 'danger',
   },
 }
 
@@ -644,7 +663,7 @@ export function App() {
   }, [])
 
   if (!settings) {
-    return <div style={{ padding: '1rem' }}>{t('loading')}</div>
+    return <div className="app__loading">{t('loading')}</div>
   }
 
   const currentModels = getModelsForProvider(settings.selectedProvider)
@@ -652,530 +671,321 @@ export function App() {
   const currentGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
 
   return (
-    <div style={{ width: '320px', padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
-      <h1 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem' }}>tachi-lens</h1>
-      <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 1rem' }}>
+    <div className="app">
+      <h1 className="app__title">tachi-lens</h1>
+      <p className="app__desc">
         {t('appDescription')}
       </p>
 
       {/* Channel info */}
       {channelName && (
-        <div
-          style={{
-            marginBottom: '0.75rem',
-            padding: '0.4rem 0.5rem',
-            background: '#f0f0f0',
-            borderRadius: '4px',
-            fontSize: '0.85rem',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>頻道：</span>
-          <span>{channelName}</span>
-        </div>
+        <Card className="card--channel app__section">
+          <span className="card__channel-label">頻道：</span>
+          <span className="card__channel-value">{channelName}</span>
+        </Card>
       )}
 
       {/* Per-channel settings */}
       {channelName && (
-        <label
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
-        >
-          <input
-            type='checkbox'
-            checked={useChannelSettings}
-            onChange={(e) => setUseChannelSettings(e.target.checked)}
-            aria-label='使用此頻道的專用設定'
-          />
-          <span style={{ fontSize: '0.9rem' }}>使用此頻道的專用設定</span>
-        </label>
+        <ToggleRow
+          className="app__section"
+          label="使用此頻道的專用設定"
+          checked={useChannelSettings}
+          onChange={(checked) => setUseChannelSettings(checked)}
+        />
       )}
 
       {/* Translation enabled */}
-      <label
-        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
-      >
-        <input
-          type='checkbox'
-          checked={settings.translationEnabled}
-          onChange={(e) => updateSetting('translationEnabled', e.target.checked)}
-          aria-label={t('enableTranslation')}
-        />
-        <span style={{ fontSize: '0.9rem' }}>{t('enableTranslation')}</span>
-      </label>
+      <ToggleRow
+        className="app__section"
+        label={t('enableTranslation')}
+        checked={settings.translationEnabled}
+        onChange={(checked) => updateSetting('translationEnabled', checked)}
+      />
 
       {/* Translation provider */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='provider-select'
-        >
-          {t('translationProvider')}
-        </label>
-        <select
-          id='provider-select'
-          aria-label={t('translationProvider')}
-          value={settings.selectedProvider}
-          onChange={(e) => handleProviderChange(e.target.value)}
-          style={{ width: '100%', padding: '0.3rem' }}
-        >
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.displayName}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SelectField
+        id="provider-select"
+        className="app__section"
+        label={t('translationProvider')}
+        value={settings.selectedProvider}
+        onChange={handleProviderChange}
+      >
+        {providers.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.displayName}
+          </option>
+        ))}
+      </SelectField>
 
       {/* Model */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='model-select'
-        >
-          {t('model')}
-        </label>
-        <select
-          id='model-select'
-          value={settings.selectedModel}
-          onChange={(e) => updateSetting('selectedModel', e.target.value)}
-          style={{ width: '100%', padding: '0.3rem' }}
-        >
-          {currentModels.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.displayName}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SelectField
+        id="model-select"
+        className="app__section"
+        label={t('model')}
+        value={settings.selectedModel}
+        onChange={(value) => updateSetting('selectedModel', value)}
+      >
+        {currentModels.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.displayName}
+          </option>
+        ))}
+      </SelectField>
 
+      {/* Gemini quota (shown only for the Gemini provider) */}
       {settings.selectedProvider === 'gemini' && (
-        <fieldset
-          style={{
-            margin: '0 0 0.75rem',
-            padding: '0.65rem',
-            border: '1px solid #d8d8d8',
-            borderRadius: '4px',
-          }}
-        >
-          <legend style={{ padding: '0 0.25rem', fontSize: '0.85rem', fontWeight: 600 }}>
-            {t('geminiQuotaSection')}: {currentModel?.displayName ?? settings.selectedModel}
-          </legend>
-          <p style={{ margin: '0 0 0.55rem', color: '#555', fontSize: '0.75rem', lineHeight: 1.4 }}>
-            {t('geminiQuotaHelp')}
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-            {GEMINI_QUOTA_FIELDS.map(({ key, labelKey, min, max }) => {
-              const inputId = `gemini-quota-${key}`
-              return (
-                <label key={key} htmlFor={inputId} style={{ display: 'block', minWidth: 0 }}>
-                  <span style={{ display: 'block', marginBottom: '0.2rem', color: '#333', fontSize: '0.75rem' }}>
-                    {t(labelKey)}
-                  </span>
-                  <input
-                    id={inputId}
-                    type='number'
-                    min={min}
-                    {...(max === undefined ? {} : { max })}
-                    value={currentGeminiQuota[key]}
-                    onChange={(event) => {
-                      const parsed = Math.floor(Number(event.target.value))
-                      const bounded = Number.isFinite(parsed)
-                        ? Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, parsed))
-                        : min
-                      updateGeminiQuota(key, bounded)
-                    }}
-                    style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
-                  />
-                </label>
-              )
-            })}
+        <Card className="app__section">
+          <SectionHeader>{`${t('geminiQuotaSection')}: ${currentModel?.displayName ?? settings.selectedModel}`}</SectionHeader>
+          <p className="section-hint">{t('geminiQuotaHelp')}</p>
+          <div className="field-grid">
+            {GEMINI_QUOTA_FIELDS.map(({ key, labelKey, min, max }) => (
+              <NumberField
+                key={key}
+                id={`gemini-quota-${key}`}
+                label={t(labelKey)}
+                min={min}
+                max={max}
+                value={currentGeminiQuota[key]}
+                onChange={(value) => {
+                  const parsed = Math.floor(value)
+                  const bounded = Number.isFinite(parsed)
+                    ? Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, parsed))
+                    : min
+                  updateGeminiQuota(key, bounded)
+                }}
+              />
+            ))}
           </div>
-        </fieldset>
+        </Card>
       )}
 
       {/* API Key */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='api-key-input'
-        >
-          {t('apiKey')}
-        </label>
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
-          <input
-            id='api-key-input'
-            type={visibleKeys[settings.selectedProvider] ? 'text' : 'password'}
-            value={apiKeyInputs[settings.selectedProvider] ?? ''}
-            onChange={(e) => handleApiKeyChange(settings.selectedProvider, e.target.value)}
-            placeholder={t('apiKeyPlaceholder')}
-            style={{ flex: 1, padding: '0.3rem', fontFamily: 'monospace' }}
-          />
-          <button
-            onClick={() => toggleKeyVisibility(settings.selectedProvider)}
-            style={{ padding: '0.3rem 0.5rem' }}
-            title={visibleKeys[settings.selectedProvider] ? t('hide') : t('show')}
-          >
-            {visibleKeys[settings.selectedProvider] ? '🙈' : '👁️'}
-          </button>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-          <button
+      <div className="app__section">
+        <SecretInput
+          id="api-key-input"
+          label={t('apiKey')}
+          value={apiKeyInputs[settings.selectedProvider] ?? ''}
+          onChange={(value) => handleApiKeyChange(settings.selectedProvider, value)}
+          placeholder={t('apiKeyPlaceholder')}
+          visible={Boolean(visibleKeys[settings.selectedProvider])}
+          onToggleVisible={() => toggleKeyVisibility(settings.selectedProvider)}
+          showLabel={t('show')}
+          hideLabel={t('hide')}
+        />
+        <div className="inline-actions">
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => handleValidateKey(settings.selectedProvider)}
             disabled={validationStatus[settings.selectedProvider] === 'checking'}
-            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
           >
             {validationStatus[settings.selectedProvider] === 'checking' ? t('validating') : t('validate')}
-          </button>
+          </Button>
           {validationStatus[settings.selectedProvider] === 'valid' && (
-            <span style={{ color: 'green', fontSize: '0.8rem' }}>{t('valid')}</span>
+            <StatusBadge tone="success" showDot={false}>{t('valid')}</StatusBadge>
           )}
           {validationStatus[settings.selectedProvider] === 'invalid' && (
-            <span style={{ color: 'red', fontSize: '0.8rem' }}>{t('invalid')}</span>
+            <StatusBadge tone="danger" showDot={false}>{t('invalid')}</StatusBadge>
           )}
         </div>
       </div>
 
       {/* Target language */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='language-select'
-        >
-          {t('targetLanguage')}
-        </label>
-        <select
-          id='language-select'
-          value={settings.targetLanguage}
-          onChange={(e) => updateSetting('targetLanguage', e.target.value)}
-          style={{ width: '100%', padding: '0.3rem' }}
-        >
-          <option value='zh-TW'>繁體中文</option>
-          <option value='zh-CN'>簡體中文</option>
-          <option value='en'>English</option>
-          <option value='ja'>日本語</option>
-          <option value='ko'>한국어</option>
-          <option value='vi'>Tiếng Việt</option>
-          <option value='th'>ภาษาไทย</option>
-        </select>
-      </div>
+      <SelectField
+        id="language-select"
+        className="app__section"
+        label={t('targetLanguage')}
+        value={settings.targetLanguage}
+        onChange={(value) => updateSetting('targetLanguage', value)}
+      >
+        <option value='zh-TW'>繁體中文</option>
+        <option value='zh-CN'>簡體中文</option>
+        <option value='en'>English</option>
+        <option value='ja'>日本語</option>
+        <option value='ko'>한국어</option>
+        <option value='vi'>Tiếng Việt</option>
+        <option value='th'>ภาษาไทย</option>
+      </SelectField>
 
-      {/* Chinese message handling */}
+      {/* Chinese message handling (segmented radio group) */}
       {isChineseTarget(settings.targetLanguage) && (
-        <fieldset
-          style={{
-            margin: '0 0 0.75rem',
-            padding: '0.65rem',
-            border: '1px solid #d8d8d8',
-            borderRadius: '4px',
-          }}
-        >
-          <legend style={{ padding: '0 0.25rem', fontSize: '0.85rem', fontWeight: 600 }}>
-            {t('chineseVariantSection')}
-          </legend>
-          {CHINESE_VARIANT_OPTIONS.map(({ value, labelKey }) => (
-            <label
-              key={value}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                marginBottom: '0.3rem',
-                fontSize: '0.82rem',
-              }}
-            >
-              <input
-                type='radio'
-                name='chinese-variant-mode'
-                value={value}
-                checked={settings.chineseVariantMode === value}
-                onChange={() => updateSetting('chineseVariantMode', value)}
-              />
-              {t(labelKey)}
-            </label>
-          ))}
-        </fieldset>
+        <Card className="app__section">
+          <SectionHeader>{t('chineseVariantSection')}</SectionHeader>
+          <SegmentedControl
+            groupLabel={t('chineseVariantSection')}
+            name="chinese-variant-mode"
+            options={CHINESE_VARIANT_OPTIONS.map(({ value, labelKey }) => ({
+              value,
+              id: `chinese-variant-${value}`,
+              label: t(labelKey),
+            }))}
+            value={settings.chineseVariantMode}
+            onChange={(value) => updateSetting('chineseVariantMode', value as ChineseVariantMode)}
+          />
+        </Card>
       )}
 
       {/* Display modes */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='display-mode-select'
-        >
-          {t('displayMode')}
-        </label>
-        <select
-          id='display-mode-select'
-          value={settings.displayMode}
-          onChange={(e) =>
-            updateSetting('displayMode', e.target.value as UserSettings['displayMode'])
-          }
-          style={{ width: '100%', padding: '0.3rem' }}
-        >
-          <option value='below'>{t('displayBelow')}</option>
-          <option value='hover'>{t('displayHover')}</option>
-          <option value='collapse'>{t('displayCollapse')}</option>
-        </select>
-      </div>
+      <SelectField
+        id="display-mode-select"
+        className="app__section"
+        label={t('displayMode')}
+        value={settings.displayMode}
+        onChange={(value) => updateSetting('displayMode', value as UserSettings['displayMode'])}
+      >
+        <option value='below'>{t('displayBelow')}</option>
+        <option value='hover'>{t('displayHover')}</option>
+        <option value='collapse'>{t('displayCollapse')}</option>
+      </SelectField>
 
       {/* Minimum translation length */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='min-length-input'
-        >
-          {t('minTextLength')}
-        </label>
-        <input
-          id='min-length-input'
-          type='number'
-          min={1}
-          max={100}
-          value={settings.minTextLength}
-          onChange={(e) =>
-            updateSetting('minTextLength', Math.max(1, parseInt(e.target.value) || 1))
-          }
-          style={{ width: '100%', padding: '0.3rem' }}
-        />
-      </div>
+      <NumberField
+        id="min-length-input"
+        className="app__section"
+        label={t('minTextLength')}
+        min={1}
+        max={100}
+        value={settings.minTextLength}
+        onChange={(value) => updateSetting('minTextLength', Math.max(1, Math.floor(value) || 1))}
+      />
 
       {/* Message filtering */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <div
-          style={{
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            marginBottom: '0.3rem',
-            color: '#444',
-          }}
-        >
-          {t('filterSection')}
-        </div>
+      <div className="app__section">
+        <SectionHeader>{t('filterSection')}</SectionHeader>
         {FILTER_TOGGLES.map(({ key, labelKey }) => (
-          <label
+          <ToggleRow
             key={key}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              marginBottom: '0.15rem',
-              fontSize: '0.82rem',
-            }}
-          >
-            <input
-              type='checkbox'
-              checked={settings[key] as boolean}
-              onChange={(e) => updateSetting(key, e.target.checked)}
-            />
-            {t(labelKey)}
-          </label>
+            compact
+            label={t(labelKey)}
+            checked={settings[key] as boolean}
+            onChange={(checked) => updateSetting(key, checked)}
+          />
         ))}
       </div>
 
       {/* Bot blacklist */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label
-          style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}
-          htmlFor='blacklist-input'
-        >
-          {t('botBlacklist')}
-        </label>
-        <input
-          id='blacklist-input'
-          type='text'
-          value={blacklistInput}
-          onChange={(e) => setBlacklistInput(e.target.value)}
-          placeholder={t('botBlacklistPlaceholder')}
-          style={{ width: '100%', padding: '0.3rem' }}
-        />
-      </div>
+      <TextInput
+        id="blacklist-input"
+        className="app__section"
+        label={t('botBlacklist')}
+        value={blacklistInput}
+        onChange={setBlacklistInput}
+        placeholder={t('botBlacklistPlaceholder')}
+      />
 
       {/* Speech subtitles (v0.3): capture/consent is owned by a later Issue. */}
-      <fieldset
-        style={{
-          margin: '0 0 0.75rem',
-          padding: '0.65rem',
-          border: '1px solid #d8d8d8',
-          borderRadius: '4px',
-        }}
-      >
-        <legend style={{ padding: '0 0.25rem', fontSize: '0.85rem', fontWeight: 600 }}>
-          {t('speechSection')}
-        </legend>
+      <Card className="app__section">
+        <SectionHeader>{t('speechSection')}</SectionHeader>
 
-        <label
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}
-        >
-          <input
-            type='checkbox'
-            // While the consent panel is open the switch reflects the user's
-            // intent (checked) even though capture has not started; unchecking
-            // cancels without persisting or starting anything (#162).
-            checked={speechConsentOpen || settings.speechConfig.speechEnabled}
-            onChange={(e) => handleSpeechEnabledToggle(e.target.checked)}
-            aria-label={t('speechEnabled')}
-          />
-          <span style={{ fontSize: '0.9rem' }}>{t('speechEnabled')}</span>
-        </label>
+        <ToggleRow
+          label={t('speechEnabled')}
+          checked={speechConsentOpen || settings.speechConfig.speechEnabled}
+          onChange={handleSpeechEnabledToggle}
+        />
 
         {/* Live speech_state readout (Spec §6/#162). Reflects the SW's
             speech_state broadcast — capturing/paused/error/budget — via the
             existing contract, never a new message. Error/paused states reuse
             the fixed #160 i18n key when the payload carries one. */}
         {speechState && (
-          <div style={{ marginBottom: '0.6rem', fontSize: '0.82rem', color: '#444' }}>
-            <span style={{ fontWeight: 600 }}>{t('speechStatus')}：</span>
+          <div className="speech-status">
+            <span className="speech-status__label">{t('speechStatus')}：</span>
             <span>
               {speechState.errorKey ? t(speechState.errorKey as Parameters<typeof t>[0]) : t(SPEECH_STATE_LABELS[speechState.state])}
             </span>
           </div>
         )}
 
-        <div style={{ marginBottom: '0.5rem' }}>
-          <label
-            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
-            htmlFor='speech-provider-select'
-          >
-            {t('speechProvider')}
-          </label>
-          <select
-            id='speech-provider-select'
-            value={settings.speechConfig.speechProvider}
-            onChange={(e) => updateSpeechConfig('speechProvider', e.target.value as SpeechProviderId)}
-            style={{ width: '100%', padding: '0.3rem' }}
-          >
-            {SPEECH_PROVIDER_IDS.map((id) => (
-              <option key={id} value={id}>
-                {id === 'gemini' ? 'Gemini' : id}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="speech-provider-select"
+          label={t('speechProvider')}
+          value={settings.speechConfig.speechProvider}
+          onChange={(value) => updateSpeechConfig('speechProvider', value as SpeechProviderId)}
+        >
+          {SPEECH_PROVIDER_IDS.map((id) => (
+            <option key={id} value={id}>
+              {id === 'gemini' ? 'Gemini' : id}
+            </option>
+          ))}
+        </SelectField>
 
-        <div style={{ marginBottom: '0.5rem' }}>
-          <label
-            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
-            htmlFor='speech-model-select'
-          >
-            {t('speechModel')}
-          </label>
-          <select
-            id='speech-model-select'
-            value={settings.speechConfig.speechModel}
-            onChange={(e) => updateSpeechConfig('speechModel', e.target.value)}
-            style={{ width: '100%', padding: '0.3rem' }}
-          >
-            {SPEECH_GEMINI_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.displayName}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="speech-model-select"
+          label={t('speechModel')}
+          value={settings.speechConfig.speechModel}
+          onChange={(value) => updateSpeechConfig('speechModel', value)}
+        >
+          {SPEECH_GEMINI_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.displayName}
+            </option>
+          ))}
+        </SelectField>
 
-        <div style={{ marginBottom: '0.5rem' }}>
-          <label
-            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
-            htmlFor='speech-language-select'
-          >
-            {t('speechTargetLanguage')}
-          </label>
-          <select
-            id='speech-language-select'
-            value={settings.speechConfig.speechTargetLanguage}
-            onChange={(e) => updateSpeechConfig('speechTargetLanguage', e.target.value)}
-            style={{ width: '100%', padding: '0.3rem' }}
-          >
-            {SPEECH_LANGUAGE_OPTIONS.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="speech-language-select"
+          label={t('speechTargetLanguage')}
+          value={settings.speechConfig.speechTargetLanguage}
+          onChange={(value) => updateSpeechConfig('speechTargetLanguage', value)}
+        >
+          {SPEECH_LANGUAGE_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </SelectField>
 
-        <div style={{ marginBottom: '0.5rem' }}>
-          <label
-            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
-            htmlFor='speech-caption-lines-input'
-          >
-            {t('speechCaptionMaxLines')}
-          </label>
-          <input
-            id='speech-caption-lines-input'
-            type='number'
-            min={1}
-            value={settings.speechConfig.captionMaxLines}
-            onChange={(e) =>
-              updateSpeechConfig('captionMaxLines', Math.max(1, parseInt(e.target.value) || 1))
-            }
-            style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
-          />
-        </div>
+        <NumberField
+          id="speech-caption-lines-input"
+          label={t('speechCaptionMaxLines')}
+          min={1}
+          value={settings.speechConfig.captionMaxLines}
+          onChange={(value) =>
+            updateSpeechConfig('captionMaxLines', Math.max(1, Math.floor(value) || 1))
+          }
+        />
 
-        <div style={{ marginBottom: '0.5rem' }}>
-          <label
-            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
-            htmlFor='speech-caption-opacity-input'
-          >
-            {t('speechCaptionOpacity')}
-          </label>
-          <input
-            id='speech-caption-opacity-input'
-            type='number'
-            min={0}
-            max={100}
-            value={settings.speechConfig.captionOpacity}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value)
-              const bounded = Number.isFinite(parsed)
-                ? Math.min(100, Math.max(0, parsed))
-                : 0
-              updateSpeechConfig('captionOpacity', bounded)
-            }}
-            style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
-          />
-        </div>
+        <NumberField
+          id="speech-caption-opacity-input"
+          label={t('speechCaptionOpacity')}
+          min={0}
+          max={100}
+          value={settings.speechConfig.captionOpacity}
+          onChange={(value) => {
+            const parsed = Math.floor(value)
+            const bounded = Number.isFinite(parsed)
+              ? Math.min(100, Math.max(0, parsed))
+              : 0
+            updateSpeechConfig('captionOpacity', bounded)
+          }}
+        />
 
-        <div style={{ marginBottom: '0.25rem' }}>
-          <label
-            style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: '#333' }}
-            htmlFor='speech-session-budget-input'
-          >
-            {t('speechMaxSessionMinutes')}
-          </label>
-          <input
-            id='speech-session-budget-input'
-            type='number'
-            min={1}
-            value={settings.speechConfig.maxSessionMinutes}
-            onChange={(e) =>
-              updateSpeechConfig('maxSessionMinutes', Math.max(1, parseInt(e.target.value) || 1))
-            }
-            style={{ boxSizing: 'border-box', width: '100%', padding: '0.3rem' }}
-          />
-        </div>
+        <NumberField
+          id="speech-session-budget-input"
+          label={t('speechMaxSessionMinutes')}
+          min={1}
+          value={settings.speechConfig.maxSessionMinutes}
+          onChange={(value) =>
+            updateSpeechConfig('maxSessionMinutes', Math.max(1, Math.floor(value) || 1))
+          }
+        />
 
         {/* First-enable consent panel (Spec §8.2 / #162). Capture is NOT started
             until the "啟用並開始" confirm click. */}
         {speechConsentOpen && (
           <div
-            role='dialog'
-            aria-modal='true'
+            className="consent-dialog"
+            role="dialog"
+            aria-modal="true"
             aria-label={t('speechConsentTitle')}
-            style={{
-              marginTop: '0.5rem',
-              padding: '0.6rem',
-              border: '1px solid #c0392b',
-              borderRadius: '4px',
-              background: '#fff8f6',
-            }}
           >
-            <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.35rem', color: '#333' }}>
+            <div className="consent-dialog__title">
               {t('speechConsentTitle')}
             </div>
-            <div style={{ fontSize: '0.8rem', lineHeight: 1.5, color: '#444' }}>
+            <div className="consent-dialog__body">
               {t('speechConsentIntro')}
-              <ul style={{ margin: '0.25rem 0 0.4rem 1.1rem', padding: 0 }}>
+              <ul className="consent-dialog__list">
                 <li>{t('speechConsentCaptureTabAudio')}</li>
                 <li>{t('speechConsentSendProvider')}</li>
                 <li>{t('speechConsentNeverStored')}</li>
@@ -1183,174 +993,123 @@ export function App() {
                 <li>{t('speechConsentActiveVisible')}</li>
               </ul>
             </div>
-            <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
-              <button
-                type='button'
-                onClick={() => void handleSpeechConsentConfirm()}
-                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', cursor: 'pointer' }}
-              >
+            <div className="consent-dialog__actions">
+              <Button variant="primary" onClick={() => void handleSpeechConsentConfirm()}>
                 {t('speechConsentConfirm')}
-              </button>
-              <button
-                type='button'
-                onClick={handleSpeechConsentCancel}
-                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', cursor: 'pointer' }}
-              >
+              </Button>
+              <Button variant="secondary" onClick={handleSpeechConsentCancel}>
                 {t('speechConsentCancel')}
-              </button>
+              </Button>
             </div>
           </div>
         )}
-      </fieldset>
+      </Card>
 
       {/* Save */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <button
-          onClick={handleSave}
-          style={{
-            padding: '0.4rem 1rem',
-            fontSize: '0.9rem',
-            cursor: 'pointer',
-          }}
-        >
+      <div className="app__section inline-actions">
+        <Button variant="primary" onClick={handleSave}>
           {t('saveSettings')}
-        </button>
+        </Button>
         {saveMessage && (
-          <span style={{ color: 'green', fontSize: '0.85rem' }}>{t('settingsSaved')}</span>
+          <InlineNotice tone="success">{t('settingsSaved')}</InlineNotice>
         )}
       </div>
 
       {/* Error notification area */}
       {errorNotifications.length > 0 && (
-        <div style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
-          <h3 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem', color: '#666' }}>
-            {t('errorNotificationTitle')}
-          </h3>
-          {errorNotifications.map((n) => (
-            <div
-              key={n.id}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '0.25rem',
-                padding: '0.25rem 0',
-                fontSize: '0.8rem',
-                color: '#c0392b',
-                wordBreak: 'break-word',
-              }}
-            >
-              <span style={{ flex: 1 }}>{n.message}</span>
-              <button
-                onClick={() => dismissError(n.id)}
-                style={{
-                  border: 'none',
-                  background: 'none',
-                  cursor: 'pointer',
-                  padding: '0',
-                  fontSize: '0.8rem',
-                  color: '#999',
-                  lineHeight: 1,
-                }}
-                aria-label={t('dismiss')}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
+        <section className="app__section">
+          <SectionHeader level={3}>{t('errorNotificationTitle')}</SectionHeader>
+          <div className="error-list">
+            {errorNotifications.map((n) => (
+              <div key={n.id} className="error-item">
+                <span className="error-item__text">{n.message}</span>
+                <IconButton
+                  bare
+                  ariaLabel={t('dismiss')}
+                  title={t('dismiss')}
+                  onClick={() => dismissError(n.id)}
+                >
+                  <CloseIcon />
+                </IconButton>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Gemini quota health */}
       {quotaHealth.length > 0 && (
-        <section style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.75rem' }}>
-          <h2 style={{ fontSize: '0.9rem', margin: '0 0 0.3rem', color: '#333' }}>
-            {t('quotaHealthSection')}
-          </h2>
-          <div style={{ display: 'grid', gap: '0.5rem' }}>
+        <section className="app__section">
+          <SectionHeader>{t('quotaHealthSection')}</SectionHeader>
+          <div className="quota-health-stack">
             {quotaHealth.map((result) => {
               const meta = QUOTA_HEALTH_STATUS_META[result.status]
               const integrity = INTEGRITY_STATUSES.has(result.status)
               return (
-                <div
-                  key={result.quotaKey}
-                  style={{
-                    padding: '0.4rem 0.5rem',
-                    border: `1px solid ${meta.color}`,
-                    borderRadius: '4px',
-                    fontSize: '0.8rem',
-                    color: '#333',
-                  }}
-                >
-                  <div style={{ fontWeight: 600, color: meta.color }}>
+                <Card key={result.quotaKey} className={`card--${meta.tone}`}>
+                  <StatusBadge tone={meta.tone} className="quota-card__title">
                     {`${result.quotaKey}：${t(meta.labelKey)}`}
-                  </div>
-                  <div style={{ marginTop: '0.15rem', color: '#555', lineHeight: 1.4 }}>
+                  </StatusBadge>
+                  <div className="quota-meta">
                     {t(meta.descKey)}
                   </div>
                   {result.denialReason && (
-                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                    <div className="quota-meta">
                       {t('quotaHealthDenialPrefix')}：{t(QUOTA_HEALTH_DENIAL_LABELS[result.denialReason])}
                     </div>
                   )}
                   {result.providerDay && (
-                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                    <div className="quota-meta">
                       {t('quotaHealthProviderDay')}：{result.providerDay}
                     </div>
                   )}
                   {result.cooldownUntil !== undefined && (
-                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                    <div className="quota-meta">
                       {t('quotaHealthCooldownUntil')}：{formatInstant(result.cooldownUntil)}
                     </div>
                   )}
                   {result.recoveryAt !== undefined && (
-                    <div style={{ marginTop: '0.15rem', color: '#666' }}>
+                    <div className="quota-meta">
                       {t('quotaHealthRecoveryAt')}：{formatInstant(result.recoveryAt)}
                     </div>
                   )}
                   {integrity && (
-                    <div style={{ marginTop: '0.3rem', color: '#2e7d32', fontSize: '0.78rem' }}>
+                    <InlineNotice tone="info" className="quota-overflow-note">
                       {t('quotaHealthDeepSeekOverflow')}
-                    </div>
+                    </InlineNotice>
                   )}
                   {REPAIRABLE_STATUSES.has(result.status) && (
-                    <button
-                      type="button"
+                    <Button
+                      variant={confirmingReset[result.quotaKey] ? 'danger' : 'danger-outline'}
+                      size="sm"
+                      className="quota-repair-btn"
                       onClick={() => void handleResetQuota(result.quotaKey)}
-                      style={{
-                        marginTop: '0.35rem',
-                        padding: '0.2rem 0.5rem',
-                        fontSize: '0.75rem',
-                        border: '1px solid #c0392b',
-                        borderRadius: '4px',
-                        background: confirmingReset[result.quotaKey] ? '#c0392b' : 'transparent',
-                        color: confirmingReset[result.quotaKey] ? '#fff' : '#c0392b',
-                        cursor: 'pointer',
-                      }}
                     >
                       {confirmingReset[result.quotaKey]
                         ? t('quotaHealthRepairConfirm')
                         : t('quotaHealthRepair')}
-                    </button>
+                    </Button>
                   )}
-                </div>
+                </Card>
               )
             })}
           </div>
         </section>
       )}
 
-      <section style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.75rem' }}>
-        <h2 style={{ fontSize: '0.9rem', margin: '0 0 0.3rem', color: '#333' }}>診斷</h2>
+      {/* Diagnostics */}
+      <section className="app__section">
+        <SectionHeader>診斷</SectionHeader>
         {diagnostics.length === 0 ? (
-          <p style={{ margin: 0, color: '#666', fontSize: '0.8rem' }}>尚未收到診斷事件。請在 Twitch 聊天室等待一則新訊息。</p>
+          <EmptyState>尚未收到診斷事件。請在 Twitch 聊天室等待一則新訊息。</EmptyState>
         ) : (
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
+          <div className="diag-list">
             {diagnostics.slice(0, 5).map((event) => (
-              <div key={event.id} style={{ fontSize: '0.8rem', color: '#444', wordBreak: 'break-word' }}>
+              <div key={event.id} className="diag-item">
                 <strong>{DIAGNOSTIC_LABELS[event.stage]}</strong>
                 {isCountStage(event.stage) && typeof event.count === 'number'
-                  ? <span style={{ color: '#666' }}>：{event.count}</span>
-                  : event.detail && <span style={{ color: '#666' }}>：{event.detail}</span>}
+                  ? <span className="diag-detail">：{event.count}</span>
+                  : event.detail && <span className="diag-detail">：{event.detail}</span>}
               </div>
             ))}
           </div>
@@ -1358,18 +1117,10 @@ export function App() {
       </section>
 
       {/* Shortcut info */}
-      <div
-        style={{
-          marginTop: '1rem',
-          paddingTop: '0.75rem',
-          borderTop: '1px solid #eee',
-          fontSize: '0.75rem',
-          color: '#999',
-        }}
-      >
+      <footer className="app__footer">
         <div>{t('shortcutToggleTranslation')}</div>
         <div>{t('shortcutToggleDisplayMode')}</div>
-      </div>
+      </footer>
     </div>
   )
 }
