@@ -9,8 +9,11 @@
 export type MessageKey =
   | 'appTitle'
   | 'appDescription'
+  | 'statusEnabled'
+  | 'statusDisabled'
   | 'enableTranslation'
   | 'translationProvider'
+  | 'providersSection'
   | 'model'
   | 'apiKey'
   | 'apiKeyPlaceholder'
@@ -43,6 +46,7 @@ export type MessageKey =
   | 'shortcutToggleTranslation'
   | 'shortcutToggleDisplayMode'
   | 'filterSection'
+  | 'channelOverridesSection'
   | 'skipEmotesOnly'
   | 'skipCheermotes'
   | 'skipSlashMe'
@@ -90,6 +94,7 @@ export type MessageKey =
   | 'quotaHealthRepair'
   | 'quotaHealthRepairConfirm'
   | 'speechSection'
+  | 'speechCaptionsSection'
   | 'speechEnabled'
   | 'speechProvider'
   | 'speechModel'
@@ -129,8 +134,11 @@ export type MessageKey =
 export const MESSAGE_KEYS: readonly string[] = [
   'appTitle',
   'appDescription',
+  'statusEnabled',
+  'statusDisabled',
   'enableTranslation',
   'translationProvider',
+  'providersSection',
   'model',
   'apiKey',
   'apiKeyPlaceholder',
@@ -163,6 +171,7 @@ export const MESSAGE_KEYS: readonly string[] = [
   'shortcutToggleTranslation',
   'shortcutToggleDisplayMode',
   'filterSection',
+  'channelOverridesSection',
   'skipEmotesOnly',
   'skipCheermotes',
   'skipSlashMe',
@@ -210,6 +219,7 @@ export const MESSAGE_KEYS: readonly string[] = [
   'quotaHealthRepair',
   'quotaHealthRepairConfirm',
   'speechSection',
+  'speechCaptionsSection',
   'speechEnabled',
   'speechProvider',
   'speechModel',
@@ -245,8 +255,11 @@ export const MESSAGE_KEYS: readonly string[] = [
 const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   appTitle: 'tachi-lens',
   appDescription: 'Twitch 聊天室沉浸式翻譯',
+  statusEnabled: '啟用中',
+  statusDisabled: '已停用',
   enableTranslation: '啟用翻譯',
   translationProvider: '翻譯提供者',
+  providersSection: '提供者與 API Key',
   model: '模型',
   apiKey: 'API Key',
   apiKeyPlaceholder: '輸入 API Key',
@@ -279,6 +292,7 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   shortcutToggleTranslation: '切換翻譯 (Ctrl+Shift+T)',
   shortcutToggleDisplayMode: '切換顯示模式 (Ctrl+Shift+M)',
   filterSection: '訊息過濾',
+  channelOverridesSection: '頻道專屬設定',
   skipEmotesOnly: '略過純表情符號',
   skipCheermotes: '略過 Cheermote',
   skipSlashMe: '略過 /me 訊息',
@@ -326,6 +340,7 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   quotaHealthRepair: '修復配額資料',
   quotaHealthRepairConfirm: '確認修復？',
   speechSection: '語音字幕',
+  speechCaptionsSection: '語音與字幕',
   speechEnabled: '啟用語音字幕',
   speechProvider: '語音提供者',
   speechModel: '語音模型',

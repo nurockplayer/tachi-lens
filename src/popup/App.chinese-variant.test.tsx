@@ -55,10 +55,17 @@ describe('Popup Chinese variant handling', () => {
     vi.unstubAllGlobals()
   })
 
+  // The Chinese variant control lives in the collapsed "訊息過濾" accordion
+  // (progressive disclosure, #173); expand it before role-based queries.
+  const openFiltersSection = async (): Promise<void> => {
+    fireEvent.click(await screen.findByRole('button', { name: '訊息過濾' }))
+  }
+
   it.each(ZH_LOCALES)('shows the Chinese variant control for the %s target', async (locale) => {
     stubChrome(locale)
     render(<App />)
 
+    await openFiltersSection()
     expect(await screen.findByText('中文訊息處理')).toBeTruthy()
     expect(screen.getByRole('radio', { name: SKIP_ALL_CHINESE_LABEL })).toBeTruthy()
     expect(screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL })).toBeTruthy()
@@ -78,6 +85,7 @@ describe('Popup Chinese variant handling', () => {
     stubChrome('zh-TW')
     render(<App />)
 
+    await openFiltersSection()
     const skipRadio = await screen.findByRole('radio', { name: SKIP_ALL_CHINESE_LABEL })
     expect((skipRadio as HTMLInputElement).checked).toBe(true)
     expect((screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }) as HTMLInputElement).checked).toBe(false)
@@ -88,6 +96,7 @@ describe('Popup Chinese variant handling', () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await openFiltersSection()
     await screen.findByText('中文訊息處理')
 
     await user.click(screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }))
@@ -118,6 +127,7 @@ describe('Popup Chinese variant handling', () => {
     const user = userEvent.setup()
     const firstRender = render(<App />)
 
+    await openFiltersSection()
     await firstRender.findByText('中文訊息處理')
     await user.click(firstRender.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }))
     await user.click(firstRender.getByRole('button', { name: '儲存設定' }))
@@ -131,6 +141,7 @@ describe('Popup Chinese variant handling', () => {
 
     cleanup()
     const reloaded = render(<App />)
+    await openFiltersSection()
     const reloadedRadio = await reloaded.findByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL })
     expect((reloadedRadio as HTMLInputElement).checked).toBe(true)
   })
@@ -140,6 +151,7 @@ describe('Popup Chinese variant handling', () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await openFiltersSection()
     await screen.findByText('中文訊息處理')
     await user.click(screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }))
 
@@ -163,6 +175,7 @@ describe('Popup Chinese variant handling', () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await openFiltersSection()
     await screen.findByText('中文訊息處理')
     await user.click(screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }))
 
@@ -181,6 +194,7 @@ describe('Popup Chinese variant handling', () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await openFiltersSection()
     await user.click(await screen.findByLabelText('使用此頻道的專用設定'))
     await user.click(screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }))
     await user.click(screen.getByRole('button', { name: '儲存設定' }))
@@ -199,6 +213,7 @@ describe('Popup Chinese variant handling', () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await openFiltersSection()
     await screen.findByText('中文訊息處理')
     fireEvent.click(screen.getByRole('radio', { name: TRANSLATE_OTHER_SCRIPT_LABEL }))
 

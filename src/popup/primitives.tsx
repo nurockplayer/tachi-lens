@@ -4,7 +4,8 @@
  * Small, stateless building blocks for the Popup visual system. They
  * exist so repeated UI patterns share one implementation and one style
  * source (popup.css) instead of divergent inline styling. All primitives
- * are pure: no state, no effects — safe to reuse anywhere in the Popup.
+ * are pure — no effects, no external state — except Accordion, which owns
+ * its own open/closed UI state.
  *
  * Deliberate contract notes:
  * - ToggleRow renders a NATIVE checkbox (role "checkbox") styled as a
@@ -16,7 +17,7 @@
  *   text node so text-based queries match the combined label + value.
  */
 
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
 
 export type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
@@ -340,6 +341,53 @@ export function EmptyState({ children, className }: {
   )
 }
 
+/* ---- Accordion (progressively disclosed section) ---------------------- */
+
+/**
+ * Collapsible section for progressive disclosure (#173). The header is a real
+ * button (keyboard operable) with aria-expanded/aria-controls; the content is
+ * a labelled region that uses the `hidden` attribute when collapsed, so
+ * collapsed content is removed from the accessibility tree and tab order.
+ * Owns only its open/closed UI state — never touches persistence.
+ */
+export function Accordion({ id, title, defaultOpen = false, children, className }: {
+  id: string
+  title: string
+  defaultOpen?: boolean
+  children: ReactNode
+  className?: string
+}): React.JSX.Element {
+  const [open, setOpen] = useState(defaultOpen)
+  const buttonId = `${id}-button`
+  const contentId = `${id}-content`
+  return (
+    <section className={['accordion', className].filter(Boolean).join(' ')}>
+      <h2 className="accordion__heading">
+        <button
+          type="button"
+          id={buttonId}
+          className="accordion__header"
+          aria-expanded={open}
+          aria-controls={contentId}
+          onClick={() => setOpen((prev) => !prev)}
+        >
+          <span className="accordion__title">{title}</span>
+          <ChevronIcon className={open ? 'accordion__chevron accordion__chevron--open' : 'accordion__chevron'} />
+        </button>
+      </h2>
+      <div
+        id={contentId}
+        role="region"
+        aria-labelledby={buttonId}
+        className="accordion__content"
+        hidden={!open}
+      >
+        {children}
+      </div>
+    </section>
+  )
+}
+
 /* ---- Icons (inline SVG, aria-hidden) --------------------------------- */
 
 const iconProps = {
@@ -402,6 +450,14 @@ export function InfoIcon(): React.JSX.Element {
     <svg {...iconProps}>
       <circle cx="12" cy="12" r="10" />
       <path d="M12 16v-4M12 8h.01" />
+    </svg>
+  )
+}
+
+export function ChevronIcon({ className }: { className?: string }): React.JSX.Element {
+  return (
+    <svg {...iconProps} className={className}>
+      <path d="M6 9l6 6 6-6" />
     </svg>
   )
 }
