@@ -30,6 +30,7 @@ import type {
 import type { SpeechPipelineState } from '@/shared/speech-state'
 import type { FilterConfig } from '@/content/message-filter'
 import {
+  Accordion,
   Button,
   Card,
   CloseIcon,
@@ -58,6 +59,20 @@ const SPEECH_LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'vi', label: 'Tiếng Việt' },
   { value: 'th', label: 'ภาษาไทย' },
 ]
+
+/** Chat target-language options shared by the quick-control select and the header status summary. */
+const TARGET_LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'zh-TW', label: '繁體中文' },
+  { value: 'zh-CN', label: '簡體中文' },
+  { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'th', label: 'ภาษาไทย' },
+]
+
+const getTargetLanguageLabel = (value: string): string =>
+  TARGET_LANGUAGE_OPTIONS.find((option) => option.value === value)?.label ?? value
 
 const FILTER_TOGGLES: { key: keyof FilterConfig; labelKey: Parameters<typeof t>[0] }[] = [
   { key: 'skipEmotesOnly', labelKey: 'skipEmotesOnly' },
@@ -672,222 +687,89 @@ export function App() {
 
   return (
     <div className="app">
-      <h1 className="app__title">tachi-lens</h1>
-      <p className="app__desc">
-        {t('appDescription')}
-      </p>
+      {/* Header: identity, active channel, concise live status (#173). */}
+      <header className="app__header">
+        <h1 className="app__title">tachi-lens</h1>
+        {channelName && (
+          <div className="app__channel">
+            <span className="card__channel-label">頻道：</span>
+            <span className="card__channel-value">{channelName}</span>
+          </div>
+        )}
+        <div className="app__status" role="status">
+          <StatusBadge tone={settings.translationEnabled ? 'success' : 'neutral'}>
+            {settings.translationEnabled ? t('statusEnabled') : t('statusDisabled')}
+          </StatusBadge>
+          <span className="app__status-summary">
+            {providers.find((p) => p.id === settings.selectedProvider)?.displayName ?? settings.selectedProvider}
+            {' → '}
+            {getTargetLanguageLabel(settings.targetLanguage)}
+          </span>
+        </div>
+      </header>
 
-      {/* Channel info */}
-      {channelName && (
-        <Card className="card--channel app__section">
-          <span className="card__channel-label">頻道：</span>
-          <span className="card__channel-value">{channelName}</span>
-        </Card>
-      )}
-
-      {/* Per-channel settings */}
-      {channelName && (
-        <ToggleRow
-          className="app__section"
-          label="使用此頻道的專用設定"
-          checked={useChannelSettings}
-          onChange={(checked) => setUseChannelSettings(checked)}
-        />
-      )}
-
-      {/* Translation enabled */}
-      <ToggleRow
-        className="app__section"
-        label={t('enableTranslation')}
-        checked={settings.translationEnabled}
-        onChange={(checked) => updateSetting('translationEnabled', checked)}
-      />
-
-      {/* Translation provider */}
-      <SelectField
-        id="provider-select"
-        className="app__section"
-        label={t('translationProvider')}
-        value={settings.selectedProvider}
-        onChange={handleProviderChange}
-      >
-        {providers.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.displayName}
-          </option>
-        ))}
-      </SelectField>
-
-      {/* Model */}
-      <SelectField
-        id="model-select"
-        className="app__section"
-        label={t('model')}
-        value={settings.selectedModel}
-        onChange={(value) => updateSetting('selectedModel', value)}
-      >
-        {currentModels.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.displayName}
-          </option>
-        ))}
-      </SelectField>
-
-      {/* Gemini quota (shown only for the Gemini provider) */}
-      {settings.selectedProvider === 'gemini' && (
-        <Card className="app__section">
-          <SectionHeader>{`${t('geminiQuotaSection')}: ${currentModel?.displayName ?? settings.selectedModel}`}</SectionHeader>
-          <p className="section-hint">{t('geminiQuotaHelp')}</p>
-          <div className="field-grid">
-            {GEMINI_QUOTA_FIELDS.map(({ key, labelKey, min, max }) => (
-              <NumberField
-                key={key}
-                id={`gemini-quota-${key}`}
-                label={t(labelKey)}
-                min={min}
-                max={max}
-                value={currentGeminiQuota[key]}
-                onChange={(value) => {
-                  const parsed = Math.floor(value)
-                  const bounded = Number.isFinite(parsed)
-                    ? Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, parsed))
-                    : min
-                  updateGeminiQuota(key, bounded)
-                }}
-              />
+      {/* Error notification area — anything needing attention is surfaced first. */}
+      {errorNotifications.length > 0 && (
+        <section className="app__section">
+          <SectionHeader level={2}>{t('errorNotificationTitle')}</SectionHeader>
+          <div className="error-list">
+            {errorNotifications.map((n) => (
+              <div key={n.id} className="error-item">
+                <span className="error-item__text">{n.message}</span>
+                <IconButton
+                  bare
+                  ariaLabel={t('dismiss')}
+                  title={t('dismiss')}
+                  onClick={() => dismissError(n.id)}
+                >
+                  <CloseIcon />
+                </IconButton>
+              </div>
             ))}
           </div>
-        </Card>
+        </section>
       )}
 
-      {/* API Key */}
-      <div className="app__section">
-        <SecretInput
-          id="api-key-input"
-          label={t('apiKey')}
-          value={apiKeyInputs[settings.selectedProvider] ?? ''}
-          onChange={(value) => handleApiKeyChange(settings.selectedProvider, value)}
-          placeholder={t('apiKeyPlaceholder')}
-          visible={Boolean(visibleKeys[settings.selectedProvider])}
-          onToggleVisible={() => toggleKeyVisibility(settings.selectedProvider)}
-          showLabel={t('show')}
-          hideLabel={t('hide')}
+      {/* Quick controls: the primary control-center surface (#173). */}
+      <div className="app__quick-controls">
+        <ToggleRow
+          label={t('enableTranslation')}
+          checked={settings.translationEnabled}
+          onChange={(checked) => updateSetting('translationEnabled', checked)}
         />
-        <div className="inline-actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => handleValidateKey(settings.selectedProvider)}
-            disabled={validationStatus[settings.selectedProvider] === 'checking'}
+
+        <div className="field-grid">
+          <SelectField
+            id="language-select"
+            label={t('targetLanguage')}
+            value={settings.targetLanguage}
+            onChange={(value) => updateSetting('targetLanguage', value)}
           >
-            {validationStatus[settings.selectedProvider] === 'checking' ? t('validating') : t('validate')}
-          </Button>
-          {validationStatus[settings.selectedProvider] === 'valid' && (
-            <StatusBadge tone="success" showDot={false}>{t('valid')}</StatusBadge>
-          )}
-          {validationStatus[settings.selectedProvider] === 'invalid' && (
-            <StatusBadge tone="danger" showDot={false}>{t('invalid')}</StatusBadge>
-          )}
+            {TARGET_LANGUAGE_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </SelectField>
+
+          <SelectField
+            id="display-mode-select"
+            label={t('displayMode')}
+            value={settings.displayMode}
+            onChange={(value) => updateSetting('displayMode', value as UserSettings['displayMode'])}
+          >
+            <option value='below'>{t('displayBelow')}</option>
+            <option value='hover'>{t('displayHover')}</option>
+            <option value='collapse'>{t('displayCollapse')}</option>
+          </SelectField>
         </div>
-      </div>
 
-      {/* Target language */}
-      <SelectField
-        id="language-select"
-        className="app__section"
-        label={t('targetLanguage')}
-        value={settings.targetLanguage}
-        onChange={(value) => updateSetting('targetLanguage', value)}
-      >
-        <option value='zh-TW'>繁體中文</option>
-        <option value='zh-CN'>簡體中文</option>
-        <option value='en'>English</option>
-        <option value='ja'>日本語</option>
-        <option value='ko'>한국어</option>
-        <option value='vi'>Tiếng Việt</option>
-        <option value='th'>ภาษาไทย</option>
-      </SelectField>
-
-      {/* Chinese message handling (segmented radio group) */}
-      {isChineseTarget(settings.targetLanguage) && (
-        <Card className="app__section">
-          <SectionHeader>{t('chineseVariantSection')}</SectionHeader>
-          <SegmentedControl
-            groupLabel={t('chineseVariantSection')}
-            name="chinese-variant-mode"
-            options={CHINESE_VARIANT_OPTIONS.map(({ value, labelKey }) => ({
-              value,
-              id: `chinese-variant-${value}`,
-              label: t(labelKey),
-            }))}
-            value={settings.chineseVariantMode}
-            onChange={(value) => updateSetting('chineseVariantMode', value as ChineseVariantMode)}
-          />
-        </Card>
-      )}
-
-      {/* Display modes */}
-      <SelectField
-        id="display-mode-select"
-        className="app__section"
-        label={t('displayMode')}
-        value={settings.displayMode}
-        onChange={(value) => updateSetting('displayMode', value as UserSettings['displayMode'])}
-      >
-        <option value='below'>{t('displayBelow')}</option>
-        <option value='hover'>{t('displayHover')}</option>
-        <option value='collapse'>{t('displayCollapse')}</option>
-      </SelectField>
-
-      {/* Minimum translation length */}
-      <NumberField
-        id="min-length-input"
-        className="app__section"
-        label={t('minTextLength')}
-        min={1}
-        max={100}
-        value={settings.minTextLength}
-        onChange={(value) => updateSetting('minTextLength', Math.max(1, Math.floor(value) || 1))}
-      />
-
-      {/* Message filtering */}
-      <div className="app__section">
-        <SectionHeader>{t('filterSection')}</SectionHeader>
-        {FILTER_TOGGLES.map(({ key, labelKey }) => (
-          <ToggleRow
-            key={key}
-            compact
-            label={t(labelKey)}
-            checked={settings[key] as boolean}
-            onChange={(checked) => updateSetting(key, checked)}
-          />
-        ))}
-      </div>
-
-      {/* Bot blacklist */}
-      <TextInput
-        id="blacklist-input"
-        className="app__section"
-        label={t('botBlacklist')}
-        value={blacklistInput}
-        onChange={setBlacklistInput}
-        placeholder={t('botBlacklistPlaceholder')}
-      />
-
-      {/* Speech subtitles (v0.3): capture/consent is owned by a later Issue. */}
-      <Card className="app__section">
-        <SectionHeader>{t('speechSection')}</SectionHeader>
-
+        {/* Speech quick controls (subtitles toggle + target language). */}
         <ToggleRow
           label={t('speechEnabled')}
           checked={speechConsentOpen || settings.speechConfig.speechEnabled}
           onChange={handleSpeechEnabledToggle}
         />
-
-        {/* Live speech_state readout (Spec §6/#162). Reflects the SW's
-            speech_state broadcast — capturing/paused/error/budget — via the
-            existing contract, never a new message. Error/paused states reuse
-            the fixed #160 i18n key when the payload carries one. */}
         {speechState && (
           <div className="speech-status">
             <span className="speech-status__label">{t('speechStatus')}：</span>
@@ -896,33 +778,6 @@ export function App() {
             </span>
           </div>
         )}
-
-        <SelectField
-          id="speech-provider-select"
-          label={t('speechProvider')}
-          value={settings.speechConfig.speechProvider}
-          onChange={(value) => updateSpeechConfig('speechProvider', value as SpeechProviderId)}
-        >
-          {SPEECH_PROVIDER_IDS.map((id) => (
-            <option key={id} value={id}>
-              {id === 'gemini' ? 'Gemini' : id}
-            </option>
-          ))}
-        </SelectField>
-
-        <SelectField
-          id="speech-model-select"
-          label={t('speechModel')}
-          value={settings.speechConfig.speechModel}
-          onChange={(value) => updateSpeechConfig('speechModel', value)}
-        >
-          {SPEECH_GEMINI_MODELS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.displayName}
-            </option>
-          ))}
-        </SelectField>
-
         <SelectField
           id="speech-language-select"
           label={t('speechTargetLanguage')}
@@ -935,41 +790,6 @@ export function App() {
             </option>
           ))}
         </SelectField>
-
-        <NumberField
-          id="speech-caption-lines-input"
-          label={t('speechCaptionMaxLines')}
-          min={1}
-          value={settings.speechConfig.captionMaxLines}
-          onChange={(value) =>
-            updateSpeechConfig('captionMaxLines', Math.max(1, Math.floor(value) || 1))
-          }
-        />
-
-        <NumberField
-          id="speech-caption-opacity-input"
-          label={t('speechCaptionOpacity')}
-          min={0}
-          max={100}
-          value={settings.speechConfig.captionOpacity}
-          onChange={(value) => {
-            const parsed = Math.floor(value)
-            const bounded = Number.isFinite(parsed)
-              ? Math.min(100, Math.max(0, parsed))
-              : 0
-            updateSpeechConfig('captionOpacity', bounded)
-          }}
-        />
-
-        <NumberField
-          id="speech-session-budget-input"
-          label={t('speechMaxSessionMinutes')}
-          min={1}
-          value={settings.speechConfig.maxSessionMinutes}
-          onChange={(value) =>
-            updateSpeechConfig('maxSessionMinutes', Math.max(1, Math.floor(value) || 1))
-          }
-        />
 
         {/* First-enable consent panel (Spec §8.2 / #162). Capture is NOT started
             until the "啟用並開始" confirm click. */}
@@ -1003,121 +823,315 @@ export function App() {
             </div>
           </div>
         )}
-      </Card>
-
-      {/* Save */}
-      <div className="app__section inline-actions">
-        <Button variant="primary" onClick={handleSave}>
-          {t('saveSettings')}
-        </Button>
-        {saveMessage && (
-          <InlineNotice tone="success">{t('settingsSaved')}</InlineNotice>
-        )}
       </div>
 
-      {/* Error notification area */}
-      {errorNotifications.length > 0 && (
-        <section className="app__section">
-          <SectionHeader level={3}>{t('errorNotificationTitle')}</SectionHeader>
-          <div className="error-list">
-            {errorNotifications.map((n) => (
-              <div key={n.id} className="error-item">
-                <span className="error-item__text">{n.message}</span>
-                <IconButton
-                  bare
-                  ariaLabel={t('dismiss')}
-                  title={t('dismiss')}
-                  onClick={() => dismissError(n.id)}
-                >
-                  <CloseIcon />
-                </IconButton>
-              </div>
+      {/* Advanced sections: progressively disclosed (#173). */}
+      <div className="app__advanced">
+        {/* Providers & API Keys */}
+        <Accordion id="providers" title={t('providersSection')}>
+          <SelectField
+            id="provider-select"
+            label={t('translationProvider')}
+            value={settings.selectedProvider}
+            onChange={handleProviderChange}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.displayName}
+              </option>
             ))}
-          </div>
-        </section>
-      )}
+          </SelectField>
 
-      {/* Gemini quota health */}
-      {quotaHealth.length > 0 && (
-        <section className="app__section">
-          <SectionHeader>{t('quotaHealthSection')}</SectionHeader>
-          <div className="quota-health-stack">
-            {quotaHealth.map((result) => {
-              const meta = QUOTA_HEALTH_STATUS_META[result.status]
-              const integrity = INTEGRITY_STATUSES.has(result.status)
-              return (
-                <Card key={result.quotaKey} className={`card--${meta.tone}`}>
-                  <StatusBadge tone={meta.tone} className="quota-card__title">
-                    {`${result.quotaKey}：${t(meta.labelKey)}`}
-                  </StatusBadge>
-                  <div className="quota-meta">
-                    {t(meta.descKey)}
-                  </div>
-                  {result.denialReason && (
-                    <div className="quota-meta">
-                      {t('quotaHealthDenialPrefix')}：{t(QUOTA_HEALTH_DENIAL_LABELS[result.denialReason])}
-                    </div>
-                  )}
-                  {result.providerDay && (
-                    <div className="quota-meta">
-                      {t('quotaHealthProviderDay')}：{result.providerDay}
-                    </div>
-                  )}
-                  {result.cooldownUntil !== undefined && (
-                    <div className="quota-meta">
-                      {t('quotaHealthCooldownUntil')}：{formatInstant(result.cooldownUntil)}
-                    </div>
-                  )}
-                  {result.recoveryAt !== undefined && (
-                    <div className="quota-meta">
-                      {t('quotaHealthRecoveryAt')}：{formatInstant(result.recoveryAt)}
-                    </div>
-                  )}
-                  {integrity && (
-                    <InlineNotice tone="info" className="quota-overflow-note">
-                      {t('quotaHealthDeepSeekOverflow')}
-                    </InlineNotice>
-                  )}
-                  {REPAIRABLE_STATUSES.has(result.status) && (
-                    <Button
-                      variant={confirmingReset[result.quotaKey] ? 'danger' : 'danger-outline'}
-                      size="sm"
-                      className="quota-repair-btn"
-                      onClick={() => void handleResetQuota(result.quotaKey)}
-                    >
-                      {confirmingReset[result.quotaKey]
-                        ? t('quotaHealthRepairConfirm')
-                        : t('quotaHealthRepair')}
-                    </Button>
-                  )}
-                </Card>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Diagnostics */}
-      <section className="app__section">
-        <SectionHeader>診斷</SectionHeader>
-        {diagnostics.length === 0 ? (
-          <EmptyState>尚未收到診斷事件。請在 Twitch 聊天室等待一則新訊息。</EmptyState>
-        ) : (
-          <div className="diag-list">
-            {diagnostics.slice(0, 5).map((event) => (
-              <div key={event.id} className="diag-item">
-                <strong>{DIAGNOSTIC_LABELS[event.stage]}</strong>
-                {isCountStage(event.stage) && typeof event.count === 'number'
-                  ? <span className="diag-detail">：{event.count}</span>
-                  : event.detail && <span className="diag-detail">：{event.detail}</span>}
-              </div>
+          <SelectField
+            id="model-select"
+            label={t('model')}
+            value={settings.selectedModel}
+            onChange={(value) => updateSetting('selectedModel', value)}
+          >
+            {currentModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName}
+              </option>
             ))}
-          </div>
-        )}
-      </section>
+          </SelectField>
 
-      {/* Shortcut info */}
+          {settings.selectedProvider === 'gemini' && (
+            <Card>
+              <SectionHeader>{`${t('geminiQuotaSection')}: ${currentModel?.displayName ?? settings.selectedModel}`}</SectionHeader>
+              <p className="section-hint">{t('geminiQuotaHelp')}</p>
+              <div className="field-grid">
+                {GEMINI_QUOTA_FIELDS.map(({ key, labelKey, min, max }) => (
+                  <NumberField
+                    key={key}
+                    id={`gemini-quota-${key}`}
+                    label={t(labelKey)}
+                    min={min}
+                    max={max}
+                    value={currentGeminiQuota[key]}
+                    onChange={(value) => {
+                      const parsed = Math.floor(value)
+                      const bounded = Number.isFinite(parsed)
+                        ? Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, parsed))
+                        : min
+                      updateGeminiQuota(key, bounded)
+                    }}
+                  />
+                ))}
+              </div>
+            </Card>
+          )}
+
+          <div className="field">
+            <SecretInput
+              id="api-key-input"
+              label={t('apiKey')}
+              value={apiKeyInputs[settings.selectedProvider] ?? ''}
+              onChange={(value) => handleApiKeyChange(settings.selectedProvider, value)}
+              placeholder={t('apiKeyPlaceholder')}
+              visible={Boolean(visibleKeys[settings.selectedProvider])}
+              onToggleVisible={() => toggleKeyVisibility(settings.selectedProvider)}
+              showLabel={t('show')}
+              hideLabel={t('hide')}
+            />
+            <div className="inline-actions">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleValidateKey(settings.selectedProvider)}
+                disabled={validationStatus[settings.selectedProvider] === 'checking'}
+              >
+                {validationStatus[settings.selectedProvider] === 'checking' ? t('validating') : t('validate')}
+              </Button>
+              {validationStatus[settings.selectedProvider] === 'valid' && (
+                <StatusBadge tone="success" showDot={false}>{t('valid')}</StatusBadge>
+              )}
+              {validationStatus[settings.selectedProvider] === 'invalid' && (
+                <StatusBadge tone="danger" showDot={false}>{t('invalid')}</StatusBadge>
+              )}
+            </div>
+          </div>
+        </Accordion>
+
+        {/* Chat Filters */}
+        <Accordion id="filters" title={t('filterSection')}>
+          <NumberField
+            id="min-length-input"
+            label={t('minTextLength')}
+            min={1}
+            max={100}
+            value={settings.minTextLength}
+            onChange={(value) => updateSetting('minTextLength', Math.max(1, Math.floor(value) || 1))}
+          />
+
+          {isChineseTarget(settings.targetLanguage) && (
+            <Card>
+              <SectionHeader>{t('chineseVariantSection')}</SectionHeader>
+              <SegmentedControl
+                groupLabel={t('chineseVariantSection')}
+                name="chinese-variant-mode"
+                options={CHINESE_VARIANT_OPTIONS.map(({ value, labelKey }) => ({
+                  value,
+                  id: `chinese-variant-${value}`,
+                  label: t(labelKey),
+                }))}
+                value={settings.chineseVariantMode}
+                onChange={(value) => updateSetting('chineseVariantMode', value as ChineseVariantMode)}
+              />
+            </Card>
+          )}
+
+          {FILTER_TOGGLES.map(({ key, labelKey }) => (
+            <ToggleRow
+              key={key}
+              compact
+              label={t(labelKey)}
+              checked={settings[key] as boolean}
+              onChange={(checked) => updateSetting(key, checked)}
+            />
+          ))}
+
+          <TextInput
+            id="blacklist-input"
+            label={t('botBlacklist')}
+            value={blacklistInput}
+            onChange={setBlacklistInput}
+            placeholder={t('botBlacklistPlaceholder')}
+          />
+        </Accordion>
+
+        {/* Quota & Health */}
+        <Accordion id="quota-health" title={t('quotaHealthSection')}>
+          {quotaHealth.length === 0 ? (
+            <EmptyState>尚未取得配額健康狀態。</EmptyState>
+          ) : (
+            <div className="quota-health-stack">
+              {quotaHealth.map((result) => {
+                const meta = QUOTA_HEALTH_STATUS_META[result.status]
+                const integrity = INTEGRITY_STATUSES.has(result.status)
+                return (
+                  <Card key={result.quotaKey} className={`card--${meta.tone}`}>
+                    <StatusBadge tone={meta.tone} className="quota-card__title">
+                      {`${result.quotaKey}：${t(meta.labelKey)}`}
+                    </StatusBadge>
+                    <div className="quota-meta">
+                      {t(meta.descKey)}
+                    </div>
+                    {result.denialReason && (
+                      <div className="quota-meta">
+                        {t('quotaHealthDenialPrefix')}：{t(QUOTA_HEALTH_DENIAL_LABELS[result.denialReason])}
+                      </div>
+                    )}
+                    {result.providerDay && (
+                      <div className="quota-meta">
+                        {t('quotaHealthProviderDay')}：{result.providerDay}
+                      </div>
+                    )}
+                    {result.cooldownUntil !== undefined && (
+                      <div className="quota-meta">
+                        {t('quotaHealthCooldownUntil')}：{formatInstant(result.cooldownUntil)}
+                      </div>
+                    )}
+                    {result.recoveryAt !== undefined && (
+                      <div className="quota-meta">
+                        {t('quotaHealthRecoveryAt')}：{formatInstant(result.recoveryAt)}
+                      </div>
+                    )}
+                    {integrity && (
+                      <InlineNotice tone="info" className="quota-overflow-note">
+                        {t('quotaHealthDeepSeekOverflow')}
+                      </InlineNotice>
+                    )}
+                    {REPAIRABLE_STATUSES.has(result.status) && (
+                      <Button
+                        variant={confirmingReset[result.quotaKey] ? 'danger' : 'danger-outline'}
+                        size="sm"
+                        className="quota-repair-btn"
+                        onClick={() => void handleResetQuota(result.quotaKey)}
+                      >
+                        {confirmingReset[result.quotaKey]
+                          ? t('quotaHealthRepairConfirm')
+                          : t('quotaHealthRepair')}
+                      </Button>
+                    )}
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </Accordion>
+
+        {/* Diagnostics */}
+        <Accordion id="diagnostics" title="診斷">
+          {diagnostics.length === 0 ? (
+            <EmptyState>尚未收到診斷事件。請在 Twitch 聊天室等待一則新訊息。</EmptyState>
+          ) : (
+            <div className="diag-list">
+              {diagnostics.slice(0, 5).map((event) => (
+                <div key={event.id} className="diag-item">
+                  <strong>{DIAGNOSTIC_LABELS[event.stage]}</strong>
+                  {isCountStage(event.stage) && typeof event.count === 'number'
+                    ? <span className="diag-detail">：{event.count}</span>
+                    : event.detail && <span className="diag-detail">：{event.detail}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </Accordion>
+
+        {/* Per-channel Overrides */}
+        <Accordion id="channel-overrides" title={t('channelOverridesSection')}>
+          {channelName ? (
+            <>
+              <div className="app__channel">
+                <span className="card__channel-label">頻道：</span>
+                <span className="card__channel-value">{channelName}</span>
+              </div>
+              <ToggleRow
+                label="使用此頻道的專用設定"
+                checked={useChannelSettings}
+                onChange={(checked) => setUseChannelSettings(checked)}
+              />
+            </>
+          ) : (
+            <p className="section-hint">尚未偵測到 Twitch 頻道。</p>
+          )}
+        </Accordion>
+
+        {/* Speech & Captions (deep config; quick controls stay on the dashboard) */}
+        <Accordion id="speech-captions" title={t('speechCaptionsSection')}>
+          <SelectField
+            id="speech-provider-select"
+            label={t('speechProvider')}
+            value={settings.speechConfig.speechProvider}
+            onChange={(value) => updateSpeechConfig('speechProvider', value as SpeechProviderId)}
+          >
+            {SPEECH_PROVIDER_IDS.map((id) => (
+              <option key={id} value={id}>
+                {id === 'gemini' ? 'Gemini' : id}
+              </option>
+            ))}
+          </SelectField>
+
+          <SelectField
+            id="speech-model-select"
+            label={t('speechModel')}
+            value={settings.speechConfig.speechModel}
+            onChange={(value) => updateSpeechConfig('speechModel', value)}
+          >
+            {SPEECH_GEMINI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName}
+              </option>
+            ))}
+          </SelectField>
+
+          <NumberField
+            id="speech-caption-lines-input"
+            label={t('speechCaptionMaxLines')}
+            min={1}
+            value={settings.speechConfig.captionMaxLines}
+            onChange={(value) =>
+              updateSpeechConfig('captionMaxLines', Math.max(1, Math.floor(value) || 1))
+            }
+          />
+
+          <NumberField
+            id="speech-caption-opacity-input"
+            label={t('speechCaptionOpacity')}
+            min={0}
+            max={100}
+            value={settings.speechConfig.captionOpacity}
+            onChange={(value) => {
+              const parsed = Math.floor(value)
+              const bounded = Number.isFinite(parsed)
+                ? Math.min(100, Math.max(0, parsed))
+                : 0
+              updateSpeechConfig('captionOpacity', bounded)
+            }}
+          />
+
+          <NumberField
+            id="speech-session-budget-input"
+            label={t('speechMaxSessionMinutes')}
+            min={1}
+            value={settings.speechConfig.maxSessionMinutes}
+            onChange={(value) =>
+              updateSpeechConfig('maxSessionMinutes', Math.max(1, Math.floor(value) || 1))
+            }
+          />
+        </Accordion>
+      </div>
+
+      {/* Footer: save + shortcut info */}
       <footer className="app__footer">
+        <div className="inline-actions">
+          <Button variant="primary" onClick={handleSave}>
+            {t('saveSettings')}
+          </Button>
+          {saveMessage && (
+            <InlineNotice tone="success">{t('settingsSaved')}</InlineNotice>
+          )}
+        </div>
         <div>{t('shortcutToggleTranslation')}</div>
         <div>{t('shortcutToggleDisplayMode')}</div>
       </footer>

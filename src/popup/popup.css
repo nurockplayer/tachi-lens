@@ -47,6 +47,56 @@
   font-size: var(--text-sm);
 }
 
+/* ---- Dashboard header (identity + channel + live status, #173) --- */
+.app__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.app__channel {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.app__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.app__status-summary {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- Quick controls (primary dashboard surface, #173) ------------- */
+.app__quick-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ---- Advanced sections (progressively disclosed, #173) ------------ */
+.app__advanced {
+  display: flex;
+  flex-direction: column;
+}
+
+.app__advanced .accordion:last-child {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
 /* ---- Card ------------------------------------------------------ */
 .card {
   padding: var(--space-3);
@@ -551,6 +601,58 @@ select.control {
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
   color: var(--color-text-tertiary);
+}
+
+/* ---- Accordion (progressively disclosed sections, #173) ----------- */
+.accordion {
+  border-top: 1px solid var(--color-border-subtle);
+  padding: var(--space-1) 0;
+}
+
+.accordion__heading {
+  margin: 0;
+}
+
+.accordion__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.accordion__header:hover {
+  color: var(--color-text-primary);
+}
+
+.accordion__header:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
+.accordion__chevron {
+  flex: none;
+  color: var(--color-text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.accordion__chevron--open {
+  transform: rotate(180deg);
+}
+
+.accordion__content {
+  padding: var(--space-2) 0 var(--space-3);
 }
 
 /* ---- Inline actions row (label + button / status) --------------- */

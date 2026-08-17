@@ -47,10 +47,18 @@ describe('Popup speech settings', () => {
   const getMessageTypes = (): string[] =>
     sendMessage.mock.calls.map(([message]) => (message as { type?: string }).type ?? '')
 
+  // Speech quick controls (toggle + target language) live on the dashboard;
+  // the deep speech config lives in the collapsed "語音與字幕" accordion
+  // (progressive disclosure, #173). Expand it before role-based queries.
+  const waitForSpeechControls = async (): Promise<void> => {
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
+    fireEvent.click(screen.getByRole('button', { name: '語音與字幕' }))
+  }
+
   it('renders the speech subtitles section with all controls', async () => {
     render(<App />)
 
-    expect(await screen.findByText('語音字幕')).toBeTruthy()
+    await waitForSpeechControls()
     expect(screen.getByRole('checkbox', { name: '啟用語音字幕' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: '語音提供者' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: '語音模型' })).toBeTruthy()
@@ -63,7 +71,8 @@ describe('Popup speech settings', () => {
   it('defaults the speech provider select to Gemini only', async () => {
     render(<App />)
 
-    const providerSelect = await screen.findByRole('combobox', { name: '語音提供者' })
+    await waitForSpeechControls()
+    const providerSelect = screen.getByRole('combobox', { name: '語音提供者' })
     const options = Array.from(providerSelect.querySelectorAll('option')).map((o) => o.value)
     expect(options).toEqual(['gemini'])
     expect((providerSelect as HTMLSelectElement).value).toBe('gemini')
@@ -73,7 +82,7 @@ describe('Popup speech settings', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await waitForSpeechControls()
     // First enable shows the consent panel; the confirm click grants consent
     // and persists speechEnabled (the checkbox alone never enables capture).
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
@@ -117,7 +126,7 @@ describe('Popup speech settings', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await waitForSpeechControls()
     await user.selectOptions(screen.getByRole('combobox', { name: '語音模型' }), 'gemini-2.5-pro')
     await user.selectOptions(screen.getByRole('combobox', { name: '語音目標語言' }), 'ja')
     await user.click(screen.getByRole('button', { name: '儲存設定' }))

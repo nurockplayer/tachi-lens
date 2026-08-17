@@ -91,6 +91,12 @@ const getSendMessageTypes = (): string[] => {
   return sendMessageMock.mock.calls.map(([message]) => (message as { type: string }).type)
 }
 
+// The quota-health panel lives in a collapsed accordion (progressive
+// disclosure, #173); expand it before role-based queries.
+const openQuotaHealthSection = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole('button', { name: 'Gemini 配額健康狀態' }))
+}
+
 describe('Popup Gemini quota health', () => {
   afterEach(() => {
     sendMessageMock.mockClear()
@@ -189,10 +195,12 @@ describe('Popup Gemini quota health', () => {
     expect(screen.queryByText(overflowNote)).toBeNull()
   })
 
-  it('renders nothing for quota health when the SW returns no results', async () => {
+  it('shows an empty state for quota health when the SW returns no results', async () => {
     renderWithQuotaHealth([])
 
-    expect(screen.queryByText('Gemini 配額健康狀態')).toBeNull()
+    // The Quota & Health accordion is always listed (progressive disclosure);
+    // with no data it shows an empty state instead of disappearing.
+    expect(await screen.findByText('尚未取得配額健康狀態。')).toBeTruthy()
   })
 
   it('only issues read-only messages and never mutates quota state', async () => {
@@ -218,6 +226,7 @@ describe('Popup Gemini quota health', () => {
     ])
 
     await screen.findByText(/gemini-2\.5-flash：時鐘回撥/)
+    await openQuotaHealthSection()
     const repairButtons = screen.getAllByRole('button', { name: /修復|重設|repair|reset/i })
     // clock_rollback, untrusted_migration, malformed_snapshot, unsupported_version.
     expect(repairButtons).toHaveLength(4)
@@ -226,6 +235,7 @@ describe('Popup Gemini quota health', () => {
   it('requires a second confirmation click before sending the reset mutation', async () => {
     renderWithQuotaHealth([clockRollbackResult])
 
+    await openQuotaHealthSection()
     const button = await screen.findByRole('button', { name: '修復配額資料' })
 
     // First click arms the confirmation and sends nothing.
@@ -241,6 +251,7 @@ describe('Popup Gemini quota health', () => {
   it('keeps the quota state unchanged when the confirmation is not completed', async () => {
     renderWithQuotaHealth([clockRollbackResult])
 
+    await openQuotaHealthSection()
     await screen.findByRole('button', { name: '修復配額資料' })
     // No click at all: only read-only messages are issued.
     expect(getSendMessageTypes()).not.toContain('reset_quota_health')

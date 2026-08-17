@@ -7,7 +7,7 @@
  *
  * This test does not navigate to Twitch or perform a translation.
  */
-import { expect } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 import { test } from './fixtures/extension'
 import fs from 'fs'
 import path from 'path'
@@ -20,6 +20,19 @@ const DIST_DIR = path.join(PROJECT_ROOT, 'dist')
 
 const POPUP_SECRET_KEY = 'e2e-popup-secret-key'
 const EXPECTED_PREVIEW = 'e2e*************-key'
+
+/**
+ * Open an advanced accordion section by its primitive id (#173). The header
+ * button is a real <button> with aria-expanded; id-based selectors keep the
+ * test locale-independent.
+ */
+const openAccordion = async (page: Page, id: string): Promise<void> => {
+  const button = page.locator(`#${id}-button`)
+  await expect(button).toBeVisible()
+  if ((await button.getAttribute('aria-expanded')) !== 'true') {
+    await button.click()
+  }
+}
 
 /** Provider API origins to block for network isolation. */
 const PROVIDER_ORIGINS = [
@@ -72,12 +85,16 @@ test.describe('Packaged Popup render and settings persistence', () => {
     const heading = page.getByRole('heading', { level: 1, name: 'tachi-lens' })
     await expect(heading).toBeVisible()
 
-    // Assert all primary controls are rendered (not hidden)
+    // Quick controls are visible on the primary dashboard surface.
+    await expect(page.locator('#language-select')).toBeVisible()
+    await expect(page.locator('#display-mode-select')).toBeVisible()
+
+    // Advanced controls live in collapsed accordions (#173); expand them.
+    await openAccordion(page, 'providers')
+    await openAccordion(page, 'filters')
     await expect(page.locator('#provider-select')).toBeVisible()
     await expect(page.locator('#model-select')).toBeVisible()
     await expect(page.locator('#api-key-input')).toBeVisible()
-    await expect(page.locator('#language-select')).toBeVisible()
-    await expect(page.locator('#display-mode-select')).toBeVisible()
     await expect(page.locator('#min-length-input')).toBeVisible()
 
     // Save button — locale-independent: chrome.i18n picks browser locale
@@ -146,19 +163,21 @@ test.describe('Packaged Popup render and settings persistence', () => {
     const reloadedCheckbox = page.getByRole('checkbox', { name: /Enable Translation|啟用翻譯/ })
     await expect(reloadedCheckbox).not.toBeChecked()
 
-    // Provider persisted
+    // Provider persisted (expand the Providers accordion first)
+    await openAccordion(page, 'providers')
     await expect(page.locator('#provider-select')).toHaveValue('deepseek')
 
     // Model persisted
     await expect(page.locator('#model-select')).toHaveValue('deepseek-v4-flash')
 
-    // Target language persisted
+    // Target language persisted (quick control)
     await expect(page.locator('#language-select')).toHaveValue('ja')
 
-    // Display mode persisted
+    // Display mode persisted (quick control)
     await expect(page.locator('#display-mode-select')).toHaveValue('hover')
 
-    // Minimum length persisted
+    // Minimum length persisted (expand the Filters accordion first)
+    await openAccordion(page, 'filters')
     await expect(page.locator('#min-length-input')).toHaveValue('3')
 
     // ===================================================================

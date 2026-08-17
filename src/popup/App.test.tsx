@@ -212,7 +212,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     const checkbox = screen.getByRole('checkbox', { name: '啟用語音字幕' })
 
     await user.click(checkbox)
@@ -234,7 +234,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
     await user.click(screen.getByRole('button', { name: '啟用並開始' }))
 
@@ -262,7 +262,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
     expect(screen.getByRole('dialog')).toBeTruthy()
 
@@ -277,7 +277,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
     // Toggle back off while the panel is open.
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
@@ -291,7 +291,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
     await user.click(screen.getByRole('button', { name: '啟用並開始' }))
 
@@ -313,7 +313,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
     await user.click(screen.getByRole('button', { name: '啟用並開始' }))
 
@@ -326,7 +326,7 @@ describe('Popup speech consent flow (#162)', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText('語音字幕')
+    await screen.findByRole('checkbox', { name: '啟用語音字幕' })
     await user.click(screen.getByRole('checkbox', { name: '啟用語音字幕' }))
     await user.click(screen.getByRole('button', { name: '啟用並開始' }))
 
