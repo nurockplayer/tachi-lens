@@ -1069,3 +1069,154 @@ describe('shouldSkipMessage — translate_other_script mode', () => {
     expect(shouldSkipMessage('网络', 'zh-TW', 'translate_other_script')).toBe(false)
   })
 })
+
+describe('shouldSkipMessage — non-Chinese same-target skip (#183)', () => {
+  describe('Japanese target (ja)', () => {
+    it('skips Kana-only Japanese for a ja target', () => {
+      expect(shouldSkipMessage('こんばんは', 'ja', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('skips Han+Kana Japanese for a ja target', () => {
+      expect(shouldSkipMessage('今日は暑い', 'ja', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('skips Katakana Japanese for a ja target', () => {
+      expect(shouldSkipMessage('ありがとうございます', 'ja', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('compares locale families (ja-JP → ja)', () => {
+      expect(shouldSkipMessage('こんばんは', 'ja-JP', 'skip_all_chinese')).toBe(true)
+      expect(shouldSkipMessage('こんばんは', 'ja_JP', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('does not skip mixed Japanese+Latin text', () => {
+      expect(shouldSkipMessage('hello こんにちは', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip mixed Japanese+Hangul text', () => {
+      expect(shouldSkipMessage('안녕 こんにちは', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Korean text for a ja target', () => {
+      expect(shouldSkipMessage('안녕하세요', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Chinese text for a ja target', () => {
+      expect(shouldSkipMessage('这个很热', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip kana-less Japanese for a ja target (uncertain)', () => {
+      expect(shouldSkipMessage('手紙', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Latin-only text for a ja target', () => {
+      expect(shouldSkipMessage('hello world', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('is independent of Chinese variant mode', () => {
+      expect(shouldSkipMessage('こんばんは', 'ja', 'translate_other_script')).toBe(true)
+    })
+  })
+
+  describe('Korean target (ko)', () => {
+    it('skips Hangul-only Korean for a ko target', () => {
+      expect(shouldSkipMessage('안녕하세요', 'ko', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('skips Hangul+Han Korean for a ko target', () => {
+      expect(shouldSkipMessage('한국어測試', 'ko', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('skips Compatibility Jamo for a ko target', () => {
+      expect(shouldSkipMessage('ㅋㅋ', 'ko', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('compares locale families (ko-KR → ko)', () => {
+      expect(shouldSkipMessage('안녕하세요', 'ko-KR', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('does not skip Japanese text for a ko target', () => {
+      expect(shouldSkipMessage('こんばんは', 'ko', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip mixed Korean+Latin text', () => {
+      expect(shouldSkipMessage('hello 안녕', 'ko', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Chinese text for a ko target', () => {
+      expect(shouldSkipMessage('这个很热', 'ko', 'skip_all_chinese')).toBe(false)
+    })
+  })
+
+  describe('English target (en)', () => {
+    it('skips clearly English text with sufficient function-word confidence', () => {
+      expect(shouldSkipMessage('the cat is on the mat', 'en', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('skips clearly English text for an en-US target', () => {
+      expect(shouldSkipMessage('I think this is great', 'en-US', 'skip_all_chinese')).toBe(true)
+    })
+
+    it('does not skip a single-word English message (insufficient confidence)', () => {
+      expect(shouldSkipMessage('hello', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip French text for an en target', () => {
+      expect(shouldSkipMessage('Bonjour, comment allez-vous', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip German text for an en target', () => {
+      expect(shouldSkipMessage('Was ist das denn', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Spanish text for an en target', () => {
+      expect(shouldSkipMessage('Hola, como estas hoy', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Chinese text for an en target', () => {
+      expect(shouldSkipMessage('这个很热', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Japanese text for an en target', () => {
+      expect(shouldSkipMessage('こんばんは', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Korean text for an en target', () => {
+      expect(shouldSkipMessage('안녕하세요', 'en', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip numbers-only text for an en target', () => {
+      expect(shouldSkipMessage('12345', 'en', 'skip_all_chinese')).toBe(false)
+    })
+  })
+
+  describe('unsupported target families', () => {
+    it('never skips for a language family without a local detector', () => {
+      expect(shouldSkipMessage('Hola amigo', 'es', 'skip_all_chinese')).toBe(false)
+      expect(shouldSkipMessage('こんばんは', 'fr', 'skip_all_chinese')).toBe(false)
+      expect(shouldSkipMessage('안녕하세요', 'vi', 'skip_all_chinese')).toBe(false)
+    })
+  })
+
+  describe('Chinese/Japanese/Korean mutual exclusion (#183)', () => {
+    it('does not skip Japanese for a zh target (existing #182 behavior)', () => {
+      expect(shouldSkipMessage('今天は暑い', 'zh-TW', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Chinese for a ja target', () => {
+      expect(shouldSkipMessage('这个很热', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Japanese for a ko target', () => {
+      expect(shouldSkipMessage('こんばんは', 'ko', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Korean for a ja target', () => {
+      expect(shouldSkipMessage('안녕하세요', 'ja', 'skip_all_chinese')).toBe(false)
+    })
+
+    it('does not skip Chinese for an en target (CJK text is never Latin English)', () => {
+      expect(shouldSkipMessage('体国长东马', 'en', 'skip_all_chinese')).toBe(false)
+    })
+  })
+})

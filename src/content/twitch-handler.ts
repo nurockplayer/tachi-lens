@@ -166,11 +166,13 @@ export class TwitchMessageHandler {
       debugLog('shouldTranslate: too short', { text, len: text.length, min: settings.minTextLength })
       return false
     }
-    // High-confidence target-language skip (#55). When the target language is
-    // Chinese and the message is confidently already in the target language,
-    // skip it before any translate_request reaches the Service Worker. The
-    // shared detector only skips on high confidence; mixed-language,
-    // uncertain, or non-target messages fall through to the normal flow.
+    // High-confidence target-language skip (#55, #183). When the target
+    // language is Chinese and the message is confidently already in the target
+    // language, or the target family is ja/ko/en and the message is confidently
+    // already in that language, skip it before any translate_request reaches
+    // the Service Worker. The shared detector only skips on high confidence;
+    // mixed-language, uncertain, or non-target messages fall through to the
+    // normal flow.
     if (settings.targetLanguage && shouldSkipMessage(text, settings.targetLanguage, settings.chineseVariantMode)) {
       debugLog('shouldTranslate: target-language skip', { text, target: settings.targetLanguage, mode: settings.chineseVariantMode })
       return false

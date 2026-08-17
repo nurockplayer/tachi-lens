@@ -349,6 +349,49 @@ const CHINESE_PHRASES = new Set([
   '沒問題',
 ])
 
+// ─── Non-Chinese same-target skip (#183) ─────────────────────────────────────
+
+/**
+ * Common English function words used by the conservative English same-target
+ * skip (#183).
+ *
+ * Only high-precision English tokens are included: words that appear
+ * constantly in ordinary English chat but are NOT ordinary tokens in the other
+ * major Latin-script languages (French, German, Spanish, Italian, Portuguese,
+ * …). Ambiguous homographs that also occur in those languages — German
+ * "was"/"im"/"will"/"in", French "on"/"a"/"like", Spanish "no"/"a", and
+ * single-letter prepositions such as a/an/of/to/at/by — are deliberately
+ * excluded, so a non-English Latin message almost never accumulates enough
+ * matches to skip. The 2-distinct-word gate (MIN_ENGLISH_FUNCTION_WORDS) is
+ * the primary precision guard.
+ */
+const ENGLISH_FUNCTION_WORDS = new Set([
+  // Determiners and pronouns.
+  'the', 'this', 'that', 'these', 'those',
+  'you', 'your', 'my', 'our', 'their', 'we', 'it', 'its', 'i',
+  // Copulas, auxiliaries, and high-frequency chat verbs.
+  'is', 'are', 'were', 'have', 'has', 'had', 'does', 'did',
+  'can', 'could', 'would', 'should',
+  'going', 'wanna', 'want', 'know', 'think', 'need', 'love', 'get', 'got',
+  // Conjunctions and prepositions with English-specific spellings.
+  'and', 'with', 'because',
+  // Particles and adverbs.
+  'not', 'yeah', 'really', 'just', 'here', 'there',
+  // Courtesy and greeting words.
+  'please', 'thanks', 'thank', 'welcome', 'hello', 'hey',
+])
+
+/**
+ * Minimum number of distinct English function words before Latin-only text is
+ * considered confidently English and may be skipped for an `en` target (#183).
+ *
+ * Requiring two distinct tokens keeps precision high: a German sentence with
+ * one English-looking homograph or a French sentence with a single borrowed
+ * English word stays translatable, while ordinary English sentences (the cat
+ * is on the mat, I think this is great) clear the gate.
+ */
+const MIN_ENGLISH_FUNCTION_WORDS = 2
+
 // ─── Unicode ranges (BMP only) ───────────────────────────────────────────────
 
 const isCJK = (code: number): boolean => code >= 0x4E00 && code <= 0x9FFF
@@ -630,9 +673,89 @@ export function analyzeMessageScript(text: string): ScriptEvidence {
   }
 }
 
+// ─── Non-Chinese same-target skip helpers (#183) ─────────────────────────────
+
+/**
+ * Whether the script evidence is confidently Japanese.
+ *
+ * Kana (Hiragana/Katakana) is the only script unique to Japanese. A message
+ * containing Kana and no Hangul and no non-CJK letters is unambiguously
+ * Japanese. Foreign letters (Latin/Cyrillic/…) mark the message as
+ * mixed-language and keep it translatable (conservative direction).
+ */
+function isConfidentlyJapanese(evidence: ScriptEvidence): boolean {
+  return evidence.hasJapaneseKana && !evidence.hasHangul && !evidence.hasForeignLetter
+}
+
+/**
+ * Whether the script evidence is confidently Korean.
+ *
+ * Hangul is the only script unique to Korean. A message containing Hangul and
+ * no Kana and no non-CJK letters is unambiguously Korean (Han/Hanja alongside
+ * Hangul is ordinary Korean). Foreign letters keep it translatable.
+ */
+function isConfidentlyKorean(evidence: ScriptEvidence): boolean {
+  return evidence.hasHangul && !evidence.hasJapaneseKana && !evidence.hasForeignLetter
+}
+
+/**
+ * Whether a Latin-only message is confidently English.
+ *
+ * Latin script is shared by English, French, German, Spanish, etc., so script
+ * evidence alone is never sufficient. Confidence comes from a concentration of
+ * high-precision English function words: the message must be free of CJK
+ * scripts and contain at least MIN_ENGLISH_FUNCTION_WORDS distinct English
+ * function words (see ENGLISH_FUNCTION_WORDS). Tokens are lowercased and
+ * apostrophes are stripped (don't → dont, you're → youre) so contractions are
+ * matched without introducing word-boundary rules.
+ */
+function isConfidentlyEnglish(text: string, evidence: ScriptEvidence): boolean {
+  if (evidence.hasHan || evidence.hasJapaneseKana || evidence.hasHangul) return false
+  const words = text.toLowerCase().match(/[\p{L}']+/gu) ?? []
+  const seen = new Set<string>()
+  for (const raw of words) {
+    const word = raw.replace(/'/g, '')
+    if (word.length === 0) continue
+    if (ENGLISH_FUNCTION_WORDS.has(word)) {
+      seen.add(word)
+      if (seen.size >= MIN_ENGLISH_FUNCTION_WORDS) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Decide whether a non-Chinese message should be skipped because a confidently
+ * detected source language family already matches the target language family.
+ *
+ * Conservative extension of the Chinese same-target skip (#183). Only language
+ * families that can be detected deterministically from script/content evidence
+ * are handled:
+ * - `ja`: confident Japanese requires Kana (see isConfidentlyJapanese).
+ * - `ko`: confident Korean requires Hangul (see isConfidentlyKorean).
+ * - `en`: confident English requires a sufficient concentration of English
+ *   function words in Latin-only text (see isConfidentlyEnglish).
+ * All other families have no local detector and always translate (fail-open:
+ * an extra translation request, never a lost or wrong translation).
+ */
+function shouldSkipNonChineseMessage(text: string, family: string): boolean {
+  const evidence = analyzeMessageScript(text)
+  if (family === 'ja') return isConfidentlyJapanese(evidence)
+  if (family === 'ko') return isConfidentlyKorean(evidence)
+  if (family === 'en') return isConfidentlyEnglish(text, evidence)
+  return false
+}
+
 /**
  * Decide whether a chat message should be skipped for the given target language
  * and Chinese variant mode.
+ *
+ * For a Chinese target family (`zh`), the weighted Chinese confidence model
+ * below applies. For any other target family, the conservative non-Chinese
+ * same-target skip (#183) applies: the message is skipped only when a
+ * confidently detected source language family already matches the target
+ * family (Japanese via Kana, Korean via Hangul, English via function-word
+ * confidence). Unsupported families always translate.
  *
  * Chinese-language confidence uses a deterministic weighted evidence model
  * (CHINESE_STRUCTURAL) rather than a tiny positive-marker whitelist (#182).
@@ -670,7 +793,11 @@ export function shouldSkipMessage(
   mode: ChineseVariantMode,
 ): boolean {
   const family = normalizeLocale(targetLanguage)
-  if (family !== 'zh') return false
+  if (family !== 'zh') {
+    // Non-Chinese same-target skip (#183): a confidently detected non-Chinese
+    // source language whose family matches the target family is skipped too.
+    return shouldSkipNonChineseMessage(text, family)
+  }
 
   const evidence = analyzeMessageScript(text)
 
