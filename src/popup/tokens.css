@@ -17,6 +17,7 @@
   --color-canvas: #0d1117; /* page background                    */
   --color-surface: #161b22; /* cards / panels                     */
   --color-surface-raised: #1c2430; /* inputs, hover, raised          */
+  --color-surface-raised-hover: #242e3a; /* raised controls hover    */
   --color-surface-sunken: #0a0e14; /* inset, radio group bed         */
   --color-overlay: rgba(10, 13, 18, 0.86); /* modal scrim           */
 
@@ -24,6 +25,10 @@
   --color-border-subtle: #1f2630; /* quiescent hairline           */
   --color-border: #2a3440; /* default dividers                  */
   --color-border-strong: #3a4654; /* hover, focus candidates      */
+  --color-success-border: rgba(52, 211, 153, 0.35); /* status card border */
+  --color-warning-border: rgba(251, 191, 36, 0.35); /* status card border */
+  --color-danger-border: rgba(248, 113, 113, 0.4); /* status card border  */
+  --color-info-border: rgba(56, 189, 248, 0.35); /* status card border   */
 
   /* ---- Color: text hierarchy ---------------------------------- */
   --color-text-primary: #e8edf2; /* headings, values, labels     */
@@ -43,9 +48,11 @@
   --color-warning: #fbbf24;
   --color-warning-soft: rgba(251, 191, 36, 0.14);
   --color-danger: #f87171;
+  --color-danger-hover: #fca5a5; /* danger fill hover              */
   --color-danger-soft: rgba(248, 113, 113, 0.14);
   --color-info: #38bdf8;
   --color-info-soft: rgba(56, 189, 248, 0.14);
+  --color-text-on-danger: #200a0a; /* text on danger fills         */
 
   /* ---- Focus --------------------------------------------------- */
   --focus-ring: 0 0 0 2px var(--color-canvas), 0 0 0 3px var(--color-accent);
