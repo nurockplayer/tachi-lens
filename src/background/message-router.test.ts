@@ -85,6 +85,105 @@ describe('MessageRouter', () => {
       expect(response.payload.messageId).toBe('m1')
     })
 
+    it('short-circuits a request when persisted chat translation is disabled', async () => {
+      const translator = {
+        translate: vi.fn(),
+      } as unknown as Translator
+      const getContentSettings = vi.fn(async () => ({ translationEnabled: false }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+
+      const result = router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm-disabled', text: 'Hello' } },
+        undefined,
+        sendResponse,
+      )
+
+      expect(result).toBe(true)
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith({
+          type: 'translate_response',
+          payload: { messageId: 'm-disabled' },
+        })
+      })
+      expect(getContentSettings).toHaveBeenCalledWith()
+      expect(translator.translate).not.toHaveBeenCalled()
+    })
+
+    it('checks the sender tab channel when guarding a translation request', async () => {
+      const translator = {
+        translate: vi.fn(),
+      } as unknown as Translator
+      const getContentSettings = vi.fn(async (channelName?: string) => ({
+        translationEnabled: channelName !== 'channel-off',
+      }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+
+      router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm-channel-off', text: 'Hello' } },
+        { tab: { url: 'https://www.twitch.tv/channel-off' } },
+        sendResponse,
+      )
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith({
+          type: 'translate_response',
+          payload: { messageId: 'm-channel-off' },
+        })
+      })
+      expect(getContentSettings).toHaveBeenCalledWith('channel-off')
+      expect(translator.translate).not.toHaveBeenCalled()
+    })
+
+    it('checks the actual channel for a Twitch popout chat sender', async () => {
+      const translator = {
+        translate: vi.fn(),
+      } as unknown as Translator
+      const getContentSettings = vi.fn(async (channelName?: string) => ({
+        translationEnabled: channelName !== 'channel-off',
+      }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+
+      router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm-popout-off', text: 'Hello' } },
+        { tab: { url: 'https://www.twitch.tv/popout/channel-off/chat' } },
+        sendResponse,
+      )
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith({
+          type: 'translate_response',
+          payload: { messageId: 'm-popout-off' },
+        })
+      })
+      expect(getContentSettings).toHaveBeenCalledWith('channel-off')
+      expect(translator.translate).not.toHaveBeenCalled()
+    })
+
+    it('carries the trusted sender channel into queued translation work', async () => {
+      const translate = vi.fn(async (request: { messageId: string }) => ({
+        messageId: request.messageId,
+        translatedText: 'translated',
+      }))
+      const translator = { translate } as unknown as Translator
+      const getContentSettings = vi.fn(async () => ({ translationEnabled: true }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+      const payload = { messageId: 'm-channel-on', text: 'Hello' }
+
+      router.handleMessage(
+        { type: 'translate_request', payload },
+        { tab: { url: 'https://www.twitch.tv/channel-on' } },
+        sendResponse,
+      )
+
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(1))
+      expect(translate).toHaveBeenCalledWith(payload, { channelName: 'channel-on' })
+    })
+
     it('returns false for an invalid translate_request payload', () => {
       const { router } = makeRouter()
       const sendResponse = vi.fn()

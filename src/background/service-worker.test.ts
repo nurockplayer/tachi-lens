@@ -142,6 +142,24 @@ describe('service worker startup', () => {
     expect(result).toBe(false)
   })
 
+  it('ignores malformed settings updates without dereferencing their payload', async () => {
+    const chromeRuntime = createChromeRuntime()
+    vi.stubGlobal('chrome', chromeRuntime)
+
+    await import('./service-worker')
+
+    const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+      | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+      | undefined
+
+    if (!handler) {
+      throw new Error('Expected a message handler to be registered')
+    }
+
+    expect(() => handler({ type: 'settings_updated', payload: null }, undefined, vi.fn())).not.toThrow()
+    expect(() => handler({ type: 'settings_updated', payload: 'invalid' }, undefined, vi.fn())).not.toThrow()
+  })
+
   it('records diagnostic events and returns them to the Popup as a snapshot', async () => {
     const chromeRuntime = createChromeRuntime()
     vi.stubGlobal('chrome', chromeRuntime)

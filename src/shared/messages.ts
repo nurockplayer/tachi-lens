@@ -69,6 +69,8 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
 export type SettingsUpdatePayload = Partial<{
+  /** Popup context used by the Service Worker to cancel matching chat work. */
+  channelName: string
   translationEnabled: boolean
   displayMode: 'below' | 'hover' | 'collapse'
   targetLanguage: string
@@ -461,14 +463,50 @@ export const isErrorNotificationMessage = (
   )
 }
 
+const SETTINGS_DISPLAY_MODES: readonly SettingsUpdatePayload['displayMode'][] = ['below', 'hover', 'collapse']
+const SETTINGS_CHINESE_VARIANT_MODES: readonly ChineseVariantMode[] = [
+  'skip_all_chinese',
+  'translate_other_script',
+]
+
+const isOptionalSettingsBoolean = (value: unknown): boolean =>
+  value === undefined || typeof value === 'boolean'
+
+const isOptionalSettingsString = (value: unknown): boolean =>
+  value === undefined || typeof value === 'string'
+
+const isOptionalSettingsNumber = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'number' && Number.isFinite(value))
+
+const isOptionalStringArray = (value: unknown): boolean =>
+  value === undefined || (Array.isArray(value) && value.every((entry) => typeof entry === 'string'))
+
 export const isSettingsUpdateMessage = (
   value: unknown,
 ): value is BaseMessage<'settings_updated', SettingsUpdatePayload> => {
-  if (!isBaseMessage(value) || value.type !== 'settings_updated') {
+  if (!isBaseMessage(value) || value.type !== 'settings_updated' || !isRecord(value.payload)) {
     return false
   }
 
-  return typeof value.payload === 'object' && value.payload !== null && !Array.isArray(value.payload)
+  const payload = value.payload
+
+  return (
+    isOptionalSettingsString(payload.channelName) &&
+    isOptionalSettingsBoolean(payload.translationEnabled) &&
+    (payload.displayMode === undefined || SETTINGS_DISPLAY_MODES.includes(payload.displayMode as SettingsUpdatePayload['displayMode'])) &&
+    isOptionalSettingsString(payload.targetLanguage) &&
+    (payload.chineseVariantMode === undefined || SETTINGS_CHINESE_VARIANT_MODES.includes(payload.chineseVariantMode as ChineseVariantMode)) &&
+    isOptionalSettingsNumber(payload.minTextLength) &&
+    isOptionalStringArray(payload.botNameBlacklist) &&
+    isOptionalSettingsBoolean(payload.skipEmotesOnly) &&
+    isOptionalSettingsBoolean(payload.skipCheermotes) &&
+    isOptionalSettingsBoolean(payload.skipSlashMe) &&
+    isOptionalSettingsBoolean(payload.skipWhispers) &&
+    isOptionalSettingsBoolean(payload.skipReplies) &&
+    isOptionalSettingsBoolean(payload.skipLinksOnly) &&
+    isOptionalSettingsBoolean(payload.skipNumbersOnly) &&
+    isOptionalSettingsBoolean(payload.skipSystemMessages)
+  )
 }
 
 /** Payload for speech_settings_updated: Partial<SpeechTranslationConfig> broadcast (Spec §6). */

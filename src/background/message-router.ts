@@ -4,7 +4,7 @@ import {
   isContentSettingsRequestMessage,
   isTranslationRequestMessage,
 } from '../shared/messages'
-import type { TranslationResult } from '../shared/messages'
+import type { TranslationRequest, TranslationResult } from '../shared/messages'
 import type { RuntimeState } from '../storage/settings'
 import { Translator } from './translator'
 
@@ -35,6 +35,41 @@ const sanitizeTranslationResultForContent = (result: TranslationResult): Transla
   }
 }
 
+const isChatTranslationDisabled = (settings: unknown): boolean =>
+  typeof settings === 'object' && settings !== null && !Array.isArray(settings) &&
+  (settings as { translationEnabled?: unknown }).translationEnabled === false
+
+interface RuntimeMessageSender {
+  tab?: { url?: unknown }
+  url?: unknown
+}
+
+/**
+ * Resolve the Twitch channel associated with a content-script sender without
+ * widening the translation-request protocol. Chrome's sender URL is trusted
+ * runtime metadata; arbitrary payload fields are not.
+ */
+const getChannelNameFromSender = (sender: unknown): string | undefined => {
+  if (typeof sender !== 'object' || sender === null || Array.isArray(sender)) return undefined
+
+  const candidate = sender as RuntimeMessageSender
+  const tabUrl = candidate.tab?.url
+  const senderUrl = typeof tabUrl === 'string' ? tabUrl : candidate.url
+  if (typeof senderUrl !== 'string') return undefined
+
+  try {
+    const url = new URL(senderUrl)
+    const hostname = url.hostname.toLowerCase()
+    if (hostname !== 'twitch.tv' && !hostname.endsWith('.twitch.tv')) return undefined
+
+    const segments = url.pathname.split('/').filter(Boolean)
+    const channel = segments[0]?.toLowerCase() === 'popout' ? segments[1] : segments[0]
+    return channel?.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
+
 export interface MessageRouter {
   handleMessage(
     message: unknown,
@@ -43,24 +78,47 @@ export interface MessageRouter {
   ): boolean
 }
 
+const handleTranslationRequest = async (
+  payload: TranslationRequest,
+  sender: unknown,
+  sendResponse: SendResponse,
+  deps: RouterDependencies,
+): Promise<void> => {
+  try {
+    const channelName = getChannelNameFromSender(sender)
+    const settings = channelName === undefined
+      ? await deps.getContentSettings?.()
+      : await deps.getContentSettings?.(channelName)
+    if (isChatTranslationDisabled(settings)) {
+      sendResponse({
+        type: 'translate_response',
+        payload: { messageId: payload.messageId },
+      })
+      return
+    }
+
+    const result = channelName === undefined
+      ? await deps.translator.translate(payload)
+      : await deps.translator.translate(payload, { channelName })
+    sendResponse({
+      type: 'translate_response',
+      payload: sanitizeTranslationResultForContent(result),
+    })
+  } catch {
+    sendResponse({
+      type: 'translate_response',
+      payload: {
+        messageId: payload.messageId,
+        error: { type: 'unknown', message: CONTENT_SAFE_TRANSLATION_ERROR_MESSAGE },
+      },
+    })
+  }
+}
+
 export const createMessageRouter = (deps: RouterDependencies): MessageRouter => ({
-  handleMessage(message, _sender, sendResponse) {
+  handleMessage(message, sender, sendResponse) {
     if (isTranslationRequestMessage(message)) {
-      deps.translator
-        .translate(message.payload)
-        .then((result) => sendResponse({
-          type: 'translate_response',
-          payload: sanitizeTranslationResultForContent(result),
-        }))
-        .catch(() =>
-          sendResponse({
-            type: 'translate_response',
-            payload: {
-              messageId: message.payload.messageId,
-              error: { type: 'unknown', message: CONTENT_SAFE_TRANSLATION_ERROR_MESSAGE },
-            },
-          }),
-        )
+      void handleTranslationRequest(message.payload, sender, sendResponse, deps)
 
       return true
     }

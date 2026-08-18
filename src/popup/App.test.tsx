@@ -22,6 +22,10 @@ describe('extractChannelFromUrl', () => {
     expect(extractChannelFromUrl('https://www.twitch.tv/SomeChannel')).toBe('somechannel')
   })
 
+  it('extracts channel name from a Twitch popout chat URL', () => {
+    expect(extractChannelFromUrl('https://www.twitch.tv/popout/SomeChannel/chat')).toBe('somechannel')
+  })
+
   it('returns undefined for non-Twitch URLs', () => {
     expect(extractChannelFromUrl('https://www.youtube.com')).toBeUndefined()
   })

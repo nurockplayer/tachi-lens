@@ -13,17 +13,43 @@ const appendMessage = (container: Element, text: string): void => {
 
 describe('content script translation queue', () => {
   const sendMessage = vi.fn()
+  let runtimeMessageListener: ((message: unknown) => void) | undefined
+  let effectiveTranslationEnabled = true
+
+  const translationRequests = (): unknown[][] => sendMessage.mock.calls.filter(([message]) =>
+    (message as { type: string }).type === 'translate_request',
+  )
+
+  const updateTranslationEnabled = async (enabled: boolean): Promise<void> => {
+    if (!runtimeMessageListener) {
+      throw new Error('Expected the content runtime message listener to be attached')
+    }
+    effectiveTranslationEnabled = enabled
+    runtimeMessageListener({
+      type: 'settings_updated',
+      payload: { translationEnabled: enabled },
+    })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+  }
 
   beforeEach(() => {
     vi.useFakeTimers()
     vi.resetModules()
     vi.clearAllMocks()
+    runtimeMessageListener = undefined
+    effectiveTranslationEnabled = true
     document.body.innerHTML =
       '<div data-test-selector="chat-scrollable-area__message-container"></div>'
     vi.stubGlobal('chrome', {
       runtime: {
         sendMessage,
-        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+        onMessage: {
+          addListener: vi.fn((listener: (message: unknown) => void) => {
+            runtimeMessageListener = listener
+          }),
+          removeListener: vi.fn(),
+        },
       },
     })
   })
@@ -32,6 +58,681 @@ describe('content script translation queue', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
     document.body.innerHTML = ''
+  })
+
+  it('stops debounce work and newly detected messages immediately when disabled', async () => {
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'pending before disable')
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(0)
+    await updateTranslationEnabled(false)
+    await vi.advanceTimersByTimeAsync(300)
+
+    appendMessage(container, 'detected while disabled')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(translationRequests()).toHaveLength(0)
+  })
+
+  it('uses the receiving tab channel setting instead of a broadcast toggle payload', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          // This tab has a channel override that remains enabled even when
+          // another tab broadcasts a global-looking disabled payload.
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    // Deliberately do not mutate the effective mock setting: the broadcast
+    // payload is not authoritative for this receiving tab.
+    runtimeMessageListener?.({
+      type: 'settings_updated',
+      payload: { translationEnabled: false },
+    })
+    await Promise.resolve()
+
+    appendMessage(container, 'channel override remains enabled')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+  })
+
+  it('discards queued but undispatched work when disabled', async () => {
+    const translationResolvers: Array<(value: unknown) => void> = []
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return new Promise((resolve) => translationResolvers.push(resolve))
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    for (let index = 0; index < 11; index++) {
+      appendMessage(container, `queued message ${index}`)
+    }
+
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(10)
+    expect(mod._test.translationQueueLength).toBe(1)
+
+    await updateTranslationEnabled(false)
+    expect(mod._test.translationQueueLength).toBe(0)
+
+    for (const resolve of translationResolvers) {
+      resolve({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+      })
+    }
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(translationRequests()).toHaveLength(10)
+  })
+
+  it('ignores a provider response that resolves after disable', async () => {
+    let resolveTranslation: ((value: unknown) => void) | undefined
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return new Promise((resolve) => { resolveTranslation = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'late response message')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(1)
+
+    await updateTranslationEnabled(false)
+    resolveTranslation?.({
+      type: 'translate_response',
+      payload: { messageId: 'any-id', translatedText: 'late translation' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-tachi-lens-translated]')).toBeNull()
+  })
+
+  it('records an empty cancellation before re-enable can recycle the row', async () => {
+    let translationCallCount = 0
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        translationCallCount++
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: translationCallCount === 1
+            ? { messageId: 'any-id' }
+            : { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'same text after recycle')
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    message.setAttribute('data-message-id', 'disabled-message')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+
+    await updateTranslationEnabled(true)
+    message.setAttribute('data-message-id', 'new-message')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(2)
+    expect(translationRequests()[1]![0]).toMatchObject({
+      payload: { text: 'same text after recycle' },
+    })
+  })
+
+  it('keeps a row unprocessed when settings hydration disables translation', async () => {
+    let returnDisabledSettings = false
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        if (returnDisabledSettings) {
+          returnDisabledSettings = false
+          return Promise.resolve({
+            type: 'content_settings',
+            payload: { translationEnabled: false, minTextLength: 1 },
+          })
+        }
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    returnDisabledSettings = true
+    appendMessage(container, 'same text after settings cancellation')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(0)
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    message.setAttribute('data-message-id', 'new-message')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'same text after settings cancellation' },
+    })
+  })
+
+  it('pauses retry and backlog processing while disabled', async () => {
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: {
+            messageId: 'any-id',
+            error: { type: 'rate_limited', retryAfterMs: 30_000, message: 'Rate limited' },
+          },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'retryable message')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(1)
+
+    mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+    const backlog = document.createElement('div')
+    backlog.textContent = 'backlog before disable'
+    container.appendChild(backlog)
+    mod._test.enqueueTranslation(backlog, 'backlog')
+    expect(mod._test.translationQueueLength).toBe(1)
+
+    await updateTranslationEnabled(false)
+    expect(mod._test.translationQueueLength).toBe(0)
+
+    mod._test.activeTranslations = 0
+    await vi.advanceTimersByTimeAsync(35_000)
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(mod._test.translationQueueLength).toBe(0)
+  })
+
+  it('resumes translation for newly eligible messages after re-enable', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'ignored while disabled')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(0)
+
+    await updateTranslationEnabled(true)
+    appendMessage(container, 'translated after re-enable')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'translated after re-enable' },
+    })
+  })
+
+  it('retries a failed settings refresh so re-enable is not stranded', async () => {
+    let failNextSettingsRead = false
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        if (failNextSettingsRead) {
+          failNextSettingsRead = false
+          return Promise.reject(new Error('temporary settings read failure'))
+        }
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+
+    await updateTranslationEnabled(false)
+    effectiveTranslationEnabled = true
+    failNextSettingsRead = true
+    runtimeMessageListener!({
+      type: 'settings_updated',
+      payload: { translationEnabled: true },
+    })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    appendMessage(container, 'still disabled during failed refresh')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(0)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(translationRequests()).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    appendMessage(container, 'translated after refresh retry')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'translated after refresh retry' },
+    })
+  })
+
+  it('refreshes settings while disabled when the re-enable broadcast is missed', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+
+    await updateTranslationEnabled(false)
+    effectiveTranslationEnabled = true
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+
+    appendMessage(container, 'translated after missed broadcast')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'translated after missed broadcast' },
+    })
+  })
+
+  it('updates empty disabled markers before allowing recycled text', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+
+    const recycledMessage = document.createElement('div')
+    recycledMessage.className = 'chat-line__message'
+    recycledMessage.innerHTML = [
+      '<span class="chat-author__display-name">viewer</span>',
+      '<span data-a-target="chat-line-message-body"></span>',
+    ].join('')
+    container.appendChild(recycledMessage)
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const body = recycledMessage.querySelector('[data-a-target="chat-line-message-body"]')!
+    body.textContent = 'hydrated while disabled'
+    // Exercise the marker transition before MutationObserver can observe the
+    // text node change; this text is still from the disabled era.
+    mod._test.enqueueTranslation(recycledMessage, 'live')
+    body.textContent = 'new recycled message'
+    mod._test.enqueueTranslation(recycledMessage, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'new recycled message' },
+    })
+  })
+
+  it('allows a same-text node after its DOM identity changes', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'repeat')
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    // Keep both the username and body text identical; only the DOM identity
+    // changes, as it does when Twitch recycles a virtual-scroll node.
+    message.setAttribute('data-message-id', 'new-message')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'repeat' },
+    })
+  })
+
+  it('allows an exact-repeat row when Twitch replaces its message body node', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'repeat')
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    message.innerHTML = [
+      '<span class="chat-author__display-name">viewer</span>',
+      '<span data-a-target="chat-line-message-body">repeat</span>',
+    ].join('')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'repeat' },
+    })
+  })
+
+  it('keeps disabled-era messages blocked across ordinary child mutations', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'ordinary hydration stays blocked')
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message')!
+    const badge = document.createElement('span')
+    badge.className = 'late-hydrated-badge'
+    message.appendChild(badge)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(translationRequests()).toHaveLength(0)
+  })
+
+  it('keeps disabled-era messages blocked across late username hydration', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    const message = document.createElement('div')
+    message.className = 'chat-line__message'
+    message.innerHTML = [
+      '<span class="chat-author__display-name"></span>',
+      '<span data-a-target="chat-line-message-body">late username</span>',
+    ].join('')
+    container.appendChild(message)
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    message.querySelector('.chat-author__display-name')!.textContent = 'viewer'
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(translationRequests()).toHaveLength(0)
+  })
+
+  it('does not resurrect disabled-era messages after re-enable', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'pending before disable')
+    await Promise.resolve()
+    await updateTranslationEnabled(false)
+
+    appendMessage(container, 'arrived while disabled')
+    await Promise.resolve()
+    await updateTranslationEnabled(true)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(translationRequests()).toHaveLength(0)
+
+    appendMessage(container, 'new after re-enable')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'new after re-enable' },
+    })
   })
 
   it('does not start more than ten translation requests before earlier requests settle', async () => {

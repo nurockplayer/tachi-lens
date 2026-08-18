@@ -17,6 +17,7 @@ import {
   isBaseMessage,
   isDiagnosticEventMessage,
   isGetQuotaHealthMessage,
+  isSettingsUpdateMessage,
   isResetQuotaHealthMessage,
   isSpeechControlMessage,
   isSpeechSettingsUpdateMessage,
@@ -69,12 +70,22 @@ const geminiQuotaStore = new GeminiQuotaStore({
   setLocal: async (value) => chrome.storage.local.set({ geminiQuotaUsage: value }),
 }, clock, createRestartSafeReservationId)
 const quotaScheduler = new QuotaScheduler(geminiQuotaStore, { clock })
+
+const getEffectiveContentSettings = async (channelName?: string) => {
+  const global = await getUserSettings()
+  const channel = channelName ? await getChannelSettings(channelName) : undefined
+
+  return channel ? mergeSettings(global, channel) : global
+}
+
 const translator = new Translator(
   {
     cache,
     persistentCache,
     rateLimiter,
     getSettings: () => getUserSettings(),
+    getTranslationEnabled: async (channelName) =>
+      (await getEffectiveContentSettings(channelName)).translationEnabled,
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
     getProvider: (providerId) => getProvider(providerId),
     quotaScheduler,
@@ -94,12 +105,7 @@ const router = createMessageRouter({
   getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
   getProvider: (providerId) => getProvider(providerId),
   getRuntimeState: () => getRuntimeState(),
-  getContentSettings: async (channelName) => {
-    const global = await getUserSettings()
-    const channel = channelName ? await getChannelSettings(channelName) : undefined
-
-    return channel ? mergeSettings(global, channel) : global
-  },
+  getContentSettings: getEffectiveContentSettings,
   saveApiKey: (providerId, apiKey) => saveApiKey(providerId, apiKey),
   deleteApiKey: (providerId) => deleteApiKey(providerId),
   getMaskedApiKeyForPopup: (providerId) => getMaskedApiKeyForPopup(providerId),
@@ -253,8 +259,17 @@ const handleMessage = (
   }
 
   // settings_updated from Popup → broadcast to all content scripts
-  if (isBaseMessage(message) && message.type === 'settings_updated') {
-    void broadcastUpdate(message.payload as SettingsUpdatePayload)
+  if (isSettingsUpdateMessage(message)) {
+    const payload = message.payload
+    if (payload.translationEnabled === false) {
+      const finishSettingsUpdate = (): void => {
+        void broadcastUpdate(payload)
+        sendResponse({ type: 'settings_update_ack' })
+      }
+      void translator.cancelQueuedTranslations(payload.channelName).then(finishSettingsUpdate, finishSettingsUpdate)
+      return true
+    }
+    void broadcastUpdate(payload)
     return false
   }
 
@@ -331,6 +346,7 @@ const handleCommand = async (command: string): Promise<void> => {
       const nextEnabled = !settings.translationEnabled
 
       await saveUserSettings({ translationEnabled: nextEnabled })
+      if (!nextEnabled) await translator.cancelQueuedTranslations()
       await broadcastUpdate({ translationEnabled: nextEnabled })
       break
     }

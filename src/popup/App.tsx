@@ -192,7 +192,8 @@ export const extractChannelFromUrl = (url: string): string | undefined => {
     if (!hostname.endsWith('twitch.tv')) return undefined
     if (hostname !== 'twitch.tv' && hostname !== 'www.twitch.tv') return undefined
 
-    const match = pathname.match(/^\/([^/]+)/)
+    const match = pathname.match(/^\/popout\/([^/]+)(?:\/chat)?(?:\/|$)/i) ??
+      pathname.match(/^\/([^/]+)/)
 
     return match?.[1]?.toLowerCase()
   } catch {
@@ -536,9 +537,13 @@ export function App() {
         setLiveControlError(false)
 
         try {
+          const payload: SettingsUpdatePayload = {
+            ...(useChannelSettings && channelName ? { channelName } : {}),
+            [key]: value,
+          } as SettingsUpdatePayload
           await chrome.runtime.sendMessage({
             type: 'settings_updated',
-            payload: { [key]: value } as SettingsUpdatePayload,
+            payload,
           })
         } catch {
           // Storage is authoritative even if a tab or the Service Worker is
@@ -735,6 +740,7 @@ export function App() {
 
       // Notify content script of settings change via SW broadcast
       const payload: SettingsUpdatePayload = {
+        ...(useChannelSettings && channelName ? { channelName } : {}),
         translationEnabled: updatedSettings.translationEnabled,
         displayMode: updatedSettings.displayMode,
         targetLanguage: updatedSettings.targetLanguage,

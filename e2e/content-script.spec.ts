@@ -3,8 +3,8 @@
  *
  * Verifies that the packaged Content Script is injected by Chromium on a
  * synthetic Twitch page, observes a newly inserted chat message, obtains
- * settings through the real MV3 Service Worker, and marks the message as
- * processed without injecting translated DOM (translation disabled).
+ * settings through the real MV3 Service Worker, and skips the message without
+ * marking it processed or injecting translated DOM (translation disabled).
  *
  * Failure diagnostics (page URL, chat HTML, diagnostics, console errors) are
  * attached reliably via try/catch before the original error is re-thrown.
@@ -21,7 +21,7 @@ import {
 import { getTwitchChatHtml } from './fixtures/twitch-chat'
 
 test.describe('Content Script injection smoke test', () => {
-  test('loads on Twitch origin, observes chat, marks processed without translated DOM', async ({
+  test('loads on Twitch origin, skips disabled chat without processed DOM', async ({
     context,
     serviceWorker,
     extensionId,
@@ -68,11 +68,13 @@ test.describe('Content Script injection smoke test', () => {
         { text: messageText, username: 'e2e_user' },
       )
 
-      // --- Assert the Content Script marks the message as processed ---
+      // --- Assert the Content Script leaves disabled work unprocessed ---
       const message = page.locator('.chat-line__message').last()
-      await expect(message).toHaveAttribute('data-tachi-lens-processed', 'true', {
-        timeout: 10_000,
-      })
+      await expect(async () => {
+        const events = await getDiagnosticsEvents(serviceWorker)
+        expect(events.some((e) => e.stage === 'message_skipped' && e.detail === '翻譯功能已關閉')).toBe(true)
+      }).toPass({ timeout: 10_000 })
+      await expect(message).not.toHaveAttribute('data-tachi-lens-processed', 'true')
 
       // --- Assert no translated DOM element is inserted ---
       const translated = page.locator('[data-tachi-lens-translated]')
