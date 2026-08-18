@@ -104,7 +104,7 @@ export class Translator {
   private inFlightTranslations = new Map<string, Promise<TranslationResult>>()
   private activeBatch = false
   private activeBatchItems = new Set<PendingItem>()
-  private cancelledMessageIds = new Set<string>()
+  private cancelledItems = new Set<PendingItem>()
   private flushRequested = false
 
   constructor(
@@ -186,7 +186,7 @@ export class Translator {
           remaining.push(item)
           continue
         }
-        if (this.activeBatchItems.has(item)) this.cancelledMessageIds.add(item.request.messageId)
+        if (this.activeBatchItems.has(item)) this.cancelledItems.add(item)
         item.resolve({ messageId: item.request.messageId })
       }
       return remaining
@@ -217,7 +217,7 @@ export class Translator {
     fallbackEnabled: boolean | undefined,
   ): Promise<PendingItem[]> {
     const enabled = await Promise.all(items.map(async (item) => {
-      if (this.cancelledMessageIds.has(item.request.messageId)) return false
+      if (this.cancelledItems.has(item)) return false
       const channelEnabled = await this.deps.getTranslationEnabled?.(item.channelName)
       return channelEnabled ?? fallbackEnabled
     }))
@@ -235,10 +235,11 @@ export class Translator {
   private async runUncancelledBatch(
     requests: SchedulerRequest[],
     signal: AbortSignal | undefined,
+    isCancelled: (request: SchedulerRequest) => boolean,
     run: (requests: SchedulerRequest[], signal?: AbortSignal) => Promise<BatchItemResult[]>,
   ): Promise<BatchItemResult[]> {
-    const activeRequests = requests.filter((request) => !this.cancelledMessageIds.has(request.id))
-    const cancelledRequests = requests.filter((request) => this.cancelledMessageIds.has(request.id))
+    const activeRequests = requests.filter((request) => !isCancelled(request))
+    const cancelledRequests = requests.filter(isCancelled)
     const results = activeRequests.length > 0 ? await run(activeRequests, signal) : []
     return [
       ...results,
@@ -266,7 +267,7 @@ export class Translator {
     void this.flush(priority).finally(() => {
       this.activeBatch = false
       this.activeBatchItems.clear()
-      this.cancelledMessageIds.clear()
+      this.cancelledItems.clear()
       this.drainAfterActiveBatch()
     })
   }
@@ -514,10 +515,24 @@ export class Translator {
     if (schedulerManaged && this.deps.quotaScheduler) {
       const selectedGemini = settings.selectedProvider === 'gemini'
       const deepseekModel = selectedGemini ? DEEPSEEK_FALLBACK_MODEL : model
+      const requestItems = new WeakMap<SchedulerRequest, PendingItem>()
+      const scheduledRequests = uncached.map((item) => {
+        const request = {
+          id: item.request.messageId,
+          text: item.request.text,
+          sourceLang: item.request.sourceLang,
+        }
+        requestItems.set(request, item)
+        return request
+      })
+      const isCancelledRequest = (request: SchedulerRequest): boolean => {
+        const item = requestItems.get(request)
+        return item !== undefined && this.cancelledItems.has(item)
+      }
       const scheduled = await this.deps.quotaScheduler.schedule({
         id: uncached.map((item) => item.request.messageId).join(','),
         priority: selectedPriority,
-        requests: uncached.map((item) => ({ id: item.request.messageId, text: item.request.text, sourceLang: item.request.sourceLang })),
+        requests: scheduledRequests,
         estimatedInputTokens: tokenEstimator.estimate(buildTranslationPrompt(uncached.map((item) => ({
           id: item.request.messageId,
           text: item.request.text,
@@ -530,6 +545,7 @@ export class Translator {
         runGemini: (requests, signal) => this.runUncancelledBatch(
           requests,
           signal,
+          isCancelledRequest,
           (activeRequests, activeSignal) => provider
             ? provider.translateBatch(activeRequests, apiKey!, model, targetLang, activeSignal)
             : Promise.resolve(activeRequests.map((request) => ({ id: request.id, error: 'Gemini provider is unavailable' }))),
@@ -538,12 +554,13 @@ export class Translator {
         runDeepSeek: (requests, signal) => this.runUncancelledBatch(
           requests,
           signal,
-          (activeRequests, activeSignal) => this.runDeepSeekBatch(activeRequests, targetLang, deepseekModel, activeSignal),
+          isCancelledRequest,
+          (activeRequests, activeSignal) => this.runDeepSeekBatch(activeRequests, targetLang, deepseekModel, activeSignal, isCancelledRequest),
         ),
       })
 
       for (const item of uncached) {
-        if (this.cancelledMessageIds.has(item.request.messageId)) {
+        if (this.cancelledItems.has(item)) {
           item.resolve({ messageId: item.request.messageId })
           continue
         }
@@ -577,7 +594,7 @@ export class Translator {
 
       if (settings.selectedProvider === 'gemini') {
         await this.translateWithDeepSeekFallback(
-          uncached.filter((item) => !this.cancelledMessageIds.has(item.request.messageId)),
+          uncached.filter((item) => !this.cancelledItems.has(item)),
           targetLang,
           retryAfterMs,
         )
@@ -691,17 +708,14 @@ export class Translator {
   }
 
   private async runDeepSeekBatch(
-    requests: Array<{ id: string; text: string; sourceLang?: string }>,
+    requests: SchedulerRequest[],
     targetLang: string,
     model: string,
     signal?: AbortSignal,
+    isCancelled: (request: SchedulerRequest) => boolean = () => false,
   ): Promise<BatchItemResult[]> {
-    const cancelledIds = new Set(
-      requests
-        .filter((request) => this.cancelledMessageIds.has(request.id))
-        .map((request) => request.id),
-    )
-    const eligibleRequests = requests.filter((request) => !cancelledIds.has(request.id))
+    const cancelledRequests = new Set(requests.filter(isCancelled))
+    const eligibleRequests = requests.filter((request) => !cancelledRequests.has(request))
     const results = new Map(
       this.getDeepSeekCachedResults(eligibleRequests, targetLang, model)
         .map((result) => [result.id, result] as const),
@@ -709,15 +723,15 @@ export class Translator {
     let uncached = eligibleRequests.filter((request) => {
       return !results.has(request.id)
     })
-    const resultFor = (request: { id: string }): BatchItemResult =>
-      (cancelledIds.has(request.id) || this.cancelledMessageIds.has(request.id))
+    const resultFor = (request: SchedulerRequest): BatchItemResult =>
+      (cancelledRequests.has(request) || isCancelled(request))
       ? { id: request.id, error: 'Translation canceled', errorType: 'unknown' }
       : results.get(request.id)!
 
     if (uncached.length === 0) return requests.map(resultFor)
 
     const apiKey = await this.deps.getApiKey(DEEPSEEK_FALLBACK_PROVIDER)
-    uncached = uncached.filter((request) => !this.cancelledMessageIds.has(request.id))
+    uncached = uncached.filter((request) => !isCancelled(request))
     if (uncached.length === 0) return requests.map(resultFor)
     const provider = this.deps.getProvider(DEEPSEEK_FALLBACK_PROVIDER)
     if (!apiKey) {
@@ -826,17 +840,28 @@ export class Translator {
     originalResults = new Map<string, BatchItemResult>(),
   ): Promise<void> {
     if (items.length === 0) return
-    const batchRequests = items.map((item) => ({
-      id: item.request.messageId,
-      text: item.request.text,
-      sourceLang: item.request.sourceLang,
-    }))
+    const requestItems = new WeakMap<SchedulerRequest, PendingItem>()
+    const batchRequests = items.map((item) => {
+      const request = {
+        id: item.request.messageId,
+        text: item.request.text,
+        sourceLang: item.request.sourceLang,
+      }
+      requestItems.set(request, item)
+      return request
+    })
+    const isCancelledRequest = (request: SchedulerRequest): boolean => {
+      const item = requestItems.get(request)
+      return item !== undefined && this.cancelledItems.has(item)
+    }
     const batchResults = await this.runDeepSeekBatch(
       batchRequests,
       targetLang,
       DEEPSEEK_FALLBACK_MODEL,
+      undefined,
+      isCancelledRequest,
     )
-    const activeItems = items.filter((item) => !this.cancelledMessageIds.has(item.request.messageId))
+    const activeItems = items.filter((item) => !this.cancelledItems.has(item))
     for (const item of items) {
       if (!activeItems.includes(item)) item.resolve({ messageId: item.request.messageId })
     }

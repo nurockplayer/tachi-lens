@@ -261,6 +261,25 @@ describe('settings_updated message', () => {
     expect(isSettingsUpdateMessage({ type: 'settings_updated', payload: 'not-an-object' })).toBe(false)
   })
 
+  it('rejects settings_updated payloads with malformed cancellation or settings fields', () => {
+    expect(isSettingsUpdateMessage({
+      type: 'settings_updated',
+      payload: { translationEnabled: false, channelName: 123 },
+    })).toBe(false)
+    expect(isSettingsUpdateMessage({
+      type: 'settings_updated',
+      payload: { displayMode: 'invalid' },
+    })).toBe(false)
+    expect(isSettingsUpdateMessage({
+      type: 'settings_updated',
+      payload: { botNameBlacklist: ['valid', 42] },
+    })).toBe(false)
+    expect(isSettingsUpdateMessage({
+      type: 'settings_updated',
+      payload: { minTextLength: Number.NaN },
+    })).toBe(false)
+  })
+
   it('rejects non-settings_updated messages', () => {
     expect(isSettingsUpdateMessage({ type: 'translate_request', payload: {} })).toBe(false)
   })

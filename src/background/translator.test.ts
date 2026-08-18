@@ -248,6 +248,47 @@ describe('Translator', () => {
         .toEqual(['enabled-follower'])
     })
 
+    it('scopes active cancellation by pending item when message IDs collide', async () => {
+      let releaseApiKey!: (key: string) => void
+      const apiKey = new Promise<string>((resolve) => { releaseApiKey = resolve })
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        { id: 'shared-message', translatedText: 'enabled translation' },
+      ])
+      const enabled = new Map([
+        ['disabled-channel', true],
+        ['enabled-channel', true],
+      ])
+      deps.getApiKey = vi.fn(() => apiKey)
+      deps.getProvider = vi.fn(() => provider)
+      deps.getTranslationEnabled = vi.fn(async (channelName) => enabled.get(channelName) ?? true)
+      translator = new Translator(deps, { batchWindowMs: 300, maxBatchSize: 2 })
+
+      const disabled = translator.translate(
+        { messageId: 'shared-message', text: 'same text' },
+        { channelName: 'disabled-channel' },
+      )
+      const enabledFollower = translator.translate(
+        { messageId: 'shared-message', text: 'same text' },
+        { channelName: 'enabled-channel' },
+      )
+      await vi.waitFor(() => expect(deps.getApiKey).toHaveBeenCalledTimes(1))
+
+      enabled.set('disabled-channel', false)
+      await translator.cancelQueuedTranslations('disabled-channel')
+      releaseApiKey('test-api-key')
+
+      await expect(disabled).resolves.toEqual({ messageId: 'shared-message' })
+      await expect(enabledFollower).resolves.toEqual({
+        messageId: 'shared-message',
+        translatedText: 'enabled translation',
+      })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0]).toEqual([
+        { id: 'shared-message', text: 'same text', sourceLang: undefined },
+      ])
+    })
+
     it('resolves a single translation request after the batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([
