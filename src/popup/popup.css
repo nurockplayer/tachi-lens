@@ -127,7 +127,7 @@
   white-space: nowrap;
 }
 
-/* Tone borders for status-bearing cards (quota health). */
+/* Tone borders for status-bearing cards. */
 .card--success {
   border-color: var(--color-success-border);
 }
@@ -603,6 +603,15 @@ select.control {
   color: var(--color-text-tertiary);
 }
 
+.panel-loading {
+  padding: var(--space-4) var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
 /* ---- Accordion (progressively disclosed sections, #173) ----------- */
 .accordion {
   border-top: 1px solid var(--color-border-subtle);
@@ -732,6 +741,60 @@ select.control {
 }
 
 /* ---- Quota health ------------------------------------------------ */
+.quota-card {
+  min-width: 0;
+}
+
+.quota-card--healthy {
+  border-color: var(--color-border);
+}
+
+.quota-card--cooldown {
+  border-color: var(--color-warning-border);
+}
+
+.quota-card--clock_rollback,
+.quota-card--untrusted_migration,
+.quota-card--malformed_snapshot,
+.quota-card--unsupported_version {
+  border-color: var(--color-danger-border);
+}
+
+.quota-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.quota-card__model {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.quota-card__status {
+  min-width: 0;
+  max-width: 48%;
+  flex: 0 1 48%;
+  justify-content: flex-end;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.quota-card__description {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .quota-meta {
   margin-top: 2px;
   font-size: var(--text-xs);
@@ -753,6 +816,10 @@ select.control {
   margin-top: var(--space-2);
 }
 
+.quota-repair-error {
+  margin-top: var(--space-2);
+}
+
 .quota-repair-btn {
   margin-top: var(--space-2);
 }
@@ -761,16 +828,78 @@ select.control {
 .diag-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .diag-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.diag-item:last-child {
+  border-bottom: none;
+}
+
+.diag-item--warning {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-warning);
+}
+
+.diag-item--danger {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-danger);
+}
+
+.diag-item__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.diag-item__stage {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.diag-item__time {
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  color: var(--color-text-tertiary);
+}
+
+.diag-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 var(--space-1);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--control-radius);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: var(--leading-tight);
   color: var(--color-text-secondary);
-  word-break: break-word;
 }
 
-.diag-detail {
-  color: var(--color-text-tertiary);
+@media (max-width: 360px) {
+  .quota-card__header {
+    flex-direction: column;
+  }
+
+  .quota-card__status {
+    max-width: 100%;
+    flex-basis: auto;
+    justify-content: flex-start;
+    text-align: left;
+  }
 }

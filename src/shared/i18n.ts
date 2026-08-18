@@ -94,6 +94,30 @@ export type MessageKey =
   | 'quotaHealthDeepSeekOverflow'
   | 'quotaHealthRepair'
   | 'quotaHealthRepairConfirm'
+  | 'quotaHealthRepairFailed'
+  | 'quotaHealthEmpty'
+  | 'diagnosticsSection'
+  | 'diagnosticsEmpty'
+  | 'diagnosticsCount'
+  | 'diagnosticStageChatContainerReady'
+  | 'diagnosticStageChatContainerMissing'
+  | 'diagnosticStageMessageDetected'
+  | 'diagnosticStageMessageNotReady'
+  | 'diagnosticStageMessageSkipped'
+  | 'diagnosticStageTranslationRequested'
+  | 'diagnosticStageTranslationReceived'
+  | 'diagnosticStageTranslationFailed'
+  | 'diagnosticStageTranslationInjected'
+  | 'diagnosticStageBatchDedupRemoved'
+  | 'diagnosticStageInFlightCoalesced'
+  | 'diagnosticStageQueueOverflowDrop'
+  | 'diagnosticStageQueueObsoleteDrop'
+  | 'diagnosticStageL2CacheHit'
+  | 'diagnosticStageSpeechStarted'
+  | 'diagnosticStageSpeechStopped'
+  | 'diagnosticStageSpeechCaptionEmitted'
+  | 'diagnosticStageSpeechChunkSent'
+  | 'diagnosticStageSpeechError'
   | 'speechSection'
   | 'speechCaptionsSection'
   | 'speechEnabled'
@@ -220,6 +244,30 @@ export const MESSAGE_KEYS: readonly string[] = [
   'quotaHealthDeepSeekOverflow',
   'quotaHealthRepair',
   'quotaHealthRepairConfirm',
+  'quotaHealthRepairFailed',
+  'quotaHealthEmpty',
+  'diagnosticsSection',
+  'diagnosticsEmpty',
+  'diagnosticsCount',
+  'diagnosticStageChatContainerReady',
+  'diagnosticStageChatContainerMissing',
+  'diagnosticStageMessageDetected',
+  'diagnosticStageMessageNotReady',
+  'diagnosticStageMessageSkipped',
+  'diagnosticStageTranslationRequested',
+  'diagnosticStageTranslationReceived',
+  'diagnosticStageTranslationFailed',
+  'diagnosticStageTranslationInjected',
+  'diagnosticStageBatchDedupRemoved',
+  'diagnosticStageInFlightCoalesced',
+  'diagnosticStageQueueOverflowDrop',
+  'diagnosticStageQueueObsoleteDrop',
+  'diagnosticStageL2CacheHit',
+  'diagnosticStageSpeechStarted',
+  'diagnosticStageSpeechStopped',
+  'diagnosticStageSpeechCaptionEmitted',
+  'diagnosticStageSpeechChunkSent',
+  'diagnosticStageSpeechError',
   'speechSection',
   'speechCaptionsSection',
   'speechEnabled',
@@ -342,6 +390,30 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   quotaHealthDeepSeekOverflow: 'Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。',
   quotaHealthRepair: '修復配額資料',
   quotaHealthRepairConfirm: '確認修復？',
+  quotaHealthRepairFailed: '配額資料修復失敗，請再試一次。',
+  quotaHealthEmpty: '目前沒有可顯示的配額健康狀態。',
+  diagnosticsSection: '診斷',
+  diagnosticsEmpty: '目前沒有可顯示的診斷活動。',
+  diagnosticsCount: '次數',
+  diagnosticStageChatContainerReady: '已連上 Twitch 聊天室',
+  diagnosticStageChatContainerMissing: '找不到 Twitch 聊天室容器',
+  diagnosticStageMessageDetected: '偵測到聊天室訊息',
+  diagnosticStageMessageNotReady: '訊息尚未完成載入',
+  diagnosticStageMessageSkipped: '訊息已略過',
+  diagnosticStageTranslationRequested: '翻譯請求已送出',
+  diagnosticStageTranslationReceived: '收到翻譯結果',
+  diagnosticStageTranslationFailed: '翻譯失敗',
+  diagnosticStageTranslationInjected: '翻譯已顯示於聊天室',
+  diagnosticStageBatchDedupRemoved: '同批重複請求已去重',
+  diagnosticStageInFlightCoalesced: '同內容進行中請求已合併',
+  diagnosticStageQueueOverflowDrop: '佇列溢位已丟棄',
+  diagnosticStageQueueObsoleteDrop: '佇列過時項目已丟棄',
+  diagnosticStageL2CacheHit: '持久快取命中',
+  diagnosticStageSpeechStarted: '語音字幕已啟動',
+  diagnosticStageSpeechStopped: '語音字幕已停止',
+  diagnosticStageSpeechCaptionEmitted: '語音字幕已輸出',
+  diagnosticStageSpeechChunkSent: '語音片段已送出',
+  diagnosticStageSpeechError: '語音錯誤',
   speechSection: '語音字幕',
   speechCaptionsSection: '語音與字幕',
   speechEnabled: '啟用語音字幕',
