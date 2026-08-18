@@ -371,5 +371,24 @@ describe('content script entry', () => {
 
       vi.unstubAllGlobals()
     })
+
+    it('keeps speech subtitles isolated when chat translation is disabled', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+      dispatch({ type: 'speech_caption', payload: { id: 'c1', text: 'speech stays visible', interim: false } })
+      dispatch({ type: 'settings_updated', payload: { translationEnabled: false } })
+
+      expect(overlayHost()).not.toBeNull()
+      expect(overlayHost()?.shadowRoot?.querySelector('.tachi-lens-caption-row')?.textContent)
+        .toBe('speech stays visible')
+
+      dispatch({ type: 'speech_settings_updated', payload: { captionOpacity: 50 } })
+      const root = overlayHost()!.shadowRoot!.querySelector('.tachi-lens-overlay-root') as HTMLElement
+      expect(root.style.opacity).toBe('0.5')
+
+      vi.unstubAllGlobals()
+    })
   })
 })

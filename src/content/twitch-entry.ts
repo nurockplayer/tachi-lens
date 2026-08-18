@@ -12,6 +12,7 @@ import {
   TwitchMessageHandler,
   type ContentSettings,
   type RuntimeMessageSender,
+  type TranslationAttemptResult,
 } from './twitch-handler'
 import { isExtensionContextInvalidatedError, safeRuntimeSendMessage } from './runtime-messaging'
 import {
@@ -255,7 +256,7 @@ let retryTimer: ReturnType<typeof setInterval> | null = null
 const startRetryTimer = (): void => {
   if (stopped || retryTimer !== null) return
   retryTimer = setInterval(() => {
-    if (!stopped) retryUnprocessed()
+    if (!stopped && chatTranslationEnabled) retryUnprocessed()
   }, 5_000)
 }
 
@@ -282,14 +283,25 @@ let queuedElements = new WeakSet<HTMLElement>()
 let pendingIdCounter = 0
 const DEBOUNCE_MS = 300
 const MAX_PENDING = 50
+let chatTranslationEnabled = true
+let chatTranslationGeneration = 0
 
 const debugLog = (msg: string, ...args: unknown[]): void => {
   console.debug('[tachi-lens]', msg, ...args)
 }
 
+const clearPendingChatTranslation = (): void => {
+  if (debounceTimer !== null) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
+  pendingMessages.clear()
+  queuedElements = new WeakSet()
+}
+
 const flushPending = (): void => {
   debounceTimer = null
-  if (stopped) {
+  if (stopped || !chatTranslationEnabled) {
     pendingMessages.clear()
     return
   }
@@ -306,7 +318,7 @@ const flushPending = (): void => {
 }
 
 const scheduleProcess = (element: HTMLElement): void => {
-  if (stopped) return
+  if (stopped || !chatTranslationEnabled) return
 
   // Use WeakSet to dedupe by element identity, not text content
   if (queuedElements.has(element)) return
@@ -410,7 +422,6 @@ const observeChat = (): void => {
 
 // --- Processing ---
 const inFlight = new WeakSet<HTMLElement>()
-const queuedForTranslation = new WeakSet<HTMLElement>()
 type TranslationPriority = 'live' | 'backlog'
 interface QueuedTranslation {
   element: HTMLElement
@@ -434,8 +445,18 @@ const MAX_QUEUED_TRANSLATIONS = 60
 let activeTranslations = 0
 let retryNotBefore = 0
 let consecutiveLiveDequeues = 0
+let queuedForTranslation = new WeakSet<HTMLElement>()
 // _test hook: record dispatched items. Set before drainTranslationQueue.
 let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
+
+const disableChatTranslation = (): void => {
+  if (chatTranslationEnabled) chatTranslationGeneration++
+  chatTranslationEnabled = false
+  clearPendingChatTranslation()
+  queuedForTranslation = new WeakSet()
+  translationQueue.length = 0
+  consecutiveLiveDequeues = 0
+}
 
 const isObsolete = (entry: QueuedTranslation): boolean =>
   !entry.element.isConnected || handler.isAlreadyProcessed(entry.element)
@@ -473,7 +494,7 @@ const enqueueTranslation = (
   element: HTMLElement,
   priority: TranslationPriority = 'live',
 ): void => {
-  if (stopped || inFlight.has(element) || queuedForTranslation.has(element)) return
+  if (!chatTranslationEnabled || stopped || inFlight.has(element) || queuedForTranslation.has(element)) return
 
   queuedForTranslation.add(element)
   const queued = { element, priority }
@@ -487,7 +508,7 @@ const enqueueTranslation = (
 }
 
 const drainTranslationQueue = (): void => {
-  if (stopped || Date.now() < retryNotBefore) return
+  if (!chatTranslationEnabled || stopped || Date.now() < retryNotBefore) return
 
   while (activeTranslations < MAX_CONCURRENT_TRANSLATIONS && translationQueue.length > 0) {
     const hasBacklog = translationQueue.some((entry) => entry.priority === 'backlog')
@@ -535,8 +556,10 @@ const drainTranslationQueue = (): void => {
 const processMessage = async (
   element: HTMLElement,
   priority: TranslationPriority = 'live',
-): Promise<{ retryAfterMs?: number }> => {
-  if (stopped) return {}
+): Promise<TranslationAttemptResult> => {
+  if (stopped || !chatTranslationEnabled) return {}
+
+  const translationGeneration = chatTranslationGeneration
 
   if (inFlight.has(element)) {
     debugLog('processMessage: already in flight')
@@ -547,8 +570,22 @@ const processMessage = async (
   try {
     const settings = await getContentSettings()
     if (stopped) return {}
+    if (!settings.translationEnabled) {
+      disableChatTranslation()
+      return await handler.translateAndInject(element, settings, priority)
+    }
+    if (!chatTranslationEnabled || translationGeneration !== chatTranslationGeneration) return {}
 
-    return await handler.translateAndInject(element, settings, priority)
+    const result = await handler.translateAndInject(
+      element,
+      settings,
+      priority,
+      () => chatTranslationEnabled && translationGeneration === chatTranslationGeneration,
+    )
+    if (result.translationDisabled) {
+      disableChatTranslation()
+    }
+    return result
   } catch {
     if (stopped) return {}
 
@@ -561,7 +598,7 @@ const processMessage = async (
 }
 
 const retryUnprocessed = (): void => {
-  if (stopped || Date.now() < retryNotBefore) return
+  if (!chatTranslationEnabled || stopped || Date.now() < retryNotBefore) return
 
   drainTranslationQueue()
 
@@ -603,6 +640,7 @@ const cleanup = (): void => {
   invalidateSettingsCache()
   pendingMessages.clear()
   queuedElements = new WeakSet()
+  queuedForTranslation = new WeakSet()
   translationQueue.length = 0
   // Speech overlay: destroy the host (never leaves a stale overlay on the page).
   subtitleOverlay?.destroy()
@@ -713,6 +751,12 @@ const isDisplayMode = (value: unknown): value is ContentSettings['displayMode'] 
 export const handleSettingsUpdate = async (_payload: SettingsUpdatePayload): Promise<void> => {
   if (stopped) return
   invalidateSettingsCache()
+
+  if (_payload.translationEnabled === false) {
+    disableChatTranslation()
+  } else if (_payload.translationEnabled === true) {
+    chatTranslationEnabled = true
+  }
 }
 
 // --- Main ---

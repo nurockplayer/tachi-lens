@@ -85,6 +85,32 @@ describe('MessageRouter', () => {
       expect(response.payload.messageId).toBe('m1')
     })
 
+    it('short-circuits a request when persisted chat translation is disabled', async () => {
+      const translator = {
+        translate: vi.fn(),
+      } as unknown as Translator
+      const getContentSettings = vi.fn(async () => ({ translationEnabled: false }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+
+      const result = router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm-disabled', text: 'Hello' } },
+        undefined,
+        sendResponse,
+      )
+
+      expect(result).toBe(true)
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith({
+          type: 'translate_response',
+          payload: { messageId: 'm-disabled' },
+        })
+      })
+      expect(getContentSettings).toHaveBeenCalledWith()
+      expect(translator.translate).not.toHaveBeenCalled()
+    })
+
     it('returns false for an invalid translate_request payload', () => {
       const { router } = makeRouter()
       const sendResponse = vi.fn()

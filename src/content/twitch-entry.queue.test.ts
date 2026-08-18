@@ -13,17 +13,38 @@ const appendMessage = (container: Element, text: string): void => {
 
 describe('content script translation queue', () => {
   const sendMessage = vi.fn()
+  let runtimeMessageListener: ((message: unknown) => void) | undefined
+
+  const translationRequests = (): unknown[][] => sendMessage.mock.calls.filter(([message]) =>
+    (message as { type: string }).type === 'translate_request',
+  )
+
+  const updateTranslationEnabled = (enabled: boolean): void => {
+    if (!runtimeMessageListener) {
+      throw new Error('Expected the content runtime message listener to be attached')
+    }
+    runtimeMessageListener({
+      type: 'settings_updated',
+      payload: { translationEnabled: enabled },
+    })
+  }
 
   beforeEach(() => {
     vi.useFakeTimers()
     vi.resetModules()
     vi.clearAllMocks()
+    runtimeMessageListener = undefined
     document.body.innerHTML =
       '<div data-test-selector="chat-scrollable-area__message-container"></div>'
     vi.stubGlobal('chrome', {
       runtime: {
         sendMessage,
-        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+        onMessage: {
+          addListener: vi.fn((listener: (message: unknown) => void) => {
+            runtimeMessageListener = listener
+          }),
+          removeListener: vi.fn(),
+        },
       },
     })
   })
@@ -32,6 +53,205 @@ describe('content script translation queue', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
     document.body.innerHTML = ''
+  })
+
+  it('stops debounce work and newly detected messages immediately when disabled', async () => {
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'pending before disable')
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(0)
+    updateTranslationEnabled(false)
+    await vi.advanceTimersByTimeAsync(300)
+
+    appendMessage(container, 'detected while disabled')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(translationRequests()).toHaveLength(0)
+  })
+
+  it('discards queued but undispatched work when disabled', async () => {
+    const translationResolvers: Array<(value: unknown) => void> = []
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return new Promise((resolve) => translationResolvers.push(resolve))
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    for (let index = 0; index < 11; index++) {
+      appendMessage(container, `queued message ${index}`)
+    }
+
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(10)
+    expect(mod._test.translationQueueLength).toBe(1)
+
+    updateTranslationEnabled(false)
+    expect(mod._test.translationQueueLength).toBe(0)
+
+    for (const resolve of translationResolvers) {
+      resolve({
+        type: 'translate_response',
+        payload: { messageId: 'any-id', translatedText: '翻譯結果' },
+      })
+    }
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(translationRequests()).toHaveLength(10)
+  })
+
+  it('ignores a provider response that resolves after disable', async () => {
+    let resolveTranslation: ((value: unknown) => void) | undefined
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return new Promise((resolve) => { resolveTranslation = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'late response message')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(1)
+
+    updateTranslationEnabled(false)
+    resolveTranslation?.({
+      type: 'translate_response',
+      payload: { messageId: 'any-id', translatedText: 'late translation' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-tachi-lens-translated]')).toBeNull()
+  })
+
+  it('pauses retry and backlog processing while disabled', async () => {
+    sendMessage.mockImplementation((message: { type: string }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: {
+            messageId: 'any-id',
+            error: { type: 'rate_limited', retryAfterMs: 30_000, message: 'Rate limited' },
+          },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'retryable message')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(1)
+
+    mod._test.activeTranslations = mod._test.MAX_CONCURRENT
+    const backlog = document.createElement('div')
+    backlog.textContent = 'backlog before disable'
+    container.appendChild(backlog)
+    mod._test.enqueueTranslation(backlog, 'backlog')
+    expect(mod._test.translationQueueLength).toBe(1)
+
+    updateTranslationEnabled(false)
+    expect(mod._test.translationQueueLength).toBe(0)
+
+    mod._test.activeTranslations = 0
+    await vi.advanceTimersByTimeAsync(35_000)
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(mod._test.translationQueueLength).toBe(0)
+  })
+
+  it('resumes translation for newly eligible messages after re-enable', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    updateTranslationEnabled(false)
+    appendMessage(container, 'ignored while disabled')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(0)
+
+    updateTranslationEnabled(true)
+    appendMessage(container, 'translated after re-enable')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'translated after re-enable' },
+    })
   })
 
   it('does not start more than ten translation requests before earlier requests settle', async () => {

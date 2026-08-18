@@ -35,6 +35,7 @@ export type RuntimeMessageSender = <T>(message: unknown) => Promise<RuntimeMessa
 
 export interface TranslationAttemptResult {
   retryAfterMs?: number
+  translationDisabled?: boolean
 }
 
 declare const chrome: { runtime: RuntimeMessagePort }
@@ -254,6 +255,7 @@ export class TwitchMessageHandler {
     element: HTMLElement,
     settings: ContentSettings,
     priority: 'live' | 'backlog' = 'live',
+    isCurrent: () => boolean = () => true,
   ): Promise<TranslationAttemptResult> {
     const text = this.getMessageText(element)
     if (!text) {
@@ -297,6 +299,7 @@ export class TwitchMessageHandler {
       }
 
       const response = runtimeResult.value
+      if (!isCurrent()) return {}
 
       if (!response?.payload) {
         debugLog('translateAndInject: no response payload, marking processed', { messageId })
@@ -306,6 +309,16 @@ export class TwitchMessageHandler {
       }
 
       const result = response.payload
+
+      // The Service Worker returns an empty TranslationResult when persisted
+      // chat translation is disabled between settings hydration and dispatch.
+      // Treat that response as a silent cancellation, never as a provider
+      // error, so the content script cannot inject a visible fallback.
+      if (result.translatedText === undefined && result.error === undefined) {
+        this.diagnosticReporter?.('message_skipped', '翻譯功能已關閉')
+        this.setProcessed(element, text)
+        return { translationDisabled: true }
+      }
 
       // Only a non-empty, non-whitespace translatedText is a usable success.
       // A whitespace-only or empty string is not injected and follows the
