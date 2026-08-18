@@ -302,6 +302,7 @@ interface ChatIdentity {
   text: string
   username: string
   messageIdentity?: string
+  messageBodyElement?: Element
 }
 type DisabledChatMarker = ChatIdentity
 const disabledChatElements = new WeakMap<HTMLElement, DisabledChatMarker>()
@@ -482,10 +483,12 @@ const MESSAGE_ID_ATTRIBUTES = ['data-message-id', 'data-message-key', 'data-id',
 
 const getChatIdentity = (element: HTMLElement): ChatIdentity => {
   const messageAttribute = MESSAGE_ID_ATTRIBUTES.find((name) => element.hasAttribute(name))
+  const messageBodyElement = queryFirst(element, currentSelectors.CHAT_MESSAGE_BODY)
   return {
     text: handler.getMessageText(element),
     username: handler.getMessageUsername(element),
     ...(messageAttribute ? { messageIdentity: `${messageAttribute}=${element.getAttribute(messageAttribute)}` } : {}),
+    ...(messageBodyElement ? { messageBodyElement } : {}),
   }
 }
 
@@ -507,6 +510,17 @@ const isDisabledChatElement = (element: HTMLElement): boolean => {
   const hasMessageIdentityChange = marker.messageIdentity !== current.messageIdentity &&
     (marker.messageIdentity !== undefined || current.messageIdentity !== undefined)
   if (hasMessageIdentityChange) {
+    disabledChatElements.delete(element)
+    return false
+  }
+
+  // Twitch can recycle a row without exposing a stable message ID. A new
+  // message body element is the remaining DOM identity boundary; ordinary
+  // presentation mutations outside the body keep the disabled-era marker.
+  const hasMessageBodyChange = marker.messageBodyElement !== undefined &&
+    current.messageBodyElement !== undefined &&
+    marker.messageBodyElement !== current.messageBodyElement
+  if (hasMessageBodyChange) {
     disabledChatElements.delete(element)
     return false
   }

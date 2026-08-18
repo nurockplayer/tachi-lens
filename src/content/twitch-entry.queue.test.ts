@@ -526,6 +526,47 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('allows an exact-repeat row when Twitch replaces its message body node', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'repeat')
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    message.innerHTML = [
+      '<span class="chat-author__display-name">viewer</span>',
+      '<span data-a-target="chat-line-message-body">repeat</span>',
+    ].join('')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'repeat' },
+    })
+  })
+
   it('keeps disabled-era messages blocked across ordinary child mutations', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {
