@@ -184,6 +184,30 @@ describe('Translator', () => {
         .toEqual(['override-enabled'])
     })
 
+    it('cancels an active flush before provider dispatch when disabled during preparation', async () => {
+      let releaseApiKey!: (key: string) => void
+      const apiKey = new Promise<string>((resolve) => { releaseApiKey = resolve })
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        { id: 'active-disabled', translatedText: 'must not dispatch' },
+      ])
+      let enabled = true
+      deps.getApiKey = vi.fn(() => apiKey)
+      deps.getProvider = vi.fn(() => provider)
+      deps.getTranslationEnabled = vi.fn(async () => enabled)
+
+      const result = translator.translate({ messageId: 'active-disabled', text: 'queued before disable' })
+      vi.advanceTimersByTime(300)
+      await vi.waitFor(() => expect(deps.getApiKey).toHaveBeenCalledTimes(1))
+
+      enabled = false
+      await translator.cancelQueuedTranslations()
+      releaseApiKey('test-api-key')
+
+      await expect(result).resolves.toEqual({ messageId: 'active-disabled' })
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+    })
+
     it('resolves a single translation request after the batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([

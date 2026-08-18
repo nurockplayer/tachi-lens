@@ -4,7 +4,7 @@ import type { DiagnosticStage, ProviderError, TranslationRequest, TranslationRes
 import { TranslationCache } from './cache'
 import { type RateLimiter } from './rate-limiter'
 import { CharacterTokenEstimator, type GeminiQuotaSettings } from './gemini-quota'
-import { type QuotaScheduler } from './quota-scheduler'
+import { type QuotaScheduler, type SchedulerRequest } from './quota-scheduler'
 import { advanceFairServiceCount, selectFairPriority } from './priority-fairness'
 import type { TranslationCacheRecord } from './translation-cache-db'
 
@@ -103,6 +103,8 @@ export class Translator {
   private consecutiveLiveBatches = 0
   private inFlightTranslations = new Map<string, Promise<TranslationResult>>()
   private activeBatch = false
+  private activeBatchItems = new Set<PendingItem>()
+  private cancelledMessageIds = new Set<string>()
   private flushRequested = false
 
   constructor(
@@ -160,6 +162,7 @@ export class Translator {
   async cancelQueuedTranslations(channelName?: string): Promise<void> {
     const liveCandidates = this.liveQueue
     const backlogCandidates = this.backlogQueue
+    const activeCandidates = [...this.activeBatchItems]
     this.liveQueue = []
     this.backlogQueue = []
 
@@ -183,6 +186,7 @@ export class Translator {
           remaining.push(item)
           continue
         }
+        if (this.activeBatchItems.has(item)) this.cancelledMessageIds.add(item.request.messageId)
         item.resolve({ messageId: item.request.messageId })
       }
       return remaining
@@ -195,6 +199,7 @@ export class Translator {
     const [remainingLive, remainingBacklog] = await Promise.all([
       cancelMatching(liveCandidates),
       cancelMatching(backlogCandidates),
+      cancelMatching(activeCandidates),
     ])
 
     // Preserve work that arrived while effective settings were being read.
@@ -205,6 +210,44 @@ export class Translator {
     this.liveQueue = [...remainingLive, ...this.liveQueue]
     this.backlogQueue = [...remainingBacklog, ...this.backlogQueue]
     if (this.liveQueue.length > 0 || this.backlogQueue.length > 0) this.scheduleTimer()
+  }
+
+  private async filterEnabledItems(
+    items: PendingItem[],
+    fallbackEnabled: boolean | undefined,
+  ): Promise<PendingItem[]> {
+    const enabled = await Promise.all(items.map(async (item) => {
+      if (this.cancelledMessageIds.has(item.request.messageId)) return false
+      const channelEnabled = await this.deps.getTranslationEnabled?.(item.channelName)
+      return channelEnabled ?? fallbackEnabled
+    }))
+    const active: PendingItem[] = []
+    for (const [index, item] of items.entries()) {
+      if (enabled[index] === false) {
+        item.resolve({ messageId: item.request.messageId })
+      } else {
+        active.push(item)
+      }
+    }
+    return active
+  }
+
+  private async runUncancelledBatch(
+    requests: SchedulerRequest[],
+    signal: AbortSignal | undefined,
+    run: (requests: SchedulerRequest[], signal?: AbortSignal) => Promise<BatchItemResult[]>,
+  ): Promise<BatchItemResult[]> {
+    const activeRequests = requests.filter((request) => !this.cancelledMessageIds.has(request.id))
+    const cancelledRequests = requests.filter((request) => this.cancelledMessageIds.has(request.id))
+    const results = activeRequests.length > 0 ? await run(activeRequests, signal) : []
+    return [
+      ...results,
+      ...cancelledRequests.map((request) => ({
+        id: request.id,
+        error: 'Translation canceled',
+        errorType: 'unknown' as const,
+      })),
+    ]
   }
 
   private flushImmediately(priority?: 'live' | 'backlog'): void {
@@ -222,6 +265,8 @@ export class Translator {
     this.activeBatch = true
     void this.flush(priority).finally(() => {
       this.activeBatch = false
+      this.activeBatchItems.clear()
+      this.cancelledMessageIds.clear()
       this.drainAfterActiveBatch()
     })
   }
@@ -278,6 +323,8 @@ export class Translator {
     const items = queue.splice(0, this.options.maxBatchSize)
 
     if (items.length === 0) return
+    this.activeBatchItems.clear()
+    for (const item of items) this.activeBatchItems.add(item)
 
     this.consecutiveLiveBatches = advanceFairServiceCount(
       this.consecutiveLiveBatches,
@@ -289,19 +336,12 @@ export class Translator {
     try {
 
     const settings = await this.deps.getSettings()
-    const enabled = await Promise.all(items.map(async (item) => {
-      const channelEnabled = await this.deps.getTranslationEnabled?.(item.channelName)
-      return channelEnabled ?? settings.translationEnabled
-    }))
-    const activeItems = items.filter((_, index) => enabled[index] !== false)
-    for (const [index, item] of items.entries()) {
-      if (enabled[index] === false) item.resolve({ messageId: item.request.messageId })
-    }
+    const activeItems = await this.filterEnabledItems(items, settings.translationEnabled)
     if (activeItems.length === 0) return
     ownedItems = activeItems
     const { selectedModel: model, targetLanguage: targetLang } = settings
 
-    const uncached: PendingItem[] = []
+    let uncached: PendingItem[] = []
     // Flush-local deduplication (#56): requests sharing a canonical identity
     // within this flush are grouped under the first request for that identity.
     // Only the group leader becomes a provider item; every follower shares the
@@ -430,6 +470,7 @@ export class Translator {
       }
     }
 
+    uncached = await this.filterEnabledItems(uncached, settings.translationEnabled)
     if (uncached.length === 0) return
 
     const apiKey = await this.deps.getApiKey(settings.selectedProvider)
@@ -459,6 +500,12 @@ export class Translator {
       return
     }
 
+    // Settings can change while API-key, cache, or quota preparation awaits.
+    // Recheck immediately before any provider-capable branch so an active
+    // flush cannot resurrect work invalidated by a disable.
+    uncached = await this.filterEnabledItems(uncached, settings.translationEnabled)
+    if (uncached.length === 0) return
+
     if (schedulerManaged && this.deps.quotaScheduler) {
       const selectedGemini = settings.selectedProvider === 'gemini'
       const deepseekModel = selectedGemini ? DEEPSEEK_FALLBACK_MODEL : model
@@ -475,14 +522,26 @@ export class Translator {
         quotaKey: model,
         geminiAvailable: selectedGemini && Boolean(apiKey && provider) && !this.deps.rateLimiter.isLimited('gemini'),
         primaryProvider: selectedGemini ? 'gemini' : 'deepseek',
-        runGemini: (requests, signal) => provider
-          ? provider.translateBatch(requests, apiKey!, model, targetLang, signal)
-          : Promise.resolve(requests.map((request) => ({ id: request.id, error: 'Gemini provider is unavailable' }))),
+        runGemini: (requests, signal) => this.runUncancelledBatch(
+          requests,
+          signal,
+          (activeRequests, activeSignal) => provider
+            ? provider.translateBatch(activeRequests, apiKey!, model, targetLang, activeSignal)
+            : Promise.resolve(activeRequests.map((request) => ({ id: request.id, error: 'Gemini provider is unavailable' }))),
+        ),
         getDeepSeekCachedResults: (requests) => this.getDeepSeekCachedResults(requests, targetLang, deepseekModel),
-        runDeepSeek: (requests, signal) => this.runDeepSeekBatch(requests, targetLang, deepseekModel, signal),
+        runDeepSeek: (requests, signal) => this.runUncancelledBatch(
+          requests,
+          signal,
+          (activeRequests, activeSignal) => this.runDeepSeekBatch(activeRequests, targetLang, deepseekModel, activeSignal),
+        ),
       })
 
       for (const item of uncached) {
+        if (this.cancelledMessageIds.has(item.request.messageId)) {
+          item.resolve({ messageId: item.request.messageId })
+          continue
+        }
         const result = scheduled.results.find((entry) => entry.id === item.request.messageId)
         const providerId = scheduled.providers.get(item.request.messageId) ?? 'gemini'
         const resultModel = providerId === 'deepseek' ? deepseekModel : model
@@ -512,7 +571,11 @@ export class Translator {
       const retryAfterMs = this.deps.rateLimiter.getRemainingCooldown(settings.selectedProvider)
 
       if (settings.selectedProvider === 'gemini') {
-        await this.translateWithDeepSeekFallback(uncached, targetLang, retryAfterMs)
+        await this.translateWithDeepSeekFallback(
+          uncached.filter((item) => !this.cancelledMessageIds.has(item.request.messageId)),
+          targetLang,
+          retryAfterMs,
+        )
       } else {
         this.resolveAll(uncached, {
           type: 'rate_limited',
@@ -523,6 +586,9 @@ export class Translator {
 
       return
     }
+
+    uncached = await this.filterEnabledItems(uncached, settings.translationEnabled)
+    if (uncached.length === 0) return
 
     const batchRequests = uncached.map((item) => ({
       id: item.request.messageId,
@@ -625,17 +691,29 @@ export class Translator {
     model: string,
     signal?: AbortSignal,
   ): Promise<BatchItemResult[]> {
+    const cancelledIds = new Set(
+      requests
+        .filter((request) => this.cancelledMessageIds.has(request.id))
+        .map((request) => request.id),
+    )
+    const eligibleRequests = requests.filter((request) => !cancelledIds.has(request.id))
     const results = new Map(
-      this.getDeepSeekCachedResults(requests, targetLang, model)
+      this.getDeepSeekCachedResults(eligibleRequests, targetLang, model)
         .map((result) => [result.id, result] as const),
     )
-    const uncached = requests.filter((request) => {
+    let uncached = eligibleRequests.filter((request) => {
       return !results.has(request.id)
     })
+    const resultFor = (request: { id: string }): BatchItemResult =>
+      (cancelledIds.has(request.id) || this.cancelledMessageIds.has(request.id))
+      ? { id: request.id, error: 'Translation canceled', errorType: 'unknown' }
+      : results.get(request.id)!
 
-    if (uncached.length === 0) return requests.map((request) => results.get(request.id)!)
+    if (uncached.length === 0) return requests.map(resultFor)
 
     const apiKey = await this.deps.getApiKey(DEEPSEEK_FALLBACK_PROVIDER)
+    uncached = uncached.filter((request) => !this.cancelledMessageIds.has(request.id))
+    if (uncached.length === 0) return requests.map(resultFor)
     const provider = this.deps.getProvider(DEEPSEEK_FALLBACK_PROVIDER)
     if (!apiKey) {
       for (const request of uncached) {
@@ -646,7 +724,7 @@ export class Translator {
           errorType: 'auth',
         })
       }
-      return requests.map((request) => results.get(request.id)!)
+      return requests.map(resultFor)
     }
     if (!provider) {
       for (const request of uncached) {
@@ -657,7 +735,7 @@ export class Translator {
           errorType: 'bad_request',
         })
       }
-      return requests.map((request) => results.get(request.id)!)
+      return requests.map(resultFor)
     }
 
     if (this.deps.rateLimiter.isLimited(DEEPSEEK_FALLBACK_PROVIDER)) {
@@ -671,7 +749,7 @@ export class Translator {
           errorType: 'rate_limited',
         })
       }
-      return requests.map((request) => results.get(request.id)!)
+      return requests.map(resultFor)
     }
 
     let providerResults: BatchItemResult[]
@@ -716,7 +794,7 @@ export class Translator {
       }
     }
 
-    return requests.map((request) => results.get(request.id)!)
+    return requests.map(resultFor)
   }
 
   private getDeepSeekCachedResults(
@@ -753,12 +831,16 @@ export class Translator {
       targetLang,
       DEEPSEEK_FALLBACK_MODEL,
     )
+    const activeItems = items.filter((item) => !this.cancelledMessageIds.has(item.request.messageId))
+    for (const item of items) {
+      if (!activeItems.includes(item)) item.resolve({ messageId: item.request.messageId })
+    }
     const byId = new Map(batchResults.map((result) => [result.id, result]))
-    const unavailable = items.filter((item) => {
+    const unavailable = activeItems.filter((item) => {
       const errorType = byId.get(item.request.messageId)?.errorType
       return errorType === 'auth' || errorType === 'bad_request'
     })
-    const available = items.filter((item) => !unavailable.includes(item))
+    const available = activeItems.filter((item) => !unavailable.includes(item))
 
     if (unavailable.length > 0) {
       const reason = byId.get(unavailable[0]!.request.messageId)?.error ?? 'DeepSeek is unavailable'
