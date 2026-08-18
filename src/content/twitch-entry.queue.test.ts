@@ -516,6 +516,45 @@ describe('content script translation queue', () => {
     expect(translationRequests()).toHaveLength(0)
   })
 
+  it('keeps disabled-era messages blocked across late username hydration', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    const message = document.createElement('div')
+    message.className = 'chat-line__message'
+    message.innerHTML = [
+      '<span class="chat-author__display-name"></span>',
+      '<span data-a-target="chat-line-message-body">late username</span>',
+    ].join('')
+    container.appendChild(message)
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    message.querySelector('.chat-author__display-name')!.textContent = 'viewer'
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(translationRequests()).toHaveLength(0)
+  })
+
   it('does not resurrect disabled-era messages after re-enable', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {

@@ -298,10 +298,12 @@ let chatTranslationEnabled = true
 let chatTranslationGeneration = 0
 const inFlight = new WeakSet<HTMLElement>()
 const inFlightElements = new Set<HTMLElement>()
-interface DisabledChatMarker {
+interface ChatIdentity {
   text: string
-  fingerprint: string
+  username: string
+  messageIdentity?: string
 }
+type DisabledChatMarker = ChatIdentity
 const disabledChatElements = new WeakMap<HTMLElement, DisabledChatMarker>()
 
 const debugLog = (msg: string, ...args: unknown[]): void => {
@@ -476,14 +478,16 @@ let queuedForTranslation = new WeakSet<HTMLElement>()
 // _test hook: record dispatched items. Set before drainTranslationQueue.
 let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
 
-const getChatFingerprint = (element: HTMLElement): string => [
-  Array.from(element.attributes)
-    .map(({ name, value }) => `${name}=${value}`)
-    .sort()
-    .join('|'),
-  handler.getMessageUsername(element),
-  handler.getMessageText(element),
-].join('\u0000')
+const MESSAGE_ID_ATTRIBUTES = ['data-message-id', 'data-message-key', 'data-id', 'id'] as const
+
+const getChatIdentity = (element: HTMLElement): ChatIdentity => {
+  const messageAttribute = MESSAGE_ID_ATTRIBUTES.find((name) => element.hasAttribute(name))
+  return {
+    text: handler.getMessageText(element),
+    username: handler.getMessageUsername(element),
+    ...(messageAttribute ? { messageIdentity: `${messageAttribute}=${element.getAttribute(messageAttribute)}` } : {}),
+  }
+}
 
 const recordChatMutation = (element: HTMLElement): void => {
   if (!chatTranslationEnabled) markDisabledChatElement(element)
@@ -491,10 +495,7 @@ const recordChatMutation = (element: HTMLElement): void => {
 
 const markDisabledChatElement = (element: HTMLElement): void => {
   if (!handler.isAlreadyProcessed(element)) {
-    disabledChatElements.set(element, {
-      text: handler.getMessageText(element),
-      fingerprint: getChatFingerprint(element),
-    })
+    disabledChatElements.set(element, getChatIdentity(element))
   }
 }
 
@@ -502,13 +503,24 @@ const isDisabledChatElement = (element: HTMLElement): boolean => {
   const marker = disabledChatElements.get(element)
   if (marker === undefined) return false
 
-  const currentText = handler.getMessageText(element)
-  const currentFingerprint = getChatFingerprint(element)
-  if (marker.text === '' && currentText !== '') {
-    disabledChatElements.set(element, { text: currentText, fingerprint: currentFingerprint })
+  const current = getChatIdentity(element)
+  const hasMessageIdentityChange = marker.messageIdentity !== current.messageIdentity &&
+    (marker.messageIdentity !== undefined || current.messageIdentity !== undefined)
+  if (hasMessageIdentityChange) {
+    disabledChatElements.delete(element)
+    return false
+  }
+
+  // A row can finish hydrating after the disable. Treat the first empty-to-
+  // populated username/body transition as the same disabled-era message.
+  const finishedHydrating = (marker.text === '' && current.text !== '') ||
+    (marker.username === '' && current.username !== '')
+  if (finishedHydrating) {
+    disabledChatElements.set(element, current)
     return true
   }
-  if (marker.fingerprint !== currentFingerprint) {
+
+  if (marker.text !== current.text || marker.username !== current.username) {
     disabledChatElements.delete(element)
     return false
   }
