@@ -62,7 +62,9 @@ const getChannelNameFromSender = (sender: unknown): string | undefined => {
     const hostname = url.hostname.toLowerCase()
     if (hostname !== 'twitch.tv' && !hostname.endsWith('.twitch.tv')) return undefined
 
-    return url.pathname.match(/^\/([^/]+)/)?.[1]?.toLowerCase()
+    const segments = url.pathname.split('/').filter(Boolean)
+    const channel = segments[0]?.toLowerCase() === 'popout' ? segments[1] : segments[0]
+    return channel?.toLowerCase()
   } catch {
     return undefined
   }

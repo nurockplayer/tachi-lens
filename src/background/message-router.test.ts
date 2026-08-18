@@ -137,6 +137,32 @@ describe('MessageRouter', () => {
       expect(translator.translate).not.toHaveBeenCalled()
     })
 
+    it('checks the actual channel for a Twitch popout chat sender', async () => {
+      const translator = {
+        translate: vi.fn(),
+      } as unknown as Translator
+      const getContentSettings = vi.fn(async (channelName?: string) => ({
+        translationEnabled: channelName !== 'channel-off',
+      }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+
+      router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm-popout-off', text: 'Hello' } },
+        { tab: { url: 'https://www.twitch.tv/popout/channel-off/chat' } },
+        sendResponse,
+      )
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith({
+          type: 'translate_response',
+          payload: { messageId: 'm-popout-off' },
+        })
+      })
+      expect(getContentSettings).toHaveBeenCalledWith('channel-off')
+      expect(translator.translate).not.toHaveBeenCalled()
+    })
+
     it('returns false for an invalid translate_request payload', () => {
       const { router } = makeRouter()
       const sendResponse = vi.fn()

@@ -84,6 +84,9 @@ const CHAT_MESSAGE_TEXT_AREA =
  * Extract a lowercased Twitch channel name from the given URL pathname.
  */
 export const parseChannelFromPathname = (pathname: string): string | undefined => {
+  const popoutMatch = pathname.match(/^\/popout\/([^/]+)(?:\/chat)?(?:\/|$)/i)
+  if (popoutMatch?.[1]) return popoutMatch[1].toLowerCase()
+
   const match = pathname.match(/^\/([^/]+)/)
   return match?.[1]?.toLowerCase()
 }

@@ -290,6 +290,9 @@ const DEBOUNCE_MS = 300
 const MAX_PENDING = 50
 let chatTranslationEnabled = true
 let chatTranslationGeneration = 0
+const inFlight = new WeakSet<HTMLElement>()
+const inFlightElements = new Set<HTMLElement>()
+const disabledChatElements = new WeakMap<HTMLElement, string>()
 
 const debugLog = (msg: string, ...args: unknown[]): void => {
   console.debug('[tachi-lens]', msg, ...args)
@@ -323,7 +326,12 @@ const flushPending = (): void => {
 }
 
 const scheduleProcess = (element: HTMLElement): void => {
-  if (stopped || !chatTranslationEnabled) return
+  if (stopped) return
+  if (!chatTranslationEnabled) {
+    markDisabledChatElement(element)
+    return
+  }
+  if (isDisabledChatElement(element)) return
 
   // Use WeakSet to dedupe by element identity, not text content
   if (queuedElements.has(element)) return
@@ -411,6 +419,10 @@ const observeChat = (): void => {
 
               for (const message of messages) {
                 if (message instanceof HTMLElement && !handler.isAlreadyProcessed(message)) {
+                  if (!chatTranslationEnabled) {
+                    markDisabledChatElement(message)
+                    continue
+                  }
                   scheduleProcess(message)
                 }
               }
@@ -426,7 +438,6 @@ const observeChat = (): void => {
 }
 
 // --- Processing ---
-const inFlight = new WeakSet<HTMLElement>()
 type TranslationPriority = 'live' | 'backlog'
 interface QueuedTranslation {
   element: HTMLElement
@@ -454,9 +465,42 @@ let queuedForTranslation = new WeakSet<HTMLElement>()
 // _test hook: record dispatched items. Set before drainTranslationQueue.
 let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
 
-const disableChatTranslation = (): void => {
+const markDisabledChatElement = (element: HTMLElement): void => {
+  if (!handler.isAlreadyProcessed(element)) {
+    disabledChatElements.set(element, handler.getMessageText(element))
+  }
+}
+
+const isDisabledChatElement = (element: HTMLElement): boolean => {
+  const disabledText = disabledChatElements.get(element)
+  if (disabledText === undefined) return false
+
+  const currentText = handler.getMessageText(element)
+  if (disabledText !== '' && currentText !== disabledText) {
+    disabledChatElements.delete(element)
+    return false
+  }
+
+  return true
+}
+
+const markCurrentChatAsDisabled = (): void => {
+  const container = queryFirst(document, currentSelectors.CHAT_CONTAINER)
+  if (!container) return
+
+  for (const node of queryFirstAll(container, currentSelectors.CHAT_MESSAGE)) {
+    if (node instanceof HTMLElement) markDisabledChatElement(node)
+  }
+}
+
+const disableChatTranslation = (triggerElement?: HTMLElement): void => {
   if (chatTranslationEnabled) chatTranslationGeneration++
   chatTranslationEnabled = false
+  if (triggerElement) markDisabledChatElement(triggerElement)
+  for (const element of pendingMessages.values()) markDisabledChatElement(element)
+  for (const entry of translationQueue) markDisabledChatElement(entry.element)
+  for (const element of inFlightElements) markDisabledChatElement(element)
+  markCurrentChatAsDisabled()
   clearPendingChatTranslation()
   queuedForTranslation = new WeakSet()
   translationQueue.length = 0
@@ -464,7 +508,7 @@ const disableChatTranslation = (): void => {
 }
 
 const isObsolete = (entry: QueuedTranslation): boolean =>
-  !entry.element.isConnected || handler.isAlreadyProcessed(entry.element)
+  !entry.element.isConnected || handler.isAlreadyProcessed(entry.element) || isDisabledChatElement(entry.element)
 
 /**
  * Enforce MAX_QUEUED_TRANSLATIONS after an enqueue (the only insertion point).
@@ -499,7 +543,12 @@ const enqueueTranslation = (
   element: HTMLElement,
   priority: TranslationPriority = 'live',
 ): void => {
-  if (!chatTranslationEnabled || stopped || inFlight.has(element) || queuedForTranslation.has(element)) return
+  if (stopped) return
+  if (!chatTranslationEnabled) {
+    markDisabledChatElement(element)
+    return
+  }
+  if (isDisabledChatElement(element) || inFlight.has(element) || queuedForTranslation.has(element)) return
 
   queuedForTranslation.add(element)
   const queued = { element, priority }
@@ -536,7 +585,7 @@ const drainTranslationQueue = (): void => {
 
     queuedForTranslation.delete(element)
 
-    if (!element.isConnected || handler.isAlreadyProcessed(element)) {
+    if (!element.isConnected || handler.isAlreadyProcessed(element) || isDisabledChatElement(element)) {
       reportDiagnosticCount('queue_obsolete_drop')
       continue
     }
@@ -571,12 +620,13 @@ const processMessage = async (
     return {}
   }
   inFlight.add(element)
+  inFlightElements.add(element)
 
   try {
     const settings = await getContentSettings()
     if (stopped) return {}
     if (!settings.translationEnabled) {
-      disableChatTranslation()
+      disableChatTranslation(element)
       return await handler.translateAndInject(element, settings, priority)
     }
     if (!chatTranslationEnabled || translationGeneration !== chatTranslationGeneration) return {}
@@ -588,7 +638,7 @@ const processMessage = async (
       () => chatTranslationEnabled && translationGeneration === chatTranslationGeneration,
     )
     if (result.translationDisabled) {
-      disableChatTranslation()
+      disableChatTranslation(element)
     }
     return result
   } catch {
@@ -599,6 +649,7 @@ const processMessage = async (
     return {}
   } finally {
     inFlight.delete(element)
+    inFlightElements.delete(element)
   }
 }
 
@@ -616,6 +667,7 @@ const retryUnprocessed = (): void => {
   for (const node of messages) {
     if (node instanceof HTMLElement &&
       !handler.isAlreadyProcessed(node) &&
+      !isDisabledChatElement(node) &&
       !queuedElements.has(node)) {
       retryCount++
       enqueueTranslation(node, 'backlog')

@@ -69,6 +69,7 @@ describe('TwitchMessageHandler', () => {
       ['/', undefined],
       ['', undefined],
       ['/somechannel/video/12345', 'somechannel'],
+      ['/popout/somechannel/chat', 'somechannel'],
     ])('parses %s into %s', (pathname, expected) => {
       expect(handler.getChannelName(pathname)).toBe(expected)
     })
@@ -89,6 +90,10 @@ describe('TwitchMessageHandler', () => {
 
     it('ignores sub-paths after channel name', () => {
       expect(parseChannelFromPathname('/channel/video/abc')).toBe('channel')
+    })
+
+    it('extracts the channel from a popout chat path', () => {
+      expect(parseChannelFromPathname('/popout/somechannel/chat')).toBe('somechannel')
     })
 
     it('returns lowercase channel name', () => {

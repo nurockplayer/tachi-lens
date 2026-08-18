@@ -297,6 +297,49 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('does not resurrect disabled-era messages after re-enable', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'pending before disable')
+    await Promise.resolve()
+    await updateTranslationEnabled(false)
+
+    appendMessage(container, 'arrived while disabled')
+    await Promise.resolve()
+    await updateTranslationEnabled(true)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(translationRequests()).toHaveLength(0)
+
+    appendMessage(container, 'new after re-enable')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'new after re-enable' },
+    })
+  })
+
   it('does not start more than ten translation requests before earlier requests settle', async () => {
     const translationResolvers: Array<(value: unknown) => void> = []
     sendMessage.mockImplementation((message: { type: string }) => {
