@@ -166,7 +166,12 @@ const handleSpeechSettingsUpdate = (payload: { captionMaxLines?: number; caption
 const onLocationChange = (): void => {
   if (stopped) return
   cleanup()
+  // A disabled chat gate is page-local state. Re-open the gate while the new
+  // channel's effective settings are rehydrated; processMessage still checks
+  // those settings before dispatching any provider work.
+  chatTranslationEnabled = true
   observeChat()
+  void rehydrateChatTranslationState()
 }
 
 let popstateAttached = false
@@ -624,6 +629,9 @@ const retryUnprocessed = (): void => {
 
 // --- Cleanup ---
 const cleanup = (): void => {
+  // Invalidate results from the page being torn down, including work that was
+  // already in flight when SPA navigation replaced the chat container.
+  chatTranslationGeneration++
   if (chatObserver) {
     chatObserver.disconnect()
     chatObserver = null
@@ -773,6 +781,28 @@ export const handleSettingsUpdate = async (_payload: SettingsUpdatePayload): Pro
   } else {
     chatTranslationEnabled = true
   }
+}
+
+const rehydrateChatTranslationState = async (): Promise<void> => {
+  const updateGeneration = ++settingsUpdateGeneration
+  invalidateSettingsCache()
+
+  let settings: ContentSettings
+  try {
+    settings = await getContentSettings(true)
+  } catch {
+    return
+  }
+
+  if (stopped || updateGeneration !== settingsUpdateGeneration) return
+
+  if (settings.translationEnabled === false) {
+    disableChatTranslation()
+    return
+  }
+
+  chatTranslationEnabled = true
+  retryUnprocessed()
 }
 
 // --- Main ---

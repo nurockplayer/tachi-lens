@@ -36,6 +36,7 @@ export interface TranslatorDependencies {
     selectedProvider: ProviderId
     selectedModel: string
     targetLanguage: string
+    translationEnabled?: boolean
     geminiQuota?: GeminiQuotaSettings
     geminiQuotaProfiles?: Record<string, GeminiQuotaSettings>
   }>
@@ -226,6 +227,16 @@ export class Translator {
     try {
 
     const settings = await this.deps.getSettings()
+    if (settings.translationEnabled === false) {
+      // A request may have passed the router gate while enabled and remained
+      // queued until the persisted setting changed. Settle it without touching
+      // cache, credentials, quota, or a provider; the Content Script treats
+      // the empty response as disabled work.
+      for (const item of items) {
+        item.resolve({ messageId: item.request.messageId })
+      }
+      return
+    }
     const { selectedModel: model, targetLanguage: targetLang } = settings
 
     const uncached: PendingItem[] = []

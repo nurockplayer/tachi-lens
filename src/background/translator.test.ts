@@ -77,6 +77,24 @@ describe('Translator', () => {
   })
 
   describe('batching', () => {
+    it('settles queued work without provider calls when chat translation is disabled at flush', async () => {
+      const provider = createMockProvider()
+      deps.getProvider = vi.fn(() => provider)
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'deepseek' as ProviderId,
+        selectedModel: 'deepseek-v4-flash',
+        targetLanguage: 'zh-TW',
+        translationEnabled: false,
+      }))
+
+      const resultPromise = translator.translate({ messageId: 'disabled-queued', text: 'must not leave the process' })
+      vi.advanceTimersByTime(300)
+
+      await expect(resultPromise).resolves.toEqual({ messageId: 'disabled-queued' })
+      expect(deps.getApiKey).not.toHaveBeenCalled()
+      expect(provider.translateBatch).not.toHaveBeenCalled()
+    })
+
     it('resolves a single translation request after the batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([
