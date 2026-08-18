@@ -480,6 +480,42 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('keeps disabled-era messages blocked across ordinary child mutations', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'ordinary hydration stays blocked')
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message')!
+    const badge = document.createElement('span')
+    badge.className = 'late-hydrated-badge'
+    message.appendChild(badge)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(translationRequests()).toHaveLength(0)
+  })
+
   it('does not resurrect disabled-era messages after re-enable', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {
