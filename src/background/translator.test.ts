@@ -142,7 +142,7 @@ describe('Translator', () => {
 
       // The setting is enabled again by the time the batch would flush, but
       // work queued before the disable must not be resurrected.
-      translator.cancelQueuedTranslations('channel-disabled')
+      await translator.cancelQueuedTranslations('channel-disabled')
       vi.advanceTimersByTime(300)
 
       await expect(disabled).resolves.toEqual({ messageId: 'channel-disabled' })
@@ -153,6 +153,35 @@ describe('Translator', () => {
       expect(provider.translateBatch).toHaveBeenCalledTimes(1)
       expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id))
         .toEqual(['channel-enabled'])
+    })
+
+    it('preserves explicitly enabled channel overrides during a global disable', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((request) => ({ id: request.id, translatedText: `translated:${request.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+      deps.getTranslationEnabled = vi.fn(async (channelName) => channelName === 'channel-enabled')
+
+      const globalItem = translator.translate(
+        { messageId: 'global-disabled', text: 'drop this' },
+        { channelName: 'channel-disabled' },
+      )
+      const overrideItem = translator.translate(
+        { messageId: 'override-enabled', text: 'keep this' },
+        { channelName: 'channel-enabled' },
+      )
+
+      await translator.cancelQueuedTranslations()
+      vi.advanceTimersByTime(300)
+
+      await expect(globalItem).resolves.toEqual({ messageId: 'global-disabled' })
+      await expect(overrideItem).resolves.toEqual({
+        messageId: 'override-enabled',
+        translatedText: 'translated:keep this',
+      })
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id))
+        .toEqual(['override-enabled'])
     })
 
     it('resolves a single translation request after the batch window', async () => {

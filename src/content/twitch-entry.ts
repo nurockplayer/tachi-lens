@@ -296,7 +296,12 @@ let chatTranslationEnabled = true
 let chatTranslationGeneration = 0
 const inFlight = new WeakSet<HTMLElement>()
 const inFlightElements = new Set<HTMLElement>()
-const disabledChatElements = new WeakMap<HTMLElement, string>()
+interface DisabledChatMarker {
+  text: string
+  fingerprint: string
+  mutationVersion: number
+}
+const disabledChatElements = new WeakMap<HTMLElement, DisabledChatMarker>()
 
 const debugLog = (msg: string, ...args: unknown[]): void => {
   console.debug('[tachi-lens]', msg, ...args)
@@ -422,6 +427,9 @@ const observeChat = (): void => {
               }
 
               for (const message of messages) {
+                if (message instanceof HTMLElement) {
+                  recordChatMutation(message)
+                }
                 if (message instanceof HTMLElement && !handler.isAlreadyProcessed(message)) {
                   if (!chatTranslationEnabled) {
                     markDisabledChatElement(message)
@@ -469,22 +477,49 @@ let queuedForTranslation = new WeakSet<HTMLElement>()
 // _test hook: record dispatched items. Set before drainTranslationQueue.
 let _dispatchRecorder: ((element: HTMLElement, priority: TranslationPriority) => void) | undefined
 
+const chatMutationVersions = new WeakMap<HTMLElement, number>()
+
+const getChatFingerprint = (element: HTMLElement): string => [
+  handler.getMessageUsername(element),
+  handler.getMessageText(element),
+  element.outerHTML,
+].join('\u0000')
+
+const recordChatMutation = (element: HTMLElement): void => {
+  const mutationVersion = (chatMutationVersions.get(element) ?? 0) + 1
+  chatMutationVersions.set(element, mutationVersion)
+
+  if (!chatTranslationEnabled) {
+    markDisabledChatElement(element)
+  } else if (disabledChatElements.has(element)) {
+    // A DOM mutation after re-enable means Twitch has recycled this node for
+    // a new message, even when the new message repeats the same body text.
+    disabledChatElements.delete(element)
+  }
+}
+
 const markDisabledChatElement = (element: HTMLElement): void => {
   if (!handler.isAlreadyProcessed(element)) {
-    disabledChatElements.set(element, handler.getMessageText(element))
+    disabledChatElements.set(element, {
+      text: handler.getMessageText(element),
+      fingerprint: getChatFingerprint(element),
+      mutationVersion: chatMutationVersions.get(element) ?? 0,
+    })
   }
 }
 
 const isDisabledChatElement = (element: HTMLElement): boolean => {
-  const disabledText = disabledChatElements.get(element)
-  if (disabledText === undefined) return false
+  const marker = disabledChatElements.get(element)
+  if (marker === undefined) return false
 
   const currentText = handler.getMessageText(element)
-  if (disabledText === '' && currentText !== '') {
-    disabledChatElements.set(element, currentText)
+  const currentFingerprint = getChatFingerprint(element)
+  const mutationVersion = chatMutationVersions.get(element) ?? 0
+  if (marker.text === '' && currentText !== '') {
+    disabledChatElements.set(element, { text: currentText, fingerprint: currentFingerprint, mutationVersion })
     return true
   }
-  if (disabledText !== '' && currentText !== disabledText) {
+  if (marker.fingerprint !== currentFingerprint || marker.mutationVersion !== mutationVersion) {
     disabledChatElements.delete(element)
     return false
   }

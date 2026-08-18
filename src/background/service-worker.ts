@@ -17,6 +17,7 @@ import {
   isBaseMessage,
   isDiagnosticEventMessage,
   isGetQuotaHealthMessage,
+  isSettingsUpdateMessage,
   isResetQuotaHealthMessage,
   isSpeechControlMessage,
   isSpeechSettingsUpdateMessage,
@@ -258,10 +259,15 @@ const handleMessage = (
   }
 
   // settings_updated from Popup → broadcast to all content scripts
-  if (isBaseMessage(message) && message.type === 'settings_updated') {
-    const payload = message.payload as SettingsUpdatePayload
+  if (isSettingsUpdateMessage(message)) {
+    const payload = message.payload
     if (payload.translationEnabled === false) {
-      translator.cancelQueuedTranslations(payload.channelName)
+      const finishSettingsUpdate = (): void => {
+        void broadcastUpdate(payload)
+        sendResponse({ type: 'settings_update_ack' })
+      }
+      void translator.cancelQueuedTranslations(payload.channelName).then(finishSettingsUpdate, finishSettingsUpdate)
+      return true
     }
     void broadcastUpdate(payload)
     return false
@@ -340,7 +346,7 @@ const handleCommand = async (command: string): Promise<void> => {
       const nextEnabled = !settings.translationEnabled
 
       await saveUserSettings({ translationEnabled: nextEnabled })
-      if (!nextEnabled) translator.cancelQueuedTranslations()
+      if (!nextEnabled) await translator.cancelQueuedTranslations()
       await broadcastUpdate({ translationEnabled: nextEnabled })
       break
     }

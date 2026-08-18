@@ -157,11 +157,29 @@ export class Translator {
    * provider. An omitted channel means the global setting changed; a channel
    * name limits cancellation to that channel's pending requests.
    */
-  cancelQueuedTranslations(channelName?: string): void {
-    const cancelMatching = (queue: PendingItem[]): PendingItem[] => {
+  async cancelQueuedTranslations(channelName?: string): Promise<void> {
+    const liveCandidates = this.liveQueue
+    const backlogCandidates = this.backlogQueue
+    this.liveQueue = []
+    this.backlogQueue = []
+
+    const shouldCancel = async (item: PendingItem): Promise<boolean> => {
+      if (channelName !== undefined) return item.channelName === channelName
+      if (!this.deps.getTranslationEnabled) return true
+
+      try {
+        return (await this.deps.getTranslationEnabled(item.channelName)) !== true
+      } catch {
+        // The authoritative disable was already received. If the effective
+        // state cannot be read, drop the work rather than risk provider cost.
+        return true
+      }
+    }
+
+    const cancelMatching = async (queue: PendingItem[]): Promise<PendingItem[]> => {
       const remaining: PendingItem[] = []
       for (const item of queue) {
-        if (channelName !== undefined && item.channelName !== channelName) {
+        if (!(await shouldCancel(item))) {
           remaining.push(item)
           continue
         }
@@ -174,8 +192,18 @@ export class Translator {
       clearTimeout(this.timer)
       this.timer = null
     }
-    this.liveQueue = cancelMatching(this.liveQueue)
-    this.backlogQueue = cancelMatching(this.backlogQueue)
+    const [remainingLive, remainingBacklog] = await Promise.all([
+      cancelMatching(liveCandidates),
+      cancelMatching(backlogCandidates),
+    ])
+
+    // Preserve work that arrived while effective settings were being read.
+    if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    this.liveQueue = [...remainingLive, ...this.liveQueue]
+    this.backlogQueue = [...remainingBacklog, ...this.backlogQueue]
     if (this.liveQueue.length > 0 || this.backlogQueue.length > 0) this.scheduleTimer()
   }
 

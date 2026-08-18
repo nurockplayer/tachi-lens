@@ -403,6 +403,46 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('allows a same-text node after its DOM identity changes', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+    appendMessage(container, 'repeat')
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    // Keep both the username and body text identical; only the DOM identity
+    // changes, as it does when Twitch recycles a virtual-scroll node.
+    message.setAttribute('data-message-id', 'new-message')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'repeat' },
+    })
+  })
+
   it('does not resurrect disabled-era messages after re-enable', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {
