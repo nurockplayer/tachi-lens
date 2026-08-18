@@ -192,7 +192,8 @@ export const extractChannelFromUrl = (url: string): string | undefined => {
     if (!hostname.endsWith('twitch.tv')) return undefined
     if (hostname !== 'twitch.tv' && hostname !== 'www.twitch.tv') return undefined
 
-    const match = pathname.match(/^\/([^/]+)/)
+    const match = pathname.match(/^\/popout\/([^/]+)(?:\/chat)?(?:\/|$)/i) ??
+      pathname.match(/^\/([^/]+)/)
 
     return match?.[1]?.toLowerCase()
   } catch {
