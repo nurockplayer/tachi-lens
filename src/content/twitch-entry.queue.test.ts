@@ -297,6 +297,63 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('retries a failed settings refresh so re-enable is not stranded', async () => {
+    let failNextSettingsRead = false
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        if (failNextSettingsRead) {
+          failNextSettingsRead = false
+          return Promise.reject(new Error('temporary settings read failure'))
+        }
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+
+    await updateTranslationEnabled(false)
+    effectiveTranslationEnabled = true
+    failNextSettingsRead = true
+    runtimeMessageListener!({
+      type: 'settings_updated',
+      payload: { translationEnabled: true },
+    })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    appendMessage(container, 'still disabled during failed refresh')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(translationRequests()).toHaveLength(0)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(translationRequests()).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    appendMessage(container, 'translated after refresh retry')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'translated after refresh retry' },
+    })
+  })
+
   it('does not resurrect disabled-era messages after re-enable', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {

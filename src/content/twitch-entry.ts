@@ -628,7 +628,7 @@ const processMessage = async (
 
   try {
     const settings = await getContentSettings()
-    if (stopped) return {}
+    if (stopped || translationGeneration !== chatTranslationGeneration) return {}
     if (!settings.translationEnabled) {
       disableChatTranslation(element)
       return await handler.translateAndInject(element, settings, priority)
@@ -683,6 +683,25 @@ const retryUnprocessed = (): void => {
   }
 }
 
+let settingsRefreshRetryTimer: ReturnType<typeof setTimeout> | null = null
+const SETTINGS_REFRESH_RETRY_MS = 1_000
+
+const clearSettingsRefreshRetry = (): void => {
+  if (settingsRefreshRetryTimer !== null) {
+    clearTimeout(settingsRefreshRetryTimer)
+    settingsRefreshRetryTimer = null
+  }
+}
+
+const scheduleSettingsRefreshRetry = (): void => {
+  if (stopped || settingsRefreshRetryTimer !== null) return
+
+  settingsRefreshRetryTimer = setTimeout(() => {
+    settingsRefreshRetryTimer = null
+    if (!stopped) void rehydrateChatTranslationState()
+  }, SETTINGS_REFRESH_RETRY_MS)
+}
+
 // --- Cleanup ---
 const cleanup = (): void => {
   // Invalidate results from the page being torn down, including work that was
@@ -701,6 +720,7 @@ const cleanup = (): void => {
     observeRetryTimer = null
   }
   stopRetryTimer()
+  clearSettingsRefreshRetry()
   invalidateSettingsCache()
   pendingMessages.clear()
   queuedElements = new WeakSet()
@@ -827,10 +847,12 @@ export const handleSettingsUpdate = async (_payload: SettingsUpdatePayload): Pro
     // on another channel's payload.
     settings = await getContentSettings(true)
   } catch {
+    scheduleSettingsRefreshRetry()
     return
   }
 
   if (stopped || updateGeneration !== settingsUpdateGeneration) return
+  clearSettingsRefreshRetry()
 
   if (settings.translationEnabled === false) {
     disableChatTranslation()
@@ -847,10 +869,12 @@ const rehydrateChatTranslationState = async (): Promise<void> => {
   try {
     settings = await getContentSettings(true)
   } catch {
+    scheduleSettingsRefreshRetry()
     return
   }
 
   if (stopped || updateGeneration !== settingsUpdateGeneration) return
+  clearSettingsRefreshRetry()
 
   if (settings.translationEnabled === false) {
     disableChatTranslation()
