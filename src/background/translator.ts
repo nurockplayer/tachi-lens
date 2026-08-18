@@ -358,7 +358,12 @@ export class Translator {
         model,
         item.request.sourceLang,
       )
-      const inFlightKey = `${selectedPriority}:${cacheKey}`
+      // Coalescing shares a completion promise, so keep it inside the same
+      // channel cancellation domain. The translation cache remains global.
+      const coalescingKey = item.channelName === undefined
+        ? cacheKey
+        : `${item.channelName}\u0000${cacheKey}`
+      const inFlightKey = `${selectedPriority}:${coalescingKey}`
       const cached = this.deps.cache.get(cacheKey)
 
       if (cached) {
@@ -369,7 +374,7 @@ export class Translator {
       // A duplicate within this flush follows its group leader. The leader is
       // registered below after the same-flush and in-flight lookups miss, so
       // the first request with a given identity always leads its group.
-      const flushLeader = flushLeaders.get(cacheKey)
+      const flushLeader = flushLeaders.get(coalescingKey)
       if (flushLeader) {
         this.deps.reportDiagnosticCount?.('batch_dedup_removed')
         void flushLeader.completion.then((result) => item.resolve({
@@ -382,7 +387,7 @@ export class Translator {
       // Backlog may safely share a live leader because the live request has
       // the tighter deadline. Live work must never inherit backlog latency.
       const inFlight = selectedPriority === 'backlog'
-        ? this.inFlightTranslations.get(`live:${cacheKey}`) ?? this.inFlightTranslations.get(inFlightKey)
+        ? this.inFlightTranslations.get(`live:${coalescingKey}`) ?? this.inFlightTranslations.get(inFlightKey)
         : this.inFlightTranslations.get(inFlightKey)
       if (inFlight) {
         this.deps.reportDiagnosticCount?.('in_flight_coalesced')
@@ -397,7 +402,7 @@ export class Translator {
             this.inFlightTranslations.delete(inFlightKey)
           }
         })
-        flushLeaders.set(cacheKey, item)
+        flushLeaders.set(coalescingKey, item)
         uncached.push(item)
       }
     }
