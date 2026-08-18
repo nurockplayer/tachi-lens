@@ -123,6 +123,38 @@ describe('Translator', () => {
       expect(provider.translateBatch).toHaveBeenCalledTimes(1)
     })
 
+    it('cancels only the disabled channel before queued work can reach the provider', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests) =>
+        requests.map((request) => ({ id: request.id, translatedText: `translated:${request.text}` })),
+      )
+      deps.getProvider = vi.fn(() => provider)
+      deps.getTranslationEnabled = vi.fn(async () => true)
+
+      const disabled = translator.translate(
+        { messageId: 'channel-disabled', text: 'must be canceled' },
+        { channelName: 'channel-disabled' },
+      )
+      const enabled = translator.translate(
+        { messageId: 'channel-enabled', text: 'still eligible' },
+        { channelName: 'channel-enabled' },
+      )
+
+      // The setting is enabled again by the time the batch would flush, but
+      // work queued before the disable must not be resurrected.
+      translator.cancelQueuedTranslations('channel-disabled')
+      vi.advanceTimersByTime(300)
+
+      await expect(disabled).resolves.toEqual({ messageId: 'channel-disabled' })
+      await expect(enabled).resolves.toEqual({
+        messageId: 'channel-enabled',
+        translatedText: 'translated:still eligible',
+      })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(provider.translateBatch).mock.calls[0]![0].map(({ id }) => id))
+        .toEqual(['channel-enabled'])
+    })
+
     it('resolves a single translation request after the batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([

@@ -69,6 +69,8 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
 
 /** Payload for settings_updated: settings broadcast from Popup/SW to content scripts. */
 export type SettingsUpdatePayload = Partial<{
+  /** Popup context used by the Service Worker to cancel matching chat work. */
+  channelName: string
   translationEnabled: boolean
   displayMode: 'below' | 'hover' | 'collapse'
   targetLanguage: string

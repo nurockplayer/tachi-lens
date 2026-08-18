@@ -152,6 +152,33 @@ export class Translator {
     })
   }
 
+  /**
+   * Settle queued work invalidated by a chat disable before it can reach the
+   * provider. An omitted channel means the global setting changed; a channel
+   * name limits cancellation to that channel's pending requests.
+   */
+  cancelQueuedTranslations(channelName?: string): void {
+    const cancelMatching = (queue: PendingItem[]): PendingItem[] => {
+      const remaining: PendingItem[] = []
+      for (const item of queue) {
+        if (channelName !== undefined && item.channelName !== channelName) {
+          remaining.push(item)
+          continue
+        }
+        item.resolve({ messageId: item.request.messageId })
+      }
+      return remaining
+    }
+
+    if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    this.liveQueue = cancelMatching(this.liveQueue)
+    this.backlogQueue = cancelMatching(this.backlogQueue)
+    if (this.liveQueue.length > 0 || this.backlogQueue.length > 0) this.scheduleTimer()
+  }
+
   private flushImmediately(priority?: 'live' | 'backlog'): void {
     if (this.timer) {
       clearTimeout(this.timer)

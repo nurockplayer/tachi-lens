@@ -259,7 +259,11 @@ const handleMessage = (
 
   // settings_updated from Popup → broadcast to all content scripts
   if (isBaseMessage(message) && message.type === 'settings_updated') {
-    void broadcastUpdate(message.payload as SettingsUpdatePayload)
+    const payload = message.payload as SettingsUpdatePayload
+    if (payload.translationEnabled === false) {
+      translator.cancelQueuedTranslations(payload.channelName)
+    }
+    void broadcastUpdate(payload)
     return false
   }
 
@@ -336,6 +340,7 @@ const handleCommand = async (command: string): Promise<void> => {
       const nextEnabled = !settings.translationEnabled
 
       await saveUserSettings({ translationEnabled: nextEnabled })
+      if (!nextEnabled) translator.cancelQueuedTranslations()
       await broadcastUpdate({ translationEnabled: nextEnabled })
       break
     }

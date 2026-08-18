@@ -262,6 +262,10 @@ describe('Popup live translation controls (#174)', () => {
         speechConfig: { speechTargetLanguage: 'vi' },
       })
     })
+    expect(settingsBroadcasts().map((message) => message.payload)).toContainEqual({
+      channelName: 'example_channel',
+      targetLanguage: 'en',
+    })
     expect(localData.perChannelSettings).not.toHaveProperty('example_channel.speechConfig')
   })
 })

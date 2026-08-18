@@ -536,9 +536,13 @@ export function App() {
         setLiveControlError(false)
 
         try {
+          const payload: SettingsUpdatePayload = {
+            ...(useChannelSettings && channelName ? { channelName } : {}),
+            [key]: value,
+          } as SettingsUpdatePayload
           await chrome.runtime.sendMessage({
             type: 'settings_updated',
-            payload: { [key]: value } as SettingsUpdatePayload,
+            payload,
           })
         } catch {
           // Storage is authoritative even if a tab or the Service Worker is
@@ -735,6 +739,7 @@ export function App() {
 
       // Notify content script of settings change via SW broadcast
       const payload: SettingsUpdatePayload = {
+        ...(useChannelSettings && channelName ? { channelName } : {}),
         translationEnabled: updatedSettings.translationEnabled,
         displayMode: updatedSettings.displayMode,
         targetLanguage: updatedSettings.targetLanguage,
