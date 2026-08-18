@@ -145,6 +145,7 @@ export class SpeechPipeline {
   private abortController: AbortController | undefined
   private resumeTimer: ReturnType<typeof setTimeout> | undefined
   private chunkSubscribed = false
+  private lifecycleToken = 0
 
   constructor(deps: SpeechPipelineDependencies) {
     this.source = deps.source
@@ -192,10 +193,12 @@ export class SpeechPipeline {
    */
   async start(): Promise<void> {
     if (this.running) return
+    const lifecycleToken = ++this.lifecycleToken
 
     this.subscribeChunks()
 
     const settings = await this.getSettings()
+    if (lifecycleToken !== this.lifecycleToken) return
     const config = settings.speechConfig
     // The popup toggle IS the consent gesture (Spec §8.2); by the time a
     // speech_control start arrives, speechEnabled is already true. Never
@@ -208,6 +211,7 @@ export class SpeechPipeline {
       return
     }
     const apiKey = await this.getApiKey(config.speechProvider)
+    if (lifecycleToken !== this.lifecycleToken) return
     if (!apiKey) {
       this.fail('auth')
       return
@@ -216,8 +220,14 @@ export class SpeechPipeline {
     // Resume the same session across an MV3 worker wake; a fresh id resets the
     // session counter on a new enable (Spec §7).
     const activeSessionId = await this.budget.readActiveSessionId()
+    if (lifecycleToken !== this.lifecycleToken) return
     const sessionId = activeSessionId ?? this.createSessionId()
     const usage = await this.budget.beginSession(sessionId)
+    if (lifecycleToken !== this.lifecycleToken) {
+      await this.budget.markSessionInactive()
+      await this.budget.flush()
+      return
+    }
     if (usage.dailySeconds >= usage.dailyCapSeconds) {
       this.fail('budget_exhausted')
       return
@@ -240,6 +250,7 @@ export class SpeechPipeline {
 
   /** Stop capture and return to idle. Clears captions and ends the session. */
   async stop(): Promise<void> {
+    this.lifecycleToken += 1
     if (!this.running) return
 
     this.running = false

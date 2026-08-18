@@ -654,66 +654,90 @@ export function App() {
   const handleSave = useCallback(async () => {
     if (!settings) return
 
-    const parsedBlacklist = blacklistInput
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
+    await enqueueLiveUpdate(async () => {
+      const persistedGlobalSettings = await getUserSettings()
+      const persistedChannelSettings = useChannelSettings && channelName
+        ? await getChannelSettings(channelName)
+        : undefined
+      const persistedEffectiveSettings = persistedChannelSettings
+        ? mergeSettings(persistedGlobalSettings, persistedChannelSettings)
+        : persistedGlobalSettings
 
-    const selectedGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
-    const updatedSettings = {
-      ...settings,
-      botNameBlacklist: parsedBlacklist,
-      geminiQuota: selectedGeminiQuota,
-    }
+      const parsedBlacklist = blacklistInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
 
-    if (useChannelSettings && channelName) {
-      const {
-        geminiQuota,
-        geminiQuotaProfiles,
-        // Speech config is global-only in v0.3: it is persisted globally
-        // (like geminiQuota) and never enters the per-channel override.
-        speechConfig,
-        ...channelSettings
-      } = updatedSettings
-      await saveUserSettings({ geminiQuota, geminiQuotaProfiles, speechConfig })
-      await saveChannelSettings(channelName, channelSettings)
-    } else {
-      await saveUserSettings(updatedSettings)
-    }
-    setSettings(updatedSettings)
-    setSaveMessage(t('settingsSaved'))
-    setTimeout(() => setSaveMessage(null), 2000)
+      const selectedGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
+      const updatedSettings = {
+        ...settings,
+        // Live controls are authoritative in storage. Re-read them after all
+        // earlier live writes so the retained Save action cannot overwrite a
+        // newer value with its render-time snapshot.
+        translationEnabled: persistedEffectiveSettings.translationEnabled,
+        targetLanguage: persistedEffectiveSettings.targetLanguage,
+        displayMode: persistedEffectiveSettings.displayMode,
+        speechConfig: {
+          ...settings.speechConfig,
+          speechEnabled: persistedGlobalSettings.speechConfig.speechEnabled,
+          speechConsentGranted: persistedGlobalSettings.speechConfig.speechConsentGranted,
+          speechTargetLanguage: persistedGlobalSettings.speechConfig.speechTargetLanguage,
+          captionMaxLines: persistedGlobalSettings.speechConfig.captionMaxLines,
+          captionOpacity: persistedGlobalSettings.speechConfig.captionOpacity,
+        },
+        botNameBlacklist: parsedBlacklist,
+        geminiQuota: selectedGeminiQuota,
+      }
 
-    // Notify content script of settings change via SW broadcast
-    const payload: SettingsUpdatePayload = {
-      translationEnabled: updatedSettings.translationEnabled,
-      displayMode: updatedSettings.displayMode,
-      targetLanguage: updatedSettings.targetLanguage,
-      chineseVariantMode: updatedSettings.chineseVariantMode,
-      minTextLength: updatedSettings.minTextLength,
-      botNameBlacklist: updatedSettings.botNameBlacklist,
-      skipEmotesOnly: updatedSettings.skipEmotesOnly,
-      skipCheermotes: updatedSettings.skipCheermotes,
-      skipSlashMe: updatedSettings.skipSlashMe,
-      skipWhispers: updatedSettings.skipWhispers,
-      skipReplies: updatedSettings.skipReplies,
-      skipLinksOnly: updatedSettings.skipLinksOnly,
-      skipNumbersOnly: updatedSettings.skipNumbersOnly,
-      skipSystemMessages: updatedSettings.skipSystemMessages,
-    }
-    await chrome.runtime.sendMessage({
-      type: 'settings_updated',
-      payload,
+      if (useChannelSettings && channelName) {
+        const {
+          geminiQuota,
+          geminiQuotaProfiles,
+          // Speech config is global-only in v0.3: it is persisted globally
+          // (like geminiQuota) and never enters the per-channel override.
+          speechConfig,
+          ...channelSettings
+        } = updatedSettings
+        await saveUserSettings({ geminiQuota, geminiQuotaProfiles, speechConfig })
+        await saveChannelSettings(channelName, channelSettings)
+      } else {
+        await saveUserSettings(updatedSettings)
+      }
+      setSettings(updatedSettings)
+      setSaveMessage(t('settingsSaved'))
+      setTimeout(() => setSaveMessage(null), 2000)
+
+      // Notify content script of settings change via SW broadcast
+      const payload: SettingsUpdatePayload = {
+        translationEnabled: updatedSettings.translationEnabled,
+        displayMode: updatedSettings.displayMode,
+        targetLanguage: updatedSettings.targetLanguage,
+        chineseVariantMode: updatedSettings.chineseVariantMode,
+        minTextLength: updatedSettings.minTextLength,
+        botNameBlacklist: updatedSettings.botNameBlacklist,
+        skipEmotesOnly: updatedSettings.skipEmotesOnly,
+        skipCheermotes: updatedSettings.skipCheermotes,
+        skipSlashMe: updatedSettings.skipSlashMe,
+        skipWhispers: updatedSettings.skipWhispers,
+        skipReplies: updatedSettings.skipReplies,
+        skipLinksOnly: updatedSettings.skipLinksOnly,
+        skipNumbersOnly: updatedSettings.skipNumbersOnly,
+        skipSystemMessages: updatedSettings.skipSystemMessages,
+      }
+      await chrome.runtime.sendMessage({
+        type: 'settings_updated',
+        payload,
+      })
+
+      // Speech settings are broadcast on their own channel (Spec §6). The payload
+      // is Partial<SpeechTranslationConfig>-compatible.
+      const speechPayload: SpeechSettingsUpdatePayload = { ...updatedSettings.speechConfig }
+      await chrome.runtime.sendMessage({
+        type: 'speech_settings_updated',
+        payload: speechPayload,
+      })
     })
-
-    // Speech settings are broadcast on their own channel (Spec §6). The payload
-    // is Partial<SpeechTranslationConfig>-compatible.
-    const speechPayload: SpeechSettingsUpdatePayload = { ...updatedSettings.speechConfig }
-    await chrome.runtime.sendMessage({
-      type: 'speech_settings_updated',
-      payload: speechPayload,
-    })
-  }, [settings, blacklistInput, useChannelSettings, channelName])
+  }, [settings, blacklistInput, useChannelSettings, channelName, enqueueLiveUpdate])
 
   const handleValidateKey = useCallback(
     async (providerId: string) => {

@@ -13,6 +13,15 @@ describe('Popup live translation controls (#174)', () => {
   let sendMessage: Mock<(message: RuntimeMessage) => Promise<unknown>>
   let activeTabs: Array<{ url?: string }>
   let rejectUserSettingsWrites: boolean
+  let holdFirstUserSettingsWrite: boolean
+  let holdSecondUserSettingsWrite: boolean
+  let firstUserSettingsWriteStarted: Promise<void>
+  let resolveFirstUserSettingsWriteStarted: () => void
+  let releaseFirstUserSettingsWrite: () => void
+  let secondUserSettingsWriteStarted: Promise<void>
+  let resolveSecondUserSettingsWriteStarted: () => void
+  let releaseSecondUserSettingsWrite: () => void
+  let userSettingsWriteCount: number
 
   const createUserSettings = (overrides: Partial<typeof DEFAULT_SETTINGS> = {}) => ({
     ...DEFAULT_SETTINGS,
@@ -23,10 +32,36 @@ describe('Popup live translation controls (#174)', () => {
   beforeEach(() => {
     activeTabs = []
     rejectUserSettingsWrites = false
+    holdFirstUserSettingsWrite = false
+    holdSecondUserSettingsWrite = false
+    userSettingsWriteCount = 0
+    firstUserSettingsWriteStarted = new Promise((resolve) => {
+      resolveFirstUserSettingsWriteStarted = resolve
+    })
+    const firstWriteGate = new Promise<void>((resolve) => {
+      releaseFirstUserSettingsWrite = resolve
+    })
+    secondUserSettingsWriteStarted = new Promise((resolve) => {
+      resolveSecondUserSettingsWriteStarted = resolve
+    })
+    const secondWriteGate = new Promise<void>((resolve) => {
+      releaseSecondUserSettingsWrite = resolve
+    })
     localData = { userSettings: createUserSettings() }
     localSet = vi.fn(async (value: Record<string, unknown>) => {
       if (rejectUserSettingsWrites && 'userSettings' in value) {
         throw new Error('storage unavailable')
+      }
+      if ('userSettings' in value) {
+        userSettingsWriteCount += 1
+        if (holdFirstUserSettingsWrite && userSettingsWriteCount === 1) {
+          resolveFirstUserSettingsWriteStarted()
+          await firstWriteGate
+        }
+        if (holdSecondUserSettingsWrite && userSettingsWriteCount === 2) {
+          resolveSecondUserSettingsWriteStarted()
+          await secondWriteGate
+        }
       }
       Object.assign(localData, value)
     })
@@ -93,6 +128,27 @@ describe('Popup live translation controls (#174)', () => {
       { displayMode: 'hover' },
     ]))
     expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'speech_settings_updated' }))
+  })
+
+  it('does not let the retained Save action overwrite a pending live chat update', async () => {
+    holdFirstUserSettingsWrite = true
+    holdSecondUserSettingsWrite = true
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('checkbox', { name: '啟用翻譯' }))
+    await firstUserSettingsWriteStarted
+
+    await user.click(screen.getByRole('button', { name: '儲存設定' }))
+    releaseFirstUserSettingsWrite()
+    await secondUserSettingsWriteStarted
+    const savedSettings = localSet.mock.calls[1]?.[0]?.userSettings as typeof DEFAULT_SETTINGS
+    expect(savedSettings.translationEnabled).toBe(false)
+    releaseSecondUserSettingsWrite()
+
+    await waitFor(() => {
+      expect(localData.userSettings).toMatchObject({ translationEnabled: false })
+    })
   })
 
   it('persists and broadcasts speech live controls and safe caption presentation without Save Settings', async () => {

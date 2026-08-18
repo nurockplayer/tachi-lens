@@ -78,6 +78,7 @@ const createHarness = (options: {
   sessionCapMinutes?: number
   dailyCapMinutes?: number
   now?: () => number
+  getApiKey?: SpeechPipelineDependencies['getApiKey']
 } = {}): Harness => {
   const source = new FakeSpeechSource()
   const { provider, handle } = createMockSpeechProvider()
@@ -98,7 +99,7 @@ const createHarness = (options: {
   const deps: SpeechPipelineDependencies = {
     source,
     getProvider: () => provider,
-    getApiKey: async () => 'gemini-secret-key',
+    getApiKey: options.getApiKey ?? (async () => 'gemini-secret-key'),
     getSettings: async () => ({ ...DEFAULT_SETTINGS, ...options.settings } as UserSettings),
     budget,
     rateLimiter,
@@ -153,6 +154,31 @@ describe('SpeechPipeline', () => {
       await h.pipeline.start()
       expect(h.source.start).not.toHaveBeenCalled()
       expect(h.stateEvents).toHaveLength(0)
+    })
+
+    it('cancels a pending start when stopped before capture begins', async () => {
+      let apiKeyRequested = false
+      let resolveApiKey!: (apiKey: string) => void
+      const apiKey = new Promise<string>((resolve) => {
+        resolveApiKey = resolve
+      })
+      const h = createHarness({
+        getApiKey: async () => {
+          apiKeyRequested = true
+          return apiKey
+        },
+      })
+
+      const startPromise = h.pipeline.start()
+      await flushMicrotasks()
+      expect(apiKeyRequested).toBe(true)
+
+      await h.pipeline.stop()
+      resolveApiKey('gemini-secret-key')
+      await startPromise
+
+      expect(h.source.start).not.toHaveBeenCalled()
+      expect(h.pipeline.isCapturing()).toBe(false)
     })
 
     it('fails with auth when no speech API key is configured', async () => {
