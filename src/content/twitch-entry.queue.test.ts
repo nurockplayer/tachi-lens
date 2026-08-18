@@ -354,6 +354,43 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('refreshes settings while disabled when the re-enable broadcast is missed', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+
+    await updateTranslationEnabled(false)
+    effectiveTranslationEnabled = true
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+
+    appendMessage(container, 'translated after missed broadcast')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'translated after missed broadcast' },
+    })
+  })
+
   it('updates empty disabled markers before allowing recycled text', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {

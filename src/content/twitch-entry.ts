@@ -265,7 +265,9 @@ let retryTimer: ReturnType<typeof setInterval> | null = null
 const startRetryTimer = (): void => {
   if (stopped || retryTimer !== null) return
   retryTimer = setInterval(() => {
-    if (!stopped && chatTranslationEnabled) retryUnprocessed()
+    if (stopped) return
+    if (chatTranslationEnabled) retryUnprocessed()
+    else void rehydrateChatTranslationState()
   }, 5_000)
 }
 
