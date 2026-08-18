@@ -19,8 +19,13 @@ import {
   isGetQuotaHealthMessage,
   isResetQuotaHealthMessage,
   isSpeechControlMessage,
+  isSpeechSettingsUpdateMessage,
 } from '@/shared/messages'
-import type { DiagnosticEvent, DiagnosticStage, SettingsUpdatePayload } from '@/shared/messages'
+import type {
+  DiagnosticEvent,
+  DiagnosticStage,
+  SettingsUpdatePayload,
+} from '@/shared/messages'
 import { getSpeechProvider } from '@/providers/speech-registry'
 import type { SpeechErrorReason } from '@/shared/speech-state'
 import { TranslationCache } from './cache'
@@ -250,6 +255,17 @@ const handleMessage = (
   // settings_updated from Popup → broadcast to all content scripts
   if (isBaseMessage(message) && message.type === 'settings_updated') {
     void broadcastUpdate(message.payload as SettingsUpdatePayload)
+    return false
+  }
+
+  // speech_settings_updated from Popup → apply to the active pipeline and
+  // broadcast the presentation settings to every content-script overlay.
+  if (isSpeechSettingsUpdateMessage(message)) {
+    speechPipeline.updateSpeechSettings(message.payload)
+    void broadcastToContentScripts({
+      type: 'speech_settings_updated',
+      payload: message.payload,
+    })
     return false
   }
 

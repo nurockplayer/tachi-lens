@@ -95,6 +95,10 @@ const CHINESE_VARIANT_OPTIONS: Array<{
 
 const isChineseTarget = (targetLanguage: string): boolean => normalizeLocale(targetLanguage) === 'zh'
 
+type LiveChatSettingKey = 'translationEnabled' | 'targetLanguage' | 'displayMode'
+type LiveSpeechSettingKey = 'speechEnabled' | 'speechTargetLanguage' | 'captionMaxLines' | 'captionOpacity'
+type LiveSpeechSettings = Partial<Pick<SpeechTranslationConfig, LiveSpeechSettingKey | 'speechConsentGranted'>>
+
 const GEMINI_QUOTA_FIELDS: Array<{
   key: keyof GeminiQuotaSettings
   labelKey: Parameters<typeof t>[0]
@@ -289,7 +293,9 @@ export function App() {
   // `speech_state` broadcast so the popup reflects capturing/paused/error live.
   const [speechConsentOpen, setSpeechConsentOpen] = useState(false)
   const [speechState, setSpeechState] = useState<SpeechStatePayload | null>(null)
+  const [liveControlError, setLiveControlError] = useState(false)
   const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
+  const liveUpdateQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   const providers = listProviderMetadata()
 
@@ -472,6 +478,106 @@ export function App() {
   )
 
   /**
+   * Serializes live writes so quick successive changes cannot read the same
+   * persisted snapshot and overwrite one another. Each operation persists
+   * before changing Popup state or notifying another extension context.
+   */
+  const enqueueLiveUpdate = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const queued = liveUpdateQueueRef.current.then(operation, operation)
+    liveUpdateQueueRef.current = queued.then(() => undefined, () => undefined)
+    return queued
+  }, [])
+
+  const persistLiveChatSetting = useCallback(
+    <K extends LiveChatSettingKey>(key: K, value: UserSettings[K]): void => {
+      void enqueueLiveUpdate(async () => {
+        try {
+          if (useChannelSettings && channelName) {
+            const currentChannelSettings = await getChannelSettings(channelName)
+            await saveChannelSettings(channelName, {
+              ...(currentChannelSettings ?? {}),
+              [key]: value,
+            })
+          } else {
+            await saveUserSettings({ [key]: value } as Partial<UserSettings>)
+          }
+        } catch {
+          setLiveControlError(true)
+          return
+        }
+
+        setSettings((previous) => previous ? { ...previous, [key]: value } : previous)
+        setLiveControlError(false)
+
+        try {
+          await chrome.runtime.sendMessage({
+            type: 'settings_updated',
+            payload: { [key]: value } as SettingsUpdatePayload,
+          })
+        } catch {
+          // Storage is authoritative even if a tab or the Service Worker is
+          // unavailable. Keep the persisted UI value and expose a retryable
+          // bounded notice rather than surfacing a raw runtime error.
+          setLiveControlError(true)
+        }
+      })
+    },
+    [channelName, enqueueLiveUpdate, useChannelSettings],
+  )
+
+  const persistLiveSpeechSettings = useCallback(
+    async (updates: LiveSpeechSettings, controlAction?: 'start' | 'stop'): Promise<boolean> =>
+      enqueueLiveUpdate(async () => {
+        try {
+          const persistedSettings = await getUserSettings()
+          await saveUserSettings({
+            speechConfig: {
+              ...persistedSettings.speechConfig,
+              ...updates,
+            },
+          })
+        } catch {
+          setLiveControlError(true)
+          return false
+        }
+
+        setSettings((previous) => previous
+          ? {
+              ...previous,
+              speechConfig: {
+                ...previous.speechConfig,
+                ...updates,
+              },
+            }
+          : previous)
+        setLiveControlError(false)
+
+        try {
+          await chrome.runtime.sendMessage({
+            type: 'speech_settings_updated',
+            payload: updates,
+          })
+        } catch {
+          setLiveControlError(true)
+        }
+
+        if (controlAction) {
+          try {
+            await chrome.runtime.sendMessage({
+              type: 'speech_control',
+              payload: { action: controlAction },
+            })
+          } catch {
+            setLiveControlError(true)
+          }
+        }
+
+        return true
+      }),
+    [enqueueLiveUpdate],
+  )
+
+  /**
    * Toggle change for the "語音字幕" switch (#162). First enable shows the
    * consent panel (Spec §8.2) and does NOT start capture; capture starts only
    * on the "啟用並開始" confirm gesture (speech_control start). The checkbox
@@ -492,25 +598,21 @@ export function App() {
         // panel is open nothing was started yet, so no control message is sent.
         setSpeechConsentOpen(false)
         if (settings?.speechConfig.speechConsentGranted) {
-          updateSpeechConfig('speechEnabled', false)
-          await saveUserSettings({ speechConfig: { ...settings.speechConfig, speechEnabled: false } })
-          await chrome.runtime.sendMessage({ type: 'speech_control', payload: { action: 'stop' } }).catch(() => undefined)
+          await persistLiveSpeechSettings({ speechEnabled: false }, 'stop')
         }
         return
       }
       if (settings?.speechConfig.speechConsentGranted) {
         // Consent was granted previously: persist first (the SW pipeline's
         // start() reads speechEnabled from storage), then start capture.
-        updateSpeechConfig('speechEnabled', true)
-        await saveUserSettings({ speechConfig: { ...settings.speechConfig, speechEnabled: true } })
-        await chrome.runtime.sendMessage({ type: 'speech_control', payload: { action: 'start' } }).catch(() => undefined)
+        await persistLiveSpeechSettings({ speechEnabled: true }, 'start')
         return
       }
       // First enable: show the consent panel; nothing is started or persisted
       // until the confirm gesture (Spec §8.2).
       setSpeechConsentOpen(true)
     })().catch(() => undefined)
-  }, [settings, updateSpeechConfig])
+  }, [persistLiveSpeechSettings, settings])
 
   /**
    * The "啟用並開始" confirm click IS the gesture that authorizes capture
@@ -520,18 +622,12 @@ export function App() {
    */
   const handleSpeechConsentConfirm = useCallback(async () => {
     if (!settings) return
-    await saveUserSettings({
-      speechConfig: {
-        ...settings.speechConfig,
-        speechEnabled: true,
-        speechConsentGranted: true,
-      },
-    })
-    updateSpeechConfig('speechEnabled', true)
-    updateSpeechConfig('speechConsentGranted', true)
-    setSpeechConsentOpen(false)
-    void chrome.runtime.sendMessage({ type: 'speech_control', payload: { action: 'start' } }).catch(() => undefined)
-  }, [settings, updateSpeechConfig])
+    const persisted = await persistLiveSpeechSettings({
+      speechEnabled: true,
+      speechConsentGranted: true,
+    }, 'start')
+    if (persisted) setSpeechConsentOpen(false)
+  }, [persistLiveSpeechSettings, settings])
 
   const handleSpeechConsentCancel = useCallback(() => {
     setSpeechConsentOpen(false)
@@ -558,66 +654,90 @@ export function App() {
   const handleSave = useCallback(async () => {
     if (!settings) return
 
-    const parsedBlacklist = blacklistInput
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
+    await enqueueLiveUpdate(async () => {
+      const persistedGlobalSettings = await getUserSettings()
+      const persistedChannelSettings = useChannelSettings && channelName
+        ? await getChannelSettings(channelName)
+        : undefined
+      const persistedEffectiveSettings = persistedChannelSettings
+        ? mergeSettings(persistedGlobalSettings, persistedChannelSettings)
+        : persistedGlobalSettings
 
-    const selectedGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
-    const updatedSettings = {
-      ...settings,
-      botNameBlacklist: parsedBlacklist,
-      geminiQuota: selectedGeminiQuota,
-    }
+      const parsedBlacklist = blacklistInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
 
-    if (useChannelSettings && channelName) {
-      const {
-        geminiQuota,
-        geminiQuotaProfiles,
-        // Speech config is global-only in v0.3: it is persisted globally
-        // (like geminiQuota) and never enters the per-channel override.
-        speechConfig,
-        ...channelSettings
-      } = updatedSettings
-      await saveUserSettings({ geminiQuota, geminiQuotaProfiles, speechConfig })
-      await saveChannelSettings(channelName, channelSettings)
-    } else {
-      await saveUserSettings(updatedSettings)
-    }
-    setSettings(updatedSettings)
-    setSaveMessage(t('settingsSaved'))
-    setTimeout(() => setSaveMessage(null), 2000)
+      const selectedGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
+      const updatedSettings = {
+        ...settings,
+        // Live controls are authoritative in storage. Re-read them after all
+        // earlier live writes so the retained Save action cannot overwrite a
+        // newer value with its render-time snapshot.
+        translationEnabled: persistedEffectiveSettings.translationEnabled,
+        targetLanguage: persistedEffectiveSettings.targetLanguage,
+        displayMode: persistedEffectiveSettings.displayMode,
+        speechConfig: {
+          ...settings.speechConfig,
+          speechEnabled: persistedGlobalSettings.speechConfig.speechEnabled,
+          speechConsentGranted: persistedGlobalSettings.speechConfig.speechConsentGranted,
+          speechTargetLanguage: persistedGlobalSettings.speechConfig.speechTargetLanguage,
+          captionMaxLines: persistedGlobalSettings.speechConfig.captionMaxLines,
+          captionOpacity: persistedGlobalSettings.speechConfig.captionOpacity,
+        },
+        botNameBlacklist: parsedBlacklist,
+        geminiQuota: selectedGeminiQuota,
+      }
 
-    // Notify content script of settings change via SW broadcast
-    const payload: SettingsUpdatePayload = {
-      translationEnabled: updatedSettings.translationEnabled,
-      displayMode: updatedSettings.displayMode,
-      targetLanguage: updatedSettings.targetLanguage,
-      chineseVariantMode: updatedSettings.chineseVariantMode,
-      minTextLength: updatedSettings.minTextLength,
-      botNameBlacklist: updatedSettings.botNameBlacklist,
-      skipEmotesOnly: updatedSettings.skipEmotesOnly,
-      skipCheermotes: updatedSettings.skipCheermotes,
-      skipSlashMe: updatedSettings.skipSlashMe,
-      skipWhispers: updatedSettings.skipWhispers,
-      skipReplies: updatedSettings.skipReplies,
-      skipLinksOnly: updatedSettings.skipLinksOnly,
-      skipNumbersOnly: updatedSettings.skipNumbersOnly,
-      skipSystemMessages: updatedSettings.skipSystemMessages,
-    }
-    await chrome.runtime.sendMessage({
-      type: 'settings_updated',
-      payload,
+      if (useChannelSettings && channelName) {
+        const {
+          geminiQuota,
+          geminiQuotaProfiles,
+          // Speech config is global-only in v0.3: it is persisted globally
+          // (like geminiQuota) and never enters the per-channel override.
+          speechConfig,
+          ...channelSettings
+        } = updatedSettings
+        await saveUserSettings({ geminiQuota, geminiQuotaProfiles, speechConfig })
+        await saveChannelSettings(channelName, channelSettings)
+      } else {
+        await saveUserSettings(updatedSettings)
+      }
+      setSettings(updatedSettings)
+      setSaveMessage(t('settingsSaved'))
+      setTimeout(() => setSaveMessage(null), 2000)
+
+      // Notify content script of settings change via SW broadcast
+      const payload: SettingsUpdatePayload = {
+        translationEnabled: updatedSettings.translationEnabled,
+        displayMode: updatedSettings.displayMode,
+        targetLanguage: updatedSettings.targetLanguage,
+        chineseVariantMode: updatedSettings.chineseVariantMode,
+        minTextLength: updatedSettings.minTextLength,
+        botNameBlacklist: updatedSettings.botNameBlacklist,
+        skipEmotesOnly: updatedSettings.skipEmotesOnly,
+        skipCheermotes: updatedSettings.skipCheermotes,
+        skipSlashMe: updatedSettings.skipSlashMe,
+        skipWhispers: updatedSettings.skipWhispers,
+        skipReplies: updatedSettings.skipReplies,
+        skipLinksOnly: updatedSettings.skipLinksOnly,
+        skipNumbersOnly: updatedSettings.skipNumbersOnly,
+        skipSystemMessages: updatedSettings.skipSystemMessages,
+      }
+      await chrome.runtime.sendMessage({
+        type: 'settings_updated',
+        payload,
+      })
+
+      // Speech settings are broadcast on their own channel (Spec §6). The payload
+      // is Partial<SpeechTranslationConfig>-compatible.
+      const speechPayload: SpeechSettingsUpdatePayload = { ...updatedSettings.speechConfig }
+      await chrome.runtime.sendMessage({
+        type: 'speech_settings_updated',
+        payload: speechPayload,
+      })
     })
-
-    // Speech settings are broadcast on their own channel (Spec §6). The payload
-    // is Partial<SpeechTranslationConfig>-compatible.
-    const speechPayload: SpeechSettingsUpdatePayload = { ...updatedSettings.speechConfig }
-    await chrome.runtime.sendMessage({
-      type: 'speech_settings_updated',
-      payload: speechPayload,
-    })
-  }, [settings, blacklistInput, useChannelSettings, channelName])
+  }, [settings, blacklistInput, useChannelSettings, channelName, enqueueLiveUpdate])
 
   const handleValidateKey = useCallback(
     async (providerId: string) => {
@@ -735,7 +855,7 @@ export function App() {
         <ToggleRow
           label={t('enableTranslation')}
           checked={settings.translationEnabled}
-          onChange={(checked) => updateSetting('translationEnabled', checked)}
+          onChange={(checked) => persistLiveChatSetting('translationEnabled', checked)}
         />
 
         <div className="field-grid">
@@ -743,7 +863,7 @@ export function App() {
             id="language-select"
             label={t('targetLanguage')}
             value={settings.targetLanguage}
-            onChange={(value) => updateSetting('targetLanguage', value)}
+            onChange={(value) => persistLiveChatSetting('targetLanguage', value)}
           >
             {TARGET_LANGUAGE_OPTIONS.map(({ value, label }) => (
               <option key={value} value={value}>
@@ -756,7 +876,7 @@ export function App() {
             id="display-mode-select"
             label={t('displayMode')}
             value={settings.displayMode}
-            onChange={(value) => updateSetting('displayMode', value as UserSettings['displayMode'])}
+            onChange={(value) => persistLiveChatSetting('displayMode', value as UserSettings['displayMode'])}
           >
             <option value='below'>{t('displayBelow')}</option>
             <option value='hover'>{t('displayHover')}</option>
@@ -782,7 +902,7 @@ export function App() {
           id="speech-language-select"
           label={t('speechTargetLanguage')}
           value={settings.speechConfig.speechTargetLanguage}
-          onChange={(value) => updateSpeechConfig('speechTargetLanguage', value)}
+          onChange={(value) => void persistLiveSpeechSettings({ speechTargetLanguage: value })}
         >
           {SPEECH_LANGUAGE_OPTIONS.map(({ value, label }) => (
             <option key={value} value={value}>
@@ -1091,7 +1211,7 @@ export function App() {
             min={1}
             value={settings.speechConfig.captionMaxLines}
             onChange={(value) =>
-              updateSpeechConfig('captionMaxLines', Math.max(1, Math.floor(value) || 1))
+              void persistLiveSpeechSettings({ captionMaxLines: Math.max(1, Math.floor(value) || 1) })
             }
           />
 
@@ -1106,7 +1226,7 @@ export function App() {
               const bounded = Number.isFinite(parsed)
                 ? Math.min(100, Math.max(0, parsed))
                 : 0
-              updateSpeechConfig('captionOpacity', bounded)
+              void persistLiveSpeechSettings({ captionOpacity: bounded })
             }}
           />
 
@@ -1130,6 +1250,9 @@ export function App() {
           </Button>
           {saveMessage && (
             <InlineNotice tone="success">{t('settingsSaved')}</InlineNotice>
+          )}
+          {liveControlError && (
+            <InlineNotice tone="danger">{t('settingsSaveFailed')}</InlineNotice>
           )}
         </div>
         <div>{t('shortcutToggleTranslation')}</div>

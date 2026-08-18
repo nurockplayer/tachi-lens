@@ -27,6 +27,7 @@ export type MessageKey =
   | 'botBlacklistPlaceholder'
   | 'saveSettings'
   | 'settingsSaved'
+  | 'settingsSaveFailed'
   | 'validate'
   | 'validating'
   | 'valid'
@@ -152,6 +153,7 @@ export const MESSAGE_KEYS: readonly string[] = [
   'botBlacklistPlaceholder',
   'saveSettings',
   'settingsSaved',
+  'settingsSaveFailed',
   'validate',
   'validating',
   'valid',
@@ -273,6 +275,7 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   botBlacklistPlaceholder: 'streamelements, nightbot',
   saveSettings: '儲存設定',
   settingsSaved: '設定已儲存',
+  settingsSaveFailed: '設定儲存失敗，請再試一次。',
   validate: '驗證',
   validating: '驗證中...',
   valid: '✓ 有效',

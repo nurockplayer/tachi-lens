@@ -19,6 +19,7 @@
   "botBlacklistPlaceholder": { "message": "streamelements, nightbot" },
   "saveSettings": { "message": "儲存設定" },
   "settingsSaved": { "message": "設定已儲存" },
+  "settingsSaveFailed": { "message": "設定儲存失敗，請再試一次。" },
   "validate": { "message": "驗證" },
   "validating": { "message": "驗證中..." },
   "valid": { "message": "✓ 有效" },

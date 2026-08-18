@@ -153,7 +153,11 @@ const handleSpeechCaptionCleared = (payload: { reason: 'idle' | 'silence' | 'dis
 
 const handleSpeechSettingsUpdate = (payload: { captionMaxLines?: number; captionOpacity?: number }): void => {
   if (!isSpeechSettingsUpdateMessage({ type: 'speech_settings_updated', payload })) return
-  pendingSpeechConfig = payload
+  pendingSpeechConfig = {
+    ...(pendingSpeechConfig ?? {}),
+    ...(payload.captionMaxLines === undefined ? {} : { captionMaxLines: payload.captionMaxLines }),
+    ...(payload.captionOpacity === undefined ? {} : { captionOpacity: payload.captionOpacity }),
+  }
   subtitleOverlay?.setSpeechConfig(payload)
 }
 
