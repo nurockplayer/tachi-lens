@@ -110,7 +110,8 @@ describe('Popup speech settings', () => {
     })
     const speechBroadcast = sendMessage.mock.calls
       .map(([message]) => message as { type?: string; payload?: unknown })
-      .find((message) => message.type === 'speech_settings_updated')
+      .filter((message) => message.type === 'speech_settings_updated')
+      .at(-1)
     expect(speechBroadcast?.payload).toMatchObject({
       speechEnabled: true,
       speechModel: 'gemini-2.5-pro',

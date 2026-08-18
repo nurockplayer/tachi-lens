@@ -19,6 +19,7 @@
   "botBlacklistPlaceholder": { "message": "streamelements, nightbot" },
   "saveSettings": { "message": "Save Settings" },
   "settingsSaved": { "message": "Settings saved" },
+  "settingsSaveFailed": { "message": "Settings could not be saved. Please try again." },
   "validate": { "message": "Validate" },
   "validating": { "message": "Checking..." },
   "valid": { "message": "✓ Valid" },

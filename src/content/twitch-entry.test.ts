@@ -352,5 +352,24 @@ describe('content script entry', () => {
 
       vi.unstubAllGlobals()
     })
+
+    it('merges partial speech presentation updates for a later overlay mount', async () => {
+      const sendMessage = vi.fn().mockResolvedValue(undefined)
+      const dispatch = await loadEntry(sendMessage)
+
+      dispatch({ type: 'speech_settings_updated', payload: { captionMaxLines: 3 } })
+      dispatch({ type: 'speech_settings_updated', payload: { captionOpacity: 50 } })
+      dispatch({ type: 'speech_state', payload: { state: 'capturing' } })
+
+      const root = overlayHost()!.shadowRoot!.querySelector('.tachi-lens-overlay-root') as HTMLElement
+      expect(root.style.opacity).toBe('0.5')
+
+      for (let i = 1; i <= 4; i++) {
+        dispatch({ type: 'speech_caption', payload: { id: `c${i}`, text: `line ${i}`, interim: false } })
+      }
+      expect(overlayHost()!.shadowRoot!.querySelectorAll('.tachi-lens-caption-row')).toHaveLength(3)
+
+      vi.unstubAllGlobals()
+    })
   })
 })
