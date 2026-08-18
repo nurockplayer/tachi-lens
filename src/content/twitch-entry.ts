@@ -219,14 +219,17 @@ const detachPageListeners = (): void => {
 
 // --- Settings cache ---
 let cachedSettings: ContentSettings | null = null
+let settingsReadGeneration = 0
 
 const invalidateSettingsCache = (): void => {
   cachedSettings = null
+  settingsReadGeneration++
 }
 
 const getContentSettings = async (forceRefresh = false): Promise<ContentSettings> => {
   if (cachedSettings && !forceRefresh) return cachedSettings
 
+  const readGeneration = ++settingsReadGeneration
   const channelName = parseChannelFromPathname(window.location.pathname)
   const merged = await getSettings(channelName)
 
@@ -239,7 +242,7 @@ const getContentSettings = async (forceRefresh = false): Promise<ContentSettings
     }
   }
 
-  cachedSettings = {
+  const nextSettings: ContentSettings = {
     botNameBlacklist: Array.isArray(merged.botNameBlacklist) ? merged.botNameBlacklist : [],
     minTextLength: typeof merged.minTextLength === 'number' ? merged.minTextLength : 2,
     displayMode: isDisplayMode(merged.displayMode) ? merged.displayMode : 'below',
@@ -249,7 +252,8 @@ const getContentSettings = async (forceRefresh = false): Promise<ContentSettings
     filterConfig,
   }
 
-  return cachedSettings!
+  if (readGeneration === settingsReadGeneration) cachedSettings = nextSettings
+  return nextSettings
 }
 
 const isChineseVariantMode = (value: unknown): value is ChineseVariantMode =>

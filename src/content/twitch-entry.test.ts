@@ -78,6 +78,33 @@ describe('content script entry', () => {
 
       vi.unstubAllGlobals()
     })
+
+    it('does not let an older settings refresh overwrite the latest cache', async () => {
+      const resolvers: Array<(value: unknown) => void> = []
+      const sendMessage = vi.fn((message: { type: string }) => {
+        if (message.type === 'get_content_settings') {
+          return new Promise((resolve) => resolvers.push(resolve))
+        }
+        return Promise.resolve(undefined)
+      })
+      vi.stubGlobal('chrome', {
+        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      })
+
+      const { _test, handleSettingsUpdate } = await import('./twitch-entry')
+      const older = handleSettingsUpdate({ translationEnabled: false })
+      await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+      const latest = handleSettingsUpdate({ translationEnabled: true })
+      await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+
+      resolvers[1]!({ type: 'content_settings', payload: { translationEnabled: true } })
+      await latest
+      resolvers[0]!({ type: 'content_settings', payload: { translationEnabled: false } })
+      await older
+
+      expect(_test.resolvedContentSettings?.translationEnabled).toBe(true)
+      vi.unstubAllGlobals()
+    })
   })
 
   describe('getSettings', () => {

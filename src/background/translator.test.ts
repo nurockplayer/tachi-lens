@@ -95,6 +95,34 @@ describe('Translator', () => {
       expect(provider.translateBatch).not.toHaveBeenCalled()
     })
 
+    it('uses channel-effective enablement instead of the global setting at flush', async () => {
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch).mockResolvedValue([
+        { id: 'channel-enabled', translatedText: 'translated' },
+      ])
+      deps.getProvider = vi.fn(() => provider)
+      deps.getSettings = vi.fn(async () => ({
+        selectedProvider: 'deepseek' as ProviderId,
+        selectedModel: 'deepseek-v4-flash',
+        targetLanguage: 'zh-TW',
+        translationEnabled: false,
+      }))
+      deps.getTranslationEnabled = vi.fn(async (channelName) => channelName === 'channel-enabled')
+
+      const resultPromise = translator.translate(
+        { messageId: 'channel-enabled', text: 'Hello' },
+        { channelName: 'channel-enabled' },
+      )
+      vi.advanceTimersByTime(300)
+
+      await expect(resultPromise).resolves.toEqual({
+        messageId: 'channel-enabled',
+        translatedText: 'translated',
+      })
+      expect(deps.getTranslationEnabled).toHaveBeenCalledWith('channel-enabled')
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+    })
+
     it('resolves a single translation request after the batch window', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([

@@ -69,12 +69,22 @@ const geminiQuotaStore = new GeminiQuotaStore({
   setLocal: async (value) => chrome.storage.local.set({ geminiQuotaUsage: value }),
 }, clock, createRestartSafeReservationId)
 const quotaScheduler = new QuotaScheduler(geminiQuotaStore, { clock })
+
+const getEffectiveContentSettings = async (channelName?: string) => {
+  const global = await getUserSettings()
+  const channel = channelName ? await getChannelSettings(channelName) : undefined
+
+  return channel ? mergeSettings(global, channel) : global
+}
+
 const translator = new Translator(
   {
     cache,
     persistentCache,
     rateLimiter,
     getSettings: () => getUserSettings(),
+    getTranslationEnabled: async (channelName) =>
+      (await getEffectiveContentSettings(channelName)).translationEnabled,
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
     getProvider: (providerId) => getProvider(providerId),
     quotaScheduler,
@@ -94,12 +104,7 @@ const router = createMessageRouter({
   getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
   getProvider: (providerId) => getProvider(providerId),
   getRuntimeState: () => getRuntimeState(),
-  getContentSettings: async (channelName) => {
-    const global = await getUserSettings()
-    const channel = channelName ? await getChannelSettings(channelName) : undefined
-
-    return channel ? mergeSettings(global, channel) : global
-  },
+  getContentSettings: getEffectiveContentSettings,
   saveApiKey: (providerId, apiKey) => saveApiKey(providerId, apiKey),
   deleteApiKey: (providerId) => deleteApiKey(providerId),
   getMaskedApiKeyForPopup: (providerId) => getMaskedApiKeyForPopup(providerId),

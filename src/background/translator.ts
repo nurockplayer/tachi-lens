@@ -40,6 +40,12 @@ export interface TranslatorDependencies {
     geminiQuota?: GeminiQuotaSettings
     geminiQuotaProfiles?: Record<string, GeminiQuotaSettings>
   }>
+  /**
+   * Optional channel-effective enablement check for queued work. The router
+   * supplies the trusted sender channel without widening the runtime payload;
+   * absent in unit tests, flush falls back to getSettings().translationEnabled.
+   */
+  getTranslationEnabled?: (channelName?: string) => Promise<boolean | undefined>
   getApiKey: (providerId: ProviderId) => Promise<string | undefined>
   getProvider: (providerId: ProviderId) => TranslationProvider | undefined
   quotaScheduler?: QuotaScheduler
@@ -60,6 +66,7 @@ export interface TranslatorOptions {
 
 interface PendingItem {
   request: TranslationRequest
+  channelName?: string
   resolve: (result: TranslationResult) => void
   completion: Promise<TranslationResult>
   enqueuedAt: number
@@ -120,7 +127,7 @@ export class Translator {
     }
   }
 
-  translate(request: TranslationRequest): Promise<TranslationResult> {
+  translate(request: TranslationRequest, options: { channelName?: string } = {}): Promise<TranslationResult> {
     return new Promise((resolve) => {
       let settled = false
       let complete!: (result: TranslationResult) => void
@@ -135,7 +142,7 @@ export class Translator {
       }
       const priority = request.priority ?? 'live'
       const queue = priority === 'live' ? this.liveQueue : this.backlogQueue
-      queue.push({ request, resolve: settle, completion, enqueuedAt: this.now() })
+      queue.push({ request, channelName: options.channelName, resolve: settle, completion, enqueuedAt: this.now() })
 
       if (queue.length >= this.options.maxBatchSize) {
         this.flushImmediately(this.liveQueue.length > 0 ? 'live' : priority)
@@ -227,16 +234,16 @@ export class Translator {
     try {
 
     const settings = await this.deps.getSettings()
-    if (settings.translationEnabled === false) {
-      // A request may have passed the router gate while enabled and remained
-      // queued until the persisted setting changed. Settle it without touching
-      // cache, credentials, quota, or a provider; the Content Script treats
-      // the empty response as disabled work.
-      for (const item of items) {
-        item.resolve({ messageId: item.request.messageId })
-      }
-      return
+    const enabled = await Promise.all(items.map(async (item) => {
+      const channelEnabled = await this.deps.getTranslationEnabled?.(item.channelName)
+      return channelEnabled ?? settings.translationEnabled
+    }))
+    const activeItems = items.filter((_, index) => enabled[index] !== false)
+    for (const [index, item] of items.entries()) {
+      if (enabled[index] === false) item.resolve({ messageId: item.request.messageId })
     }
+    if (activeItems.length === 0) return
+    ownedItems = activeItems
     const { selectedModel: model, targetLanguage: targetLang } = settings
 
     const uncached: PendingItem[] = []
@@ -248,7 +255,7 @@ export class Translator {
     // work across separate flushes (owned by #58).
     const flushLeaders = new Map<string, PendingItem>()
 
-    for (const item of items) {
+    for (const item of activeItems) {
       const cacheKey = this.deps.cache.buildKey(
         item.request.text,
         targetLang,

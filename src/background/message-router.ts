@@ -97,7 +97,9 @@ const handleTranslationRequest = async (
       return
     }
 
-    const result = await deps.translator.translate(payload)
+    const result = channelName === undefined
+      ? await deps.translator.translate(payload)
+      : await deps.translator.translate(payload, { channelName })
     sendResponse({
       type: 'translate_response',
       payload: sanitizeTranslationResultForContent(result),
