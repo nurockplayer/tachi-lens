@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { QuotaHealthResult } from '@/shared/messages'
 import { App } from './App'
+
+interface RenderQuotaHealthOptions {
+  getQuotaHealthResponse?: () => unknown
+  resetResponse?: unknown
+}
 
 const COOLDOWN_UNTIL = 1_750_000_000_000
 const RECOVERY_AT = 1_750_000_000_000
@@ -56,13 +61,13 @@ const unsupportedResult: QuotaHealthResult = {
 
 /** Renders App with a stub SW returning the given quota-health payload. */
 const sendMessageMock = vi.fn()
-const renderWithQuotaHealth = (payload: QuotaHealthResult[]) => {
+const renderWithQuotaHealth = (payload: QuotaHealthResult[], options: RenderQuotaHealthOptions = {}) => {
   sendMessageMock.mockImplementation(async (message: { type: string }) => {
     if (message.type === 'get_quota_health') {
-      return { type: 'quota_health_result', payload }
+      return options.getQuotaHealthResponse?.() ?? { type: 'quota_health_result', payload }
     }
     if (message.type === 'reset_quota_health') {
-      return { type: 'quota_health_reset_result', payload: { ok: true, resetKeys: ['default'] } }
+      return options.resetResponse ?? { type: 'quota_health_reset_result', payload: { ok: true, resetKeys: ['default'] } }
     }
     if (message.type === 'get_diagnostics') {
       return { type: 'diagnostics_snapshot', payload: { events: [] } }
@@ -115,12 +120,16 @@ describe('Popup Gemini quota health', () => {
     ])
 
     expect(await screen.findByText('Gemini 配額健康狀態')).toBeTruthy()
-    expect(screen.getByText(/default：正常/)).toBeTruthy()
-    expect(screen.getByText(/gemini-2\.5-pro：冷卻中/)).toBeTruthy()
-    expect(screen.getByText(/gemini-2\.5-flash：時鐘回撥/)).toBeTruthy()
-    expect(screen.getByText(/legacy：不可信的遷移/)).toBeTruthy()
-    expect(screen.getByText(/gemini-2\.5-pro：資料異常/)).toBeTruthy()
-    expect(screen.getByText(/default：不支援的版本/)).toBeTruthy()
+    expect(screen.getAllByText('default')).toHaveLength(2)
+    expect(screen.getAllByText('gemini-2.5-pro')).toHaveLength(2)
+    expect(screen.getByText('gemini-2.5-flash')).toBeTruthy()
+    expect(screen.getByText('legacy')).toBeTruthy()
+    expect(screen.getByText('正常')).toBeTruthy()
+    expect(screen.getByText('冷卻中')).toBeTruthy()
+    expect(screen.getByText('時鐘回撥')).toBeTruthy()
+    expect(screen.getByText('不可信的遷移')).toBeTruthy()
+    expect(screen.getByText('資料異常')).toBeTruthy()
+    expect(screen.getByText('不支援的版本')).toBeTruthy()
 
     expect(screen.getByText('Gemini 配額運作正常。')).toBeTruthy()
     expect(screen.getByText('Gemini 正在冷卻，暫停送出請求以保護配額。')).toBeTruthy()
@@ -133,7 +142,7 @@ describe('Popup Gemini quota health', () => {
   it('shows cooldown denial reason, provider day and next recovery time when provided', async () => {
     renderWithQuotaHealth([cooldownResult])
 
-    await screen.findByText(/gemini-2\.5-pro：冷卻中/)
+    await screen.findByText('gemini-2.5-pro')
     expect(screen.getByText(/拒絕原因：冷卻中/)).toBeTruthy()
     expect(screen.getByText(/目前配額日：2026-08-03/)).toBeTruthy()
     expect(
@@ -146,7 +155,7 @@ describe('Popup Gemini quota health', () => {
   it('shows clock rollback recovery time when provided', async () => {
     renderWithQuotaHealth([clockRollbackResult])
 
-    await screen.findByText(/gemini-2\.5-flash：時鐘回撥/)
+    await screen.findByText('gemini-2.5-flash')
     expect(screen.getByText(/拒絕原因：時鐘回撥/)).toBeTruthy()
     expect(
       screen.getByText((content) =>
@@ -158,7 +167,7 @@ describe('Popup Gemini quota health', () => {
   it('omits optional fields when the contract does not provide them', async () => {
     renderWithQuotaHealth([healthyResult])
 
-    await screen.findByText(/default：正常/)
+    await screen.findByText('default')
     expect(screen.queryByText(/拒絕原因/)).toBeNull()
     expect(screen.queryByText(/目前配額日/)).toBeNull()
     expect(screen.queryByText(/冷卻結束/)).toBeNull()
@@ -168,7 +177,7 @@ describe('Popup Gemini quota health', () => {
   it('does not present a healthy state as needing repair', async () => {
     renderWithQuotaHealth([healthyResult])
 
-    await screen.findByText(/default：正常/)
+    await screen.findByText('default')
     expect(screen.queryByRole('button', { name: /重設|reset|修復|repair/i })).toBeNull()
   })
 
@@ -176,14 +185,14 @@ describe('Popup Gemini quota health', () => {
     const overflowNote = 'Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。'
 
     const { unmount: unmountIntegrity } = renderWithQuotaHealth([untrustedMigrationResult])
-    expect(await screen.findByText(/legacy：不可信的遷移/)).toBeTruthy()
+    expect(await screen.findByText('legacy')).toBeTruthy()
     expect(screen.getByText(overflowNote)).toBeTruthy()
     unmountIntegrity()
 
     cleanup()
 
     renderWithQuotaHealth([clockRollbackResult, malformedResult, unsupportedResult])
-    await screen.findByText(/gemini-2\.5-flash：時鐘回撥/)
+    await screen.findByText('gemini-2.5-flash')
     expect(screen.getAllByText(overflowNote)).toHaveLength(3)
   })
 
@@ -191,7 +200,7 @@ describe('Popup Gemini quota health', () => {
     const overflowNote = 'Gemini 暫停期間，仍可改用 DeepSeek 進行翻譯。'
 
     renderWithQuotaHealth([healthyResult, cooldownResult])
-    await screen.findByText(/gemini-2\.5-pro：冷卻中/)
+    await screen.findByText('gemini-2.5-pro')
     expect(screen.queryByText(overflowNote)).toBeNull()
   })
 
@@ -200,13 +209,70 @@ describe('Popup Gemini quota health', () => {
 
     // The Quota & Health accordion is always listed (progressive disclosure);
     // with no data it shows an empty state instead of disappearing.
-    expect(await screen.findByText('尚未取得配額健康狀態。')).toBeTruthy()
+    expect(await screen.findByText('目前沒有可顯示的配額健康狀態。')).toBeTruthy()
+  })
+
+  it('shows a loading state while quota health is being read', async () => {
+    let resolveQuotaHealth: ((value: unknown) => void) | undefined
+    const quotaHealthResponse = new Promise<unknown>((resolve) => {
+      resolveQuotaHealth = resolve
+    })
+
+    sendMessageMock.mockImplementation(async (message: { type: string }) => {
+      if (message.type === 'get_quota_health') return quotaHealthResponse
+      if (message.type === 'get_diagnostics') return { type: 'diagnostics_snapshot', payload: { events: [] } }
+      if (message.type === 'get_api_key_preview') return { type: 'api_key_preview', payload: { preview: '' } }
+      return undefined
+    })
+    vi.stubGlobal('chrome', {
+      storage: { local: { get: vi.fn(async () => ({})) } },
+      runtime: {
+        sendMessage: sendMessageMock,
+        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      tabs: { query: vi.fn(async () => []) },
+    })
+    render(<App />)
+
+    const sectionButton = await screen.findByRole('button', { name: 'Gemini 配額健康狀態' })
+    fireEvent.click(sectionButton)
+    const region = screen.getByRole('region', { name: 'Gemini 配額健康狀態' })
+    expect(region.textContent).toContain('載入中...')
+
+    resolveQuotaHealth?.({ type: 'quota_health_result', payload: [] })
+    await waitFor(() => expect(region.textContent).toContain('目前沒有可顯示的配額健康狀態。'))
+  })
+
+  it('keeps a transient quota-health read failure neutral instead of fabricating an unhealthy state', async () => {
+    sendMessageMock.mockImplementation(async (message: { type: string }) => {
+      if (message.type === 'get_quota_health') throw new Error('raw service-worker failure')
+      if (message.type === 'get_diagnostics') return { type: 'diagnostics_snapshot', payload: { events: [] } }
+      if (message.type === 'get_api_key_preview') return { type: 'api_key_preview', payload: { preview: '' } }
+      return undefined
+    })
+    vi.stubGlobal('chrome', {
+      storage: { local: { get: vi.fn(async () => ({})) } },
+      runtime: {
+        sendMessage: sendMessageMock,
+        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      tabs: { query: vi.fn(async () => []) },
+    })
+    render(<App />)
+
+    const sectionButton = await screen.findByRole('button', { name: 'Gemini 配額健康狀態' })
+    fireEvent.click(sectionButton)
+    const region = screen.getByRole('region', { name: 'Gemini 配額健康狀態' })
+    expect(region.textContent).toContain('目前沒有可顯示的配額健康狀態。')
+    expect(within(region).queryByRole('button', { name: /修復|重設|repair|reset/i })).toBeNull()
+    expect(within(region).queryByText(/時鐘回撥|資料異常|不支援的版本/)).toBeNull()
+    expect(region.textContent).not.toContain('raw service-worker failure')
   })
 
   it('only issues read-only messages and never mutates quota state', async () => {
     renderWithQuotaHealth([healthyResult, cooldownResult, clockRollbackResult])
 
-    await screen.findByText(/gemini-2\.5-flash：時鐘回撥/)
+    await screen.findByText('gemini-2.5-flash')
 
     const mutationPattern = /reset|repair|delete_quota|save_quota|clear_quota|purge/i
     for (const type of getSendMessageTypes()) {
@@ -225,7 +291,7 @@ describe('Popup Gemini quota health', () => {
       unsupportedResult,
     ])
 
-    await screen.findByText(/gemini-2\.5-flash：時鐘回撥/)
+    await screen.findByText('gemini-2.5-flash')
     await openQuotaHealthSection()
     const repairButtons = screen.getAllByRole('button', { name: /修復|重設|repair|reset/i })
     // clock_rollback, untrusted_migration, malformed_snapshot, unsupported_version.
@@ -246,6 +312,45 @@ describe('Popup Gemini quota health', () => {
     // Second click sends the reset and refreshes diagnostics.
     fireEvent.click(screen.getByRole('button', { name: '確認修復？' }))
     await waitFor(() => expect(getSendMessageTypes()).toContain('reset_quota_health'))
+  })
+
+  it('refreshes the health view after a successful repair', async () => {
+    let healthReads = 0
+    renderWithQuotaHealth([clockRollbackResult], {
+      getQuotaHealthResponse: () => {
+        healthReads += 1
+        return {
+          type: 'quota_health_result',
+          payload: healthReads === 1 ? [clockRollbackResult] : [healthyResult],
+        }
+      },
+    })
+
+    await openQuotaHealthSection()
+    fireEvent.click(await screen.findByRole('button', { name: '修復配額資料' }))
+    fireEvent.click(screen.getByRole('button', { name: '確認修復？' }))
+
+    await waitFor(() => expect(screen.getByText('正常')).toBeTruthy())
+    expect(healthReads).toBe(2)
+    expect(screen.queryByRole('button', { name: /修復|重設|repair|reset/i })).toBeNull()
+  })
+
+  it('keeps the existing state and shows bounded localized copy after a repair failure', async () => {
+    renderWithQuotaHealth([clockRollbackResult], {
+      resetResponse: {
+        type: 'quota_health_reset_result',
+        payload: { ok: false, resetKeys: [], error: 'RAW_PROVIDER_ERROR_WITH_SECRET' },
+      },
+    })
+
+    await openQuotaHealthSection()
+    fireEvent.click(await screen.findByRole('button', { name: '修復配額資料' }))
+    fireEvent.click(screen.getByRole('button', { name: '確認修復？' }))
+
+    const failure = await screen.findByText('配額資料修復失敗，請再試一次。')
+    expect(failure).toBeTruthy()
+    expect(screen.getByText('時鐘回撥')).toBeTruthy()
+    expect(screen.queryByText('RAW_PROVIDER_ERROR_WITH_SECRET')).toBeNull()
   })
 
   it('keeps the quota state unchanged when the confirmation is not completed', async () => {

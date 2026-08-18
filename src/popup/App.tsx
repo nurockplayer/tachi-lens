@@ -179,6 +179,12 @@ const REPAIRABLE_STATUSES: ReadonlySet<QuotaHealthStatus> = INTEGRITY_STATUSES
 /** Formats an epoch-ms timestamp into a localized wall-clock string. */
 const formatInstant = (epochMs: number): string => new Date(epochMs).toLocaleString()
 
+/** Returns a safe machine-readable timestamp for the accessible `<time>` value. */
+const formatTimestampAttribute = (epochMs: number): string => {
+  const date = new Date(epochMs)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+}
+
 export const extractChannelFromUrl = (url: string): string | undefined => {
   try {
     const { hostname, pathname } = new URL(url)
@@ -220,31 +226,36 @@ interface ErrorNotificationItem {
   timestamp: number
 }
 
-const DIAGNOSTIC_LABELS: Record<DiagnosticStage, string> = {
-  chat_container_ready: '已連上 Twitch 聊天室',
-  chat_container_missing: '找不到 Twitch 聊天室容器',
-  message_detected: '偵測到聊天室訊息',
-  message_not_ready: '訊息尚未完成載入',
-  message_skipped: '訊息已略過',
-  translation_requested: '翻譯請求已送出',
-  translation_received: '收到翻譯結果',
-  translation_failed: '翻譯失敗',
-  translation_injected: '翻譯已顯示於聊天室',
-  // Privacy-safe aggregate counters (#60). Shown as a single bounded event with
-  // a count; never message content, usernames, channel names, or provider data.
-  batch_dedup_removed: '同批重複請求已去重',
-  in_flight_coalesced: '同內容進行中請求已合併',
-  queue_overflow_drop: '佇列溢位已丟棄',
-  queue_obsolete_drop: '佇列過時項目已丟棄',
-  // #104: persistent L2 IndexedDB cache hits, aggregated as a bounded counter.
-  l2_cache_hit: '持久快取命中',
-  // v0.3 speech counters (Spec §6). Aggregated counts only — never transcript
-  // text, audio, channel names, provider bodies, or keys.
-  speech_started: '語音字幕已啟動',
-  speech_stopped: '語音字幕已停止',
-  speech_caption_emitted: '語音字幕已輸出',
-  speech_chunk_sent: '語音片段已送出',
-  speech_error: '語音錯誤',
+const DIAGNOSTIC_LABEL_KEYS: Record<DiagnosticStage, Parameters<typeof t>[0]> = {
+  chat_container_ready: 'diagnosticStageChatContainerReady',
+  chat_container_missing: 'diagnosticStageChatContainerMissing',
+  message_detected: 'diagnosticStageMessageDetected',
+  message_not_ready: 'diagnosticStageMessageNotReady',
+  message_skipped: 'diagnosticStageMessageSkipped',
+  translation_requested: 'diagnosticStageTranslationRequested',
+  translation_received: 'diagnosticStageTranslationReceived',
+  translation_failed: 'diagnosticStageTranslationFailed',
+  translation_injected: 'diagnosticStageTranslationInjected',
+  batch_dedup_removed: 'diagnosticStageBatchDedupRemoved',
+  in_flight_coalesced: 'diagnosticStageInFlightCoalesced',
+  queue_overflow_drop: 'diagnosticStageQueueOverflowDrop',
+  queue_obsolete_drop: 'diagnosticStageQueueObsoleteDrop',
+  l2_cache_hit: 'diagnosticStageL2CacheHit',
+  speech_started: 'diagnosticStageSpeechStarted',
+  speech_stopped: 'diagnosticStageSpeechStopped',
+  speech_caption_emitted: 'diagnosticStageSpeechCaptionEmitted',
+  speech_chunk_sent: 'diagnosticStageSpeechChunkSent',
+  speech_error: 'diagnosticStageSpeechError',
+}
+
+/** Only exceptional diagnostic stages receive semantic color treatment. */
+const DIAGNOSTIC_TONES: Partial<Record<DiagnosticStage, Extract<Tone, 'warning' | 'danger'>>> = {
+  chat_container_missing: 'danger',
+  translation_failed: 'danger',
+  speech_error: 'danger',
+  message_not_ready: 'warning',
+  queue_overflow_drop: 'warning',
+  queue_obsolete_drop: 'warning',
 }
 
 /** i18n labels for each speech_state machine value (Spec §6, live-status readout). */
@@ -286,7 +297,10 @@ export function App() {
   const [useChannelSettings, setUseChannelSettings] = useState(false)
   const [errorNotifications, setErrorNotifications] = useState<ErrorNotificationItem[]>([])
   const [diagnostics, setDiagnostics] = useState<DiagnosticEvent[]>([])
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(true)
   const [quotaHealth, setQuotaHealth] = useState<QuotaHealthResult[]>([])
+  const [quotaHealthLoading, setQuotaHealthLoading] = useState(true)
+  const [quotaRepairErrors, setQuotaRepairErrors] = useState<Record<string, boolean>>({})
   // Consent modal + live speech_state readout (#162). `speechConsentOpen` is a
   // transient UI flag (never persisted); the persisted grant is
   // `speechConfig.speechConsentGranted`. `speechState` mirrors the SW's
@@ -301,6 +315,7 @@ export function App() {
 
   /** Refreshes the quota-health panel from the Service Worker. */
   const refreshQuotaHealth = useCallback(async (): Promise<void> => {
+    setQuotaHealthLoading(true)
     try {
       const response = (await chrome.runtime.sendMessage({
         type: 'get_quota_health',
@@ -311,6 +326,8 @@ export function App() {
       }
     } catch {
       // The service worker may be starting. The Popup shows nothing until data arrives.
+    } finally {
+      setQuotaHealthLoading(false)
     }
   }, [])
 
@@ -329,10 +346,17 @@ export function App() {
         payload: { quotaKey },
       })) as unknown
       if (isQuotaHealthResetResultMessage(response) && response.payload.ok) {
+        setQuotaRepairErrors((previous) => {
+          const next = { ...previous }
+          delete next[quotaKey]
+          return next
+        })
         await refreshQuotaHealth()
+      } else {
+        setQuotaRepairErrors((previous) => ({ ...previous, [quotaKey]: true }))
       }
     } catch {
-      // The service worker may be restarting; the next refresh shows the state.
+      setQuotaRepairErrors((previous) => ({ ...previous, [quotaKey]: true }))
     }
   }, [confirmingReset, refreshQuotaHealth])
 
@@ -358,6 +382,8 @@ export function App() {
         }
       } catch {
         // The service worker may be starting. The Popup still receives live events when available.
+      } finally {
+        if (!cancelled) setDiagnosticsLoading(false)
       }
     }
     void loadDiagnostics()
@@ -1081,21 +1107,24 @@ export function App() {
 
         {/* Quota & Health */}
         <Accordion id="quota-health" title={t('quotaHealthSection')}>
-          {quotaHealth.length === 0 ? (
-            <EmptyState>尚未取得配額健康狀態。</EmptyState>
+          {quotaHealthLoading ? (
+            <div className="panel-loading" role="status">{t('loading')}</div>
+          ) : quotaHealth.length === 0 ? (
+            <EmptyState>{t('quotaHealthEmpty')}</EmptyState>
           ) : (
             <div className="quota-health-stack">
               {quotaHealth.map((result) => {
                 const meta = QUOTA_HEALTH_STATUS_META[result.status]
                 const integrity = INTEGRITY_STATUSES.has(result.status)
                 return (
-                  <Card key={result.quotaKey} className={`card--${meta.tone}`}>
-                    <StatusBadge tone={meta.tone} className="quota-card__title">
-                      {`${result.quotaKey}：${t(meta.labelKey)}`}
-                    </StatusBadge>
-                    <div className="quota-meta">
-                      {t(meta.descKey)}
+                  <Card key={result.quotaKey} className={`quota-card quota-card--${result.status}`}>
+                    <div className="quota-card__header">
+                      <span className="quota-card__model">{result.quotaKey}</span>
+                      <StatusBadge tone={meta.tone} className="quota-card__status">
+                        {t(meta.labelKey)}
+                      </StatusBadge>
                     </div>
+                    <p className="quota-card__description">{t(meta.descKey)}</p>
                     {result.denialReason && (
                       <div className="quota-meta">
                         {t('quotaHealthDenialPrefix')}：{t(QUOTA_HEALTH_DENIAL_LABELS[result.denialReason])}
@@ -1121,6 +1150,11 @@ export function App() {
                         {t('quotaHealthDeepSeekOverflow')}
                       </InlineNotice>
                     )}
+                    {quotaRepairErrors[result.quotaKey] && (
+                      <InlineNotice tone="danger" className="quota-repair-error">
+                        {t('quotaHealthRepairFailed')}
+                      </InlineNotice>
+                    )}
                     {REPAIRABLE_STATUSES.has(result.status) && (
                       <Button
                         variant={confirmingReset[result.quotaKey] ? 'danger' : 'danger-outline'}
@@ -1141,20 +1175,39 @@ export function App() {
         </Accordion>
 
         {/* Diagnostics */}
-        <Accordion id="diagnostics" title="診斷">
-          {diagnostics.length === 0 ? (
-            <EmptyState>尚未收到診斷事件。請在 Twitch 聊天室等待一則新訊息。</EmptyState>
+        <Accordion id="diagnostics" title={t('diagnosticsSection')}>
+          {diagnosticsLoading ? (
+            <div className="panel-loading" role="status">{t('loading')}</div>
+          ) : diagnostics.length === 0 ? (
+            <EmptyState>{t('diagnosticsEmpty')}</EmptyState>
           ) : (
-            <div className="diag-list">
+            <ul className="diag-list">
               {diagnostics.slice(0, 5).map((event) => (
-                <div key={event.id} className="diag-item">
-                  <strong>{DIAGNOSTIC_LABELS[event.stage]}</strong>
+                <li
+                  key={event.id}
+                  className={[
+                    'diag-item',
+                    DIAGNOSTIC_TONES[event.stage] ? `diag-item--${DIAGNOSTIC_TONES[event.stage]}` : '',
+                  ].filter(Boolean).join(' ')}
+                >
+                  <div className="diag-item__main">
+                    {DIAGNOSTIC_TONES[event.stage] ? (
+                      <StatusBadge tone={DIAGNOSTIC_TONES[event.stage]} className="diag-item__stage">
+                        {t(DIAGNOSTIC_LABEL_KEYS[event.stage])}
+                      </StatusBadge>
+                    ) : (
+                      <strong className="diag-item__stage">{t(DIAGNOSTIC_LABEL_KEYS[event.stage])}</strong>
+                    )}
                   {isCountStage(event.stage) && typeof event.count === 'number'
-                    ? <span className="diag-detail">：{event.count}</span>
-                    : event.detail && <span className="diag-detail">：{event.detail}</span>}
-                </div>
+                    ? <span className="diag-count" aria-label={`${t('diagnosticsCount')} ${event.count}`}>×{event.count}</span>
+                    : null}
+                  </div>
+                  <time className="diag-item__time" dateTime={formatTimestampAttribute(event.timestamp)}>
+                    {formatInstant(event.timestamp)}
+                  </time>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </Accordion>
 
