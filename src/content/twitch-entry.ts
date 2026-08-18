@@ -480,6 +480,10 @@ const isDisabledChatElement = (element: HTMLElement): boolean => {
   if (disabledText === undefined) return false
 
   const currentText = handler.getMessageText(element)
+  if (disabledText === '' && currentText !== '') {
+    disabledChatElements.set(element, currentText)
+    return true
+  }
   if (disabledText !== '' && currentText !== disabledText) {
     disabledChatElements.delete(element)
     return false

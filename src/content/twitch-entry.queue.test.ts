@@ -354,6 +354,55 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('updates empty disabled markers before allowing recycled text', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    await updateTranslationEnabled(false)
+
+    const recycledMessage = document.createElement('div')
+    recycledMessage.className = 'chat-line__message'
+    recycledMessage.innerHTML = [
+      '<span class="chat-author__display-name">viewer</span>',
+      '<span data-a-target="chat-line-message-body"></span>',
+    ].join('')
+    container.appendChild(recycledMessage)
+    await Promise.resolve()
+
+    await updateTranslationEnabled(true)
+    const body = recycledMessage.querySelector('[data-a-target="chat-line-message-body"]')!
+    body.textContent = 'hydrated while disabled'
+    // Exercise the marker transition before MutationObserver can observe the
+    // text node change; this text is still from the disabled era.
+    mod._test.enqueueTranslation(recycledMessage, 'live')
+    body.textContent = 'new recycled message'
+    mod._test.enqueueTranslation(recycledMessage, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'new recycled message' },
+    })
+  })
+
   it('does not resurrect disabled-era messages after re-enable', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {
