@@ -685,7 +685,8 @@ const processMessage = async (
     if (stopped || translationGeneration !== chatTranslationGeneration) return {}
     if (!settings.translationEnabled) {
       disableChatTranslation(element)
-      return await handler.translateAndInject(element, settings, priority)
+      reportDiagnostic('message_skipped', '翻譯功能已關閉')
+      return { translationDisabled: true }
     }
     if (!chatTranslationEnabled || translationGeneration !== chatTranslationGeneration) return {}
 

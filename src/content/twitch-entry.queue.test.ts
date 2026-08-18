@@ -256,6 +256,56 @@ describe('content script translation queue', () => {
     })
   })
 
+  it('keeps a row unprocessed when settings hydration disables translation', async () => {
+    let returnDisabledSettings = false
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        if (returnDisabledSettings) {
+          returnDisabledSettings = false
+          return Promise.resolve({
+            type: 'content_settings',
+            payload: { translationEnabled: false, minTextLength: 1 },
+          })
+        }
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    returnDisabledSettings = true
+    appendMessage(container, 'same text after settings cancellation')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(0)
+
+    await updateTranslationEnabled(true)
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    message.setAttribute('data-message-id', 'new-message')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+    expect(translationRequests()[0]![0]).toMatchObject({
+      payload: { text: 'same text after settings cancellation' },
+    })
+  })
+
   it('pauses retry and backlog processing while disabled', async () => {
     sendMessage.mockImplementation((message: { type: string }) => {
       if (message.type === 'get_content_settings') {
