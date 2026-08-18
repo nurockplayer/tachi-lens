@@ -210,6 +210,52 @@ describe('content script translation queue', () => {
     expect(container.querySelector('[data-tachi-lens-translated]')).toBeNull()
   })
 
+  it('records an empty cancellation before re-enable can recycle the row', async () => {
+    let translationCallCount = 0
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        translationCallCount++
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: translationCallCount === 1
+            ? { messageId: 'any-id' }
+            : { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'same text after recycle')
+    const message = container.querySelector('.chat-line__message') as HTMLElement
+    message.setAttribute('data-message-id', 'disabled-message')
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+
+    await updateTranslationEnabled(true)
+    message.setAttribute('data-message-id', 'new-message')
+    mod._test.enqueueTranslation(message, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(2)
+    expect(translationRequests()[1]![0]).toMatchObject({
+      payload: { text: 'same text after recycle' },
+    })
+  })
+
   it('pauses retry and backlog processing while disabled', async () => {
     sendMessage.mockImplementation((message: { type: string }) => {
       if (message.type === 'get_content_settings') {

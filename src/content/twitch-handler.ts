@@ -319,7 +319,6 @@ export class TwitchMessageHandler {
       // error, so the content script cannot inject a visible fallback.
       if (result.translatedText === undefined && result.error === undefined) {
         this.diagnosticReporter?.('message_skipped', '翻譯功能已關閉')
-        this.setProcessed(element, text)
         return { translationDisabled: true }
       }
 
