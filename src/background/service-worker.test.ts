@@ -667,4 +667,35 @@ describe('service worker startup', () => {
       expect(result).toBe(false)
     })
   })
+
+  describe('speech settings routing (#174)', () => {
+    it('forwards Popup speech settings updates to content scripts', async () => {
+      const sendMessage = vi.fn(async () => undefined)
+      const chromeRuntime = {
+        ...createChromeRuntime(),
+        tabs: {
+          query: vi.fn(async () => [{ id: 42 }]),
+          sendMessage,
+        },
+      }
+      vi.stubGlobal('chrome', chromeRuntime)
+
+      await import('./service-worker')
+
+      const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]?.[0] as
+        | ((message: unknown, _sender: unknown, sendResponse: (response: unknown) => void) => boolean)
+        | undefined
+      if (!handler) throw new Error('Expected a message handler to be registered')
+
+      const payload = { speechTargetLanguage: 'ja', captionOpacity: 65 }
+      expect(handler({ type: 'speech_settings_updated', payload }, undefined, vi.fn())).toBe(false)
+
+      await vi.waitFor(() => {
+        expect(sendMessage).toHaveBeenCalledWith(42, {
+          type: 'speech_settings_updated',
+          payload,
+        })
+      })
+    })
+  })
 })

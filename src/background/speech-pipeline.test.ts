@@ -227,6 +227,26 @@ describe('SpeechPipeline', () => {
     })
   })
 
+  describe('live settings', () => {
+    it('uses a refreshed speech target language for subsequent active windows', async () => {
+      const h = createHarness()
+      await h.pipeline.start()
+      h.pipeline.updateSpeechSettings({ speechTargetLanguage: 'ja' })
+      h.handle.transcribeChunk.mockResolvedValue([])
+
+      pushWindow(h)
+      await flushMicrotasks()
+
+      expect(h.handle.transcribeChunk).toHaveBeenCalledWith(
+        expect.anything(),
+        'gemini-secret-key',
+        'gemini-2.5-flash',
+        'ja',
+        expect.anything(),
+      )
+    })
+  })
+
   describe('chunk → caption assembly', () => {
     it('emits interim captions untranslated and final captions translated', async () => {
       // A long window means the 5 s push below never auto-flushes; silence

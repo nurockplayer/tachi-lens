@@ -28,6 +28,7 @@ import type { SpeechAction, SpeechErrorReason, SpeechState } from '@/shared/spee
 import type {
   SpeechCaptionClearedPayload,
   SpeechCaptionPayload,
+  SpeechSettingsUpdatePayload,
   SpeechStatePayload,
 } from '@/shared/messages'
 import type { DiagnosticStage } from '@/shared/messages'
@@ -175,6 +176,13 @@ export class SpeechPipeline {
   /** True while capture + transcription are active (not idle, not a terminal error). */
   isCapturing(): boolean {
     return this.running && this.state.state !== 'idle' && this.state.state !== 'error'
+  }
+
+  /** Apply live speech settings that affect subsequent active windows. */
+  updateSpeechSettings(settings: SpeechSettingsUpdatePayload): void {
+    if (settings.speechTargetLanguage !== undefined) {
+      this.targetLang = settings.speechTargetLanguage
+    }
   }
 
   /**
