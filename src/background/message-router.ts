@@ -39,6 +39,35 @@ const isChatTranslationDisabled = (settings: unknown): boolean =>
   typeof settings === 'object' && settings !== null && !Array.isArray(settings) &&
   (settings as { translationEnabled?: unknown }).translationEnabled === false
 
+interface RuntimeMessageSender {
+  tab?: { url?: unknown }
+  url?: unknown
+}
+
+/**
+ * Resolve the Twitch channel associated with a content-script sender without
+ * widening the translation-request protocol. Chrome's sender URL is trusted
+ * runtime metadata; arbitrary payload fields are not.
+ */
+const getChannelNameFromSender = (sender: unknown): string | undefined => {
+  if (typeof sender !== 'object' || sender === null || Array.isArray(sender)) return undefined
+
+  const candidate = sender as RuntimeMessageSender
+  const tabUrl = candidate.tab?.url
+  const senderUrl = typeof tabUrl === 'string' ? tabUrl : candidate.url
+  if (typeof senderUrl !== 'string') return undefined
+
+  try {
+    const url = new URL(senderUrl)
+    const hostname = url.hostname.toLowerCase()
+    if (hostname !== 'twitch.tv' && !hostname.endsWith('.twitch.tv')) return undefined
+
+    return url.pathname.match(/^\/([^/]+)/)?.[1]?.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
+
 export interface MessageRouter {
   handleMessage(
     message: unknown,
@@ -49,11 +78,15 @@ export interface MessageRouter {
 
 const handleTranslationRequest = async (
   payload: TranslationRequest,
+  sender: unknown,
   sendResponse: SendResponse,
   deps: RouterDependencies,
 ): Promise<void> => {
   try {
-    const settings = await deps.getContentSettings?.()
+    const channelName = getChannelNameFromSender(sender)
+    const settings = channelName === undefined
+      ? await deps.getContentSettings?.()
+      : await deps.getContentSettings?.(channelName)
     if (isChatTranslationDisabled(settings)) {
       sendResponse({
         type: 'translate_response',
@@ -79,9 +112,9 @@ const handleTranslationRequest = async (
 }
 
 export const createMessageRouter = (deps: RouterDependencies): MessageRouter => ({
-  handleMessage(message, _sender, sendResponse) {
+  handleMessage(message, sender, sendResponse) {
     if (isTranslationRequestMessage(message)) {
-      void handleTranslationRequest(message.payload, sendResponse, deps)
+      void handleTranslationRequest(message.payload, sender, sendResponse, deps)
 
       return true
     }

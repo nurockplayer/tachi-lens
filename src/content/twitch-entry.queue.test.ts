@@ -14,19 +14,23 @@ const appendMessage = (container: Element, text: string): void => {
 describe('content script translation queue', () => {
   const sendMessage = vi.fn()
   let runtimeMessageListener: ((message: unknown) => void) | undefined
+  let effectiveTranslationEnabled = true
 
   const translationRequests = (): unknown[][] => sendMessage.mock.calls.filter(([message]) =>
     (message as { type: string }).type === 'translate_request',
   )
 
-  const updateTranslationEnabled = (enabled: boolean): void => {
+  const updateTranslationEnabled = async (enabled: boolean): Promise<void> => {
     if (!runtimeMessageListener) {
       throw new Error('Expected the content runtime message listener to be attached')
     }
+    effectiveTranslationEnabled = enabled
     runtimeMessageListener({
       type: 'settings_updated',
       payload: { translationEnabled: enabled },
     })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
   }
 
   beforeEach(() => {
@@ -34,6 +38,7 @@ describe('content script translation queue', () => {
     vi.resetModules()
     vi.clearAllMocks()
     runtimeMessageListener = undefined
+    effectiveTranslationEnabled = true
     document.body.innerHTML =
       '<div data-test-selector="chat-scrollable-area__message-container"></div>'
     vi.stubGlobal('chrome', {
@@ -60,7 +65,7 @@ describe('content script translation queue', () => {
       if (message.type === 'get_content_settings') {
         return Promise.resolve({
           type: 'content_settings',
-          payload: { translationEnabled: true, minTextLength: 1 },
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
         })
       }
       if (message.type === 'translate_request') {
@@ -80,7 +85,7 @@ describe('content script translation queue', () => {
     await Promise.resolve()
 
     expect(translationRequests()).toHaveLength(0)
-    updateTranslationEnabled(false)
+    await updateTranslationEnabled(false)
     await vi.advanceTimersByTimeAsync(300)
 
     appendMessage(container, 'detected while disabled')
@@ -90,13 +95,51 @@ describe('content script translation queue', () => {
     expect(translationRequests()).toHaveLength(0)
   })
 
+  it('uses the receiving tab channel setting instead of a broadcast toggle payload', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          // This tab has a channel override that remains enabled even when
+          // another tab broadcasts a global-looking disabled payload.
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    // Deliberately do not mutate the effective mock setting: the broadcast
+    // payload is not authoritative for this receiving tab.
+    runtimeMessageListener?.({
+      type: 'settings_updated',
+      payload: { translationEnabled: false },
+    })
+    await Promise.resolve()
+
+    appendMessage(container, 'channel override remains enabled')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+
+    expect(translationRequests()).toHaveLength(1)
+  })
+
   it('discards queued but undispatched work when disabled', async () => {
     const translationResolvers: Array<(value: unknown) => void> = []
     sendMessage.mockImplementation((message: { type: string }) => {
       if (message.type === 'get_content_settings') {
         return Promise.resolve({
           type: 'content_settings',
-          payload: { translationEnabled: true, minTextLength: 1 },
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
         })
       }
       if (message.type === 'translate_request') {
@@ -118,7 +161,7 @@ describe('content script translation queue', () => {
     expect(translationRequests()).toHaveLength(10)
     expect(mod._test.translationQueueLength).toBe(1)
 
-    updateTranslationEnabled(false)
+    await updateTranslationEnabled(false)
     expect(mod._test.translationQueueLength).toBe(0)
 
     for (const resolve of translationResolvers) {
@@ -138,7 +181,7 @@ describe('content script translation queue', () => {
       if (message.type === 'get_content_settings') {
         return Promise.resolve({
           type: 'content_settings',
-          payload: { translationEnabled: true, minTextLength: 1 },
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
         })
       }
       if (message.type === 'translate_request') {
@@ -156,7 +199,7 @@ describe('content script translation queue', () => {
     await vi.advanceTimersByTimeAsync(300)
     expect(translationRequests()).toHaveLength(1)
 
-    updateTranslationEnabled(false)
+    await updateTranslationEnabled(false)
     resolveTranslation?.({
       type: 'translate_response',
       payload: { messageId: 'any-id', translatedText: 'late translation' },
@@ -172,7 +215,7 @@ describe('content script translation queue', () => {
       if (message.type === 'get_content_settings') {
         return Promise.resolve({
           type: 'content_settings',
-          payload: { translationEnabled: true, minTextLength: 1 },
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
         })
       }
       if (message.type === 'translate_request') {
@@ -205,7 +248,7 @@ describe('content script translation queue', () => {
     mod._test.enqueueTranslation(backlog, 'backlog')
     expect(mod._test.translationQueueLength).toBe(1)
 
-    updateTranslationEnabled(false)
+    await updateTranslationEnabled(false)
     expect(mod._test.translationQueueLength).toBe(0)
 
     mod._test.activeTranslations = 0
@@ -220,7 +263,7 @@ describe('content script translation queue', () => {
       if (message.type === 'get_content_settings') {
         return Promise.resolve({
           type: 'content_settings',
-          payload: { translationEnabled: true, minTextLength: 1 },
+          payload: { translationEnabled: effectiveTranslationEnabled, minTextLength: 1 },
         })
       }
       if (message.type === 'translate_request') {
@@ -236,13 +279,13 @@ describe('content script translation queue', () => {
     const container = document.querySelector(
       '[data-test-selector="chat-scrollable-area__message-container"]',
     )!
-    updateTranslationEnabled(false)
+    await updateTranslationEnabled(false)
     appendMessage(container, 'ignored while disabled')
     await Promise.resolve()
     await vi.advanceTimersByTimeAsync(300)
     expect(translationRequests()).toHaveLength(0)
 
-    updateTranslationEnabled(true)
+    await updateTranslationEnabled(true)
     appendMessage(container, 'translated after re-enable')
     await Promise.resolve()
     await vi.advanceTimersByTimeAsync(300)

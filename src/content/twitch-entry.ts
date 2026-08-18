@@ -649,6 +649,7 @@ const cleanup = (): void => {
 }
 
 let runtimeMessageListenerAttached = false
+let settingsUpdateGeneration = 0
 
 const onRuntimeMessage = (message: unknown): void => {
   if (stopped) return
@@ -750,11 +751,26 @@ const isDisplayMode = (value: unknown): value is ContentSettings['displayMode'] 
 
 export const handleSettingsUpdate = async (_payload: SettingsUpdatePayload): Promise<void> => {
   if (stopped) return
+  const updateGeneration = ++settingsUpdateGeneration
   invalidateSettingsCache()
 
-  if (_payload.translationEnabled === false) {
+  let settings: ContentSettings
+  try {
+    // The Popup broadcasts a setting change to every open tab, but a channel
+    // override can make the effective value different for each receiver.
+    // Re-read through the normal channel-aware runtime path before invalidating
+    // work so an unrelated tab does not stop or resume chat translation based
+    // on another channel's payload.
+    settings = await getContentSettings(true)
+  } catch {
+    return
+  }
+
+  if (stopped || updateGeneration !== settingsUpdateGeneration) return
+
+  if (settings.translationEnabled === false) {
     disableChatTranslation()
-  } else if (_payload.translationEnabled === true) {
+  } else {
     chatTranslationEnabled = true
   }
 }

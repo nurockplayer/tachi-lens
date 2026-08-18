@@ -74,7 +74,7 @@ describe('content script entry', () => {
       await handleSettingsUpdate({ translationEnabled: false })
       expect(sendMessage.mock.calls.filter(([message]) =>
         (message as { type?: string }).type === 'get_content_settings',
-      )).toHaveLength(1)
+      )).toHaveLength(2)
 
       vi.unstubAllGlobals()
     })

@@ -111,6 +111,32 @@ describe('MessageRouter', () => {
       expect(translator.translate).not.toHaveBeenCalled()
     })
 
+    it('checks the sender tab channel when guarding a translation request', async () => {
+      const translator = {
+        translate: vi.fn(),
+      } as unknown as Translator
+      const getContentSettings = vi.fn(async (channelName?: string) => ({
+        translationEnabled: channelName !== 'channel-off',
+      }))
+      const { router } = makeRouter({ translator, getContentSettings })
+      const sendResponse = vi.fn()
+
+      router.handleMessage(
+        { type: 'translate_request', payload: { messageId: 'm-channel-off', text: 'Hello' } },
+        { tab: { url: 'https://www.twitch.tv/channel-off' } },
+        sendResponse,
+      )
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith({
+          type: 'translate_response',
+          payload: { messageId: 'm-channel-off' },
+        })
+      })
+      expect(getContentSettings).toHaveBeenCalledWith('channel-off')
+      expect(translator.translate).not.toHaveBeenCalled()
+    })
+
     it('returns false for an invalid translate_request payload', () => {
       const { router } = makeRouter()
       const sendResponse = vi.fn()
