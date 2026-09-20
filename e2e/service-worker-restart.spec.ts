@@ -30,6 +30,7 @@ test.describe('Service Worker restart recovery', () => {
     testInfo.setTimeout(90_000)
 
     let page: Page | undefined
+    let calls: Awaited<ReturnType<typeof setupDeepSeekMock>>['calls'] = []
 
     try {
       // --- Extension readiness ---
@@ -48,12 +49,12 @@ test.describe('Service Worker restart recovery', () => {
       })
 
       // DeepSeek mock returning different translations per message
-      const { calls } = await setupDeepSeekMock(context, {
+      calls = (await setupDeepSeekMock(context, {
         translations: {
           'before restart': '重新啟動前',
           'after restart': '重新啟動後',
         },
-      })
+      })).calls
 
       // --- Navigate to synthetic Twitch page ---
       page = await context.newPage()
@@ -183,7 +184,7 @@ test.describe('Service Worker restart recovery', () => {
             const apiKeys = stored.providerApiKeys as Record<string, string> | undefined
             expect(userSettings?.translationEnabled).toBe(true)
             expect(userSettings?.selectedProvider).toBe('deepseek')
-            expect(userSettings?.selectedModel).toBe('deepseek-v4-flash')
+            expect(userSettings?.selectedModel).toBe('deepseek-flash')
             expect(apiKeys?.deepseek).toBe(DEEPSEEK_MOCK_KEY)
             return // success
           } catch {

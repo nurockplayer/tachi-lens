@@ -6,7 +6,7 @@ vi.mock('@/storage/settings', () => ({
   initializeStorageAccess: vi.fn(async () => undefined),
   getUserSettings: vi.fn(async () => ({
     selectedProvider: 'deepseek',
-    selectedModel: 'deepseek-v4-flash',
+    selectedModel: 'deepseek-flash',
     targetLanguage: 'zh-TW',
     speechConfig: {
       speechEnabled: true,

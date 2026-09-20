@@ -1,5 +1,6 @@
 import type { BatchItemResult, ProviderId, TranslationProvider } from '@/providers/types'
 import { buildTranslationPrompt } from '@/providers/prompt'
+import { DEEPSEEK_DEFAULT_MODEL } from '@/providers/deepseek'
 import type { DiagnosticStage, ProviderError, TranslationRequest, TranslationResult } from '@/shared/messages'
 import { TranslationCache } from './cache'
 import { type RateLimiter } from './rate-limiter'
@@ -73,7 +74,7 @@ interface PendingItem {
 }
 
 const DEEPSEEK_FALLBACK_PROVIDER: ProviderId = 'deepseek'
-const DEEPSEEK_FALLBACK_MODEL = 'deepseek-v4-flash'
+const DEEPSEEK_FALLBACK_MODEL = DEEPSEEK_DEFAULT_MODEL
 const tokenEstimator = new CharacterTokenEstimator()
 
 /**

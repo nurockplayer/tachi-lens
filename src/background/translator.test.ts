@@ -32,7 +32,7 @@ const createMockProvider = (id: ProviderId = 'deepseek'): TranslationProvider =>
   id,
   displayName: id === 'gemini' ? 'Gemini' : 'DeepSeek',
   models: [],
-  defaultModel: 'deepseek-v4-flash',
+  defaultModel: 'deepseek-flash',
   translateBatch: vi.fn<TranslationProvider['translateBatch']>(),
   validateKey: vi.fn(),
 })
@@ -42,7 +42,7 @@ const defaultDeps = (overrides?: Partial<TranslatorDependencies>): TranslatorDep
   rateLimiter: new RateLimiter({ maxBackoffMs: 60000 }),
   getSettings: vi.fn(async () => ({
     selectedProvider: 'deepseek' as ProviderId,
-    selectedModel: 'deepseek-v4-flash',
+    selectedModel: 'deepseek-flash',
     targetLanguage: 'zh-TW',
   })),
   getApiKey: vi.fn(async () => 'test-api-key'),
@@ -82,7 +82,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'deepseek' as ProviderId,
-        selectedModel: 'deepseek-v4-flash',
+        selectedModel: 'deepseek-flash',
         targetLanguage: 'zh-TW',
         translationEnabled: false,
       }))
@@ -103,7 +103,7 @@ describe('Translator', () => {
       deps.getProvider = vi.fn(() => provider)
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'deepseek' as ProviderId,
-        selectedModel: 'deepseek-v4-flash',
+        selectedModel: 'deepseek-flash',
         targetLanguage: 'zh-TW',
         translationEnabled: false,
       }))
@@ -532,7 +532,7 @@ describe('Translator', () => {
       const callArgs = vi.mocked(provider.translateBatch).mock.calls[0]!
       expect(callArgs[0]).toEqual([{ id: 'msg1', text: 'Hello', sourceLang: undefined }])
       expect(callArgs[1]).toBe('test-api-key')
-      expect(callArgs[2]).toBe('deepseek-v4-flash')
+      expect(callArgs[2]).toBe('deepseek-flash')
       expect(callArgs[3]).toBe('zh-TW')
     })
 
@@ -1330,7 +1330,7 @@ describe('Translator', () => {
     it('returns cached result without calling the provider', async () => {
       const provider = createMockProvider()
       deps.getProvider = vi.fn(() => provider)
-      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'), {
+      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-flash'), {
         id: 'msg1',
         translatedText: '你好',
       })
@@ -1408,7 +1408,7 @@ describe('Translator', () => {
       vi.advanceTimersByTime(300)
       await promise1
 
-      expect(deps.cache.has(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'))).toBe(true)
+      expect(deps.cache.has(cacheKey('Hello', 'deepseek', 'deepseek-flash'))).toBe(true)
     })
 
     it('does not cache error results', async () => {
@@ -1422,7 +1422,7 @@ describe('Translator', () => {
       vi.advanceTimersByTime(300)
       await promise
 
-      expect(deps.cache.has(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'))).toBe(false)
+      expect(deps.cache.has(cacheKey('Hello', 'deepseek', 'deepseek-flash'))).toBe(false)
     })
 
     it('coalesces concurrent identical translations through one scheduler provider call', async () => {
@@ -1709,7 +1709,7 @@ describe('Translator', () => {
     it('settles every item when a dependency throws after a partial cache hit', async () => {
       const provider = createMockProvider()
       deps.getProvider = vi.fn(() => provider)
-      deps.cache.set(cacheKey('cached', 'deepseek', 'deepseek-v4-flash'), {
+      deps.cache.set(cacheKey('cached', 'deepseek', 'deepseek-flash'), {
         id: 'cached-id',
         translatedText: '快取結果',
       })
@@ -1780,7 +1780,7 @@ describe('Translator', () => {
         if (settingsCalls === 1) throw new Error('transient storage failure')
         return {
           selectedProvider: 'deepseek' as ProviderId,
-          selectedModel: 'deepseek-v4-flash',
+          selectedModel: 'deepseek-flash',
           targetLanguage: 'zh-TW',
         }
       })
@@ -1810,7 +1810,7 @@ describe('Translator', () => {
       expect(provider.translateBatch).toHaveBeenCalledWith(
         Array.from({ length: 10 }, (_, i) => ({ id: `second-${i}`, text: `text${i}`, sourceLang: undefined })),
         'test-api-key',
-        'deepseek-v4-flash',
+        'deepseek-flash',
         'zh-TW',
       )
     })
@@ -2190,7 +2190,7 @@ describe('Translator', () => {
   })
 
   describe('rate limiting', () => {
-    it('falls back from a genuine Gemini 429 to DeepSeek V4 Flash', async () => {
+    it('falls back from a genuine Gemini 429 to DeepSeek Flash', async () => {
       const gemini = createMockProvider('gemini')
       const deepseek = createMockProvider('deepseek')
       vi.mocked(gemini.translateBatch).mockResolvedValue([
@@ -2220,7 +2220,7 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).toHaveBeenCalledWith(
         [{ id: 'msg1', text: 'Hello', sourceLang: undefined }],
         'key-deepseek',
-        'deepseek-v4-flash',
+        'deepseek-flash',
         'zh-TW',
       )
       expect(deps.rateLimiter.getRemainingCooldown('gemini')).toBe(57_000)
@@ -2261,7 +2261,7 @@ describe('Translator', () => {
       deps.getApiKey = vi.fn(async (providerId) => `key-${providerId}`)
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
       deps.rateLimiter.recordError('gemini', 30_000)
-      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'), {
+      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-flash'), {
         id: 'old-id',
         translatedText: '快取翻譯',
       })
@@ -2288,7 +2288,7 @@ describe('Translator', () => {
       }))
       deps.getApiKey = vi.fn(async (providerId) => providerId === 'gemini' ? 'gemini-key' : 'deepseek-key')
       deps.getProvider = vi.fn((providerId) => providerId === 'gemini' ? gemini : deepseek)
-      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-v4-flash'), {
+      deps.cache.set(cacheKey('Hello', 'deepseek', 'deepseek-flash'), {
         id: 'cached-id',
         translatedText: '快取翻譯',
       })
@@ -2314,7 +2314,7 @@ describe('Translator', () => {
       let selectedProvider: ProviderId = 'deepseek'
       deps.getSettings = vi.fn(async () => ({
         selectedProvider,
-        selectedModel: selectedProvider === 'gemini' ? 'gemini-2.5-flash' : 'deepseek-v4-flash',
+        selectedModel: selectedProvider === 'gemini' ? 'gemini-2.5-flash' : 'deepseek-flash',
         targetLanguage: 'zh-TW',
       }))
       deps.getApiKey = vi.fn(async (providerId) => `key-${providerId}`)
@@ -2329,7 +2329,7 @@ describe('Translator', () => {
       const quota = new GeminiQuotaStore(quotaStorage)
       await quota.openCooldown(60_000, 'gemini-2.5-flash')
       deps.quotaScheduler = new QuotaScheduler(quota, { deepseekMaxConcurrency: 2 })
-      deps.cache.set(cacheKey('cached', 'deepseek', 'deepseek-v4-flash'), {
+      deps.cache.set(cacheKey('cached', 'deepseek', 'deepseek-flash'), {
         id: 'cached-before',
         translatedText: '快取翻譯',
       })
@@ -2651,7 +2651,7 @@ describe('Translator', () => {
       ])
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'deepseek' as ProviderId,
-        selectedModel: 'deepseek-v4-flash',
+        selectedModel: 'deepseek-flash',
         targetLanguage: 'zh-TW',
       }))
       deps.getProvider = vi.fn((providerId) => providerId === 'deepseek' ? deepseek : undefined)

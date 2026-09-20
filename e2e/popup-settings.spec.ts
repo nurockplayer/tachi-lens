@@ -115,8 +115,8 @@ test.describe('Packaged Popup render and settings persistence', () => {
     // Provider → deepseek (may already be default, select anyway)
     await page.locator('#provider-select').selectOption('deepseek')
 
-    // Model → deepseek-v4-flash (set by provider change; select explicitly)
-    await page.locator('#model-select').selectOption('deepseek-v4-flash')
+    // Model → deepseek-flash (set by provider change; select explicitly)
+    await page.locator('#model-select').selectOption('deepseek-flash')
 
     // API key → fill the secret (triggers save_api_key runtime message)
     const apiKeyInput = page.locator('#api-key-input')
@@ -168,7 +168,7 @@ test.describe('Packaged Popup render and settings persistence', () => {
     await expect(page.locator('#provider-select')).toHaveValue('deepseek')
 
     // Model persisted
-    await expect(page.locator('#model-select')).toHaveValue('deepseek-v4-flash')
+    await expect(page.locator('#model-select')).toHaveValue('deepseek-flash')
 
     // Target language persisted (quick control)
     await expect(page.locator('#language-select')).toHaveValue('ja')
@@ -206,7 +206,7 @@ test.describe('Packaged Popup render and settings persistence', () => {
     const userSettings = stored.userSettings as Record<string, unknown> | undefined
     expect(userSettings?.translationEnabled).toBe(false)
     expect(userSettings?.selectedProvider).toBe('deepseek')
-    expect(userSettings?.selectedModel).toBe('deepseek-v4-flash')
+    expect(userSettings?.selectedModel).toBe('deepseek-flash')
     expect(userSettings?.targetLanguage).toBe('ja')
     expect(userSettings?.displayMode).toBe('hover')
     expect(userSettings?.minTextLength).toBe(3)

@@ -86,9 +86,9 @@ export const setupDeepSeekMock = async (
     }
 
     // --- Validate model and thinking ---
-    if (body.model !== 'deepseek-v4-flash') {
+    if (body.model !== 'deepseek-flash') {
       await route.abort('blockedbyclient')
-      throw new Error(`DeepSeek mock: expected model deepseek-v4-flash, got ${body.model}`)
+      throw new Error(`DeepSeek mock: expected model deepseek-flash, got ${body.model}`)
     }
     if ((body.thinking as Record<string, unknown>)?.type !== 'disabled') {
       await route.abort('blockedbyclient')

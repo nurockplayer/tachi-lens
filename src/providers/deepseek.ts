@@ -3,11 +3,11 @@ import { parseRetryAfterMs } from './retry-after'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const DEEPSEEK_MODELS: ProviderModel[] = [
-  { id: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash' },
+  { id: 'deepseek-flash', displayName: 'DeepSeek Flash' },
   { id: 'deepseek-v4-pro', displayName: 'DeepSeek V4 Pro' },
 ]
 
-export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash'
+export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-flash'
 
 const BASE_URL = 'https://api.deepseek.com'
 
@@ -80,11 +80,11 @@ export const createDeepSeekProvider = (
 
       const body: unknown = await response.json()
       const models = isRecord(body) && Array.isArray(body.data) ? body.data : []
-      const hasV4Flash = models.some((model) => isRecord(model) && model.id === DEEPSEEK_DEFAULT_MODEL)
+      const hasDefaultModel = models.some((model) => isRecord(model) && model.id === DEEPSEEK_DEFAULT_MODEL)
 
       return {
-        valid: hasV4Flash,
-        error: hasV4Flash ? undefined : `DeepSeek model "${DEEPSEEK_DEFAULT_MODEL}" is unavailable`,
+        valid: hasDefaultModel,
+        error: hasDefaultModel ? undefined : `DeepSeek model "${DEEPSEEK_DEFAULT_MODEL}" is unavailable`,
       }
     } catch (err) {
       return { valid: false, error: err instanceof Error ? err.message : 'Unknown error' }
