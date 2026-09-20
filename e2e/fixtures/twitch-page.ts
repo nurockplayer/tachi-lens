@@ -35,7 +35,7 @@ export const seedTestSettings = async (serviceWorker: Worker): Promise<void> => 
       userSettings: {
         ...config,
         selectedProvider: 'deepseek',
-        selectedModel: 'deepseek-v4-flash',
+        selectedModel: 'deepseek-flash',
         targetLanguage: 'zh-TW',
         displayMode: 'below',
         botNameBlacklist: [],
@@ -66,7 +66,7 @@ export const seedDeepSeekTestSettings = async (
       userSettings: {
         ...config,
         selectedProvider: 'deepseek',
-        selectedModel: 'deepseek-v4-flash',
+        selectedModel: 'deepseek-flash',
         targetLanguage: 'zh-TW',
         displayMode: mode,
         botNameBlacklist: [],

@@ -30,6 +30,7 @@ test.describe('Service Worker restart recovery', () => {
     testInfo.setTimeout(90_000)
 
     let page: Page | undefined
+    let calls: Awaited<ReturnType<typeof setupDeepSeekMock>>['calls'] = []
 
     try {
       // --- Extension readiness ---
@@ -48,12 +49,12 @@ test.describe('Service Worker restart recovery', () => {
       })
 
       // DeepSeek mock returning different translations per message
-      const { calls } = await setupDeepSeekMock(context, {
+      calls = (await setupDeepSeekMock(context, {
         translations: {
           'before restart': '重新啟動前',
           'after restart': '重新啟動後',
         },
-      })
+      })).calls
 
       // --- Navigate to synthetic Twitch page ---
       page = await context.newPage()
