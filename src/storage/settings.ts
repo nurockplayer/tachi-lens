@@ -5,6 +5,7 @@ import type { FilterConfig } from '@/content/message-filter'
 import { DEFAULT_FILTER_CONFIG } from '@/content/message-filter'
 import type { ProviderId } from '@/providers/types'
 import { GEMINI_MODELS } from '@/providers/gemini'
+import { DEEPSEEK_DEFAULT_MODEL } from '@/providers/deepseek'
 import {
   DEFAULT_GEMINI_QUOTA,
   normalizeGeminiQuotaSettings,
@@ -62,7 +63,7 @@ export const DEFAULT_GEMINI_QUOTA_PROFILES: Record<string, GeminiQuotaSettings> 
 export const DEFAULT_SETTINGS: UserSettings = {
   ...DEFAULT_FILTER_CONFIG,
   selectedProvider: 'deepseek',
-  selectedModel: 'deepseek-v4-flash',
+  selectedModel: DEEPSEEK_DEFAULT_MODEL,
   targetLanguage: 'zh-TW',
   displayMode: 'below',
   chineseVariantMode: 'skip_all_chinese',
@@ -79,6 +80,18 @@ export interface RuntimeState {
   activeProvider?: ProviderId
   validationInProgress?: boolean
   lastValidationError?: string
+}
+
+const LEGACY_DEEPSEEK_FLASH_MODEL = 'deepseek-v4-flash'
+
+const normalizeSelectedModel = (provider: unknown, model: unknown): string => {
+  const candidate = typeof model === 'string' && model.trim()
+    ? model.trim()
+    : DEFAULT_SETTINGS.selectedModel
+
+  return provider === 'deepseek' && candidate === LEGACY_DEEPSEEK_FLASH_MODEL
+    ? DEEPSEEK_DEFAULT_MODEL
+    : candidate
 }
 
 export const USER_SETTINGS_STORAGE_KEY = 'userSettings'
@@ -182,10 +195,11 @@ export const initializeStorageAccess = async (storage = getDefaultStorage()): Pr
 export const getUserSettings = async (storage = getDefaultStorage()): Promise<UserSettings> => {
   const storedSettings = await readRecord(storage.local, USER_SETTINGS_STORAGE_KEY)
   const geminiQuota = normalizeGeminiQuotaSettings(storedSettings.geminiQuota)
+  const mergedSettings = { ...DEFAULT_SETTINGS, ...storedSettings }
 
   return {
-    ...DEFAULT_SETTINGS,
-    ...storedSettings,
+    ...mergedSettings,
+    selectedModel: normalizeSelectedModel(mergedSettings.selectedProvider, mergedSettings.selectedModel),
     chineseVariantMode: normalizeChineseVariantMode(storedSettings.chineseVariantMode),
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(storedSettings.geminiQuotaProfiles, geminiQuota),
@@ -205,6 +219,7 @@ export const saveUserSettings = async (
   const profilesSource = updates.geminiQuotaProfiles ?? mergedSettings.geminiQuotaProfiles
   const nextSettings = {
     ...mergedSettings,
+    selectedModel: normalizeSelectedModel(mergedSettings.selectedProvider, mergedSettings.selectedModel),
     chineseVariantMode: normalizeChineseVariantMode(mergedSettings.chineseVariantMode),
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(profilesSource, geminiQuota),
@@ -435,6 +450,7 @@ export const mergeSettings = (
       : global.chineseVariantMode
   return {
     ...merged,
+    selectedModel: normalizeSelectedModel(merged.selectedProvider, merged.selectedModel),
     chineseVariantMode,
     geminiQuota,
     geminiQuotaProfiles: normalizeGeminiQuotaProfiles(global.geminiQuotaProfiles, geminiQuota),

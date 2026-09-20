@@ -17,9 +17,9 @@ describe('provider registry', () => {
   it('exposes provider-owned model lists and default models', () => {
     expect(getProviderMetadata('deepseek')).toMatchObject({
       id: 'deepseek',
-      defaultModel: 'deepseek-v4-flash',
+      defaultModel: 'deepseek-flash',
       models: [
-        { id: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash' },
+        { id: 'deepseek-flash', displayName: 'DeepSeek Flash' },
         { id: 'deepseek-v4-pro', displayName: 'DeepSeek V4 Pro' },
       ],
     })

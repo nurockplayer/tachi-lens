@@ -79,7 +79,7 @@ describe('Popup App', () => {
 
   it('defaults to deepseek as provider', () => {
     expect(DEFAULT_SETTINGS.selectedProvider).toBe('deepseek')
-    expect(DEFAULT_SETTINGS.selectedModel).toBe('deepseek-v4-flash')
+    expect(DEFAULT_SETTINGS.selectedModel).toBe('deepseek-flash')
   })
 
   it('defaults to below display mode', () => {

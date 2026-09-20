@@ -22,7 +22,7 @@ describe('DeepSeek provider', () => {
       }), { status: 429, headers: { 'Retry-After': future } }))
       const provider = createDeepSeekProvider(fetchFn)
 
-      const [result] = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+      const [result] = await provider.translateBatch(REQS, 'fake-key', 'deepseek-flash', 'zh-TW')
 
       expect(result?.retryAfterMs).toBeGreaterThan(0)
       expect(result?.retryAfterMs).toBeLessThanOrEqual(60_000)
@@ -31,7 +31,7 @@ describe('DeepSeek provider', () => {
       const fetchFn = mockFetch(200, CHAT_BODY('[{"id":"m1","translated_text":"你好"},{"id":"m2","translated_text":"世界"}]'))
       const provider = createDeepSeekProvider(fetchFn)
 
-      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-flash', 'zh-TW')
 
       expect(results).toEqual([
         { id: 'm1', translatedText: '你好' },
@@ -39,7 +39,7 @@ describe('DeepSeek provider', () => {
       ])
       const request = vi.mocked(fetchFn).mock.calls[0]![1] as RequestInit
       expect(JSON.parse(request.body as string)).toMatchObject({
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-flash',
         thinking: { type: 'disabled' },
       })
     })
@@ -48,7 +48,7 @@ describe('DeepSeek provider', () => {
       const fetchFn = mockFetch(401, { error: { message: 'Invalid API Key' } })
       const provider = createDeepSeekProvider(fetchFn)
 
-      const results = await provider.translateBatch(REQS, 'bad-key', 'deepseek-v4-flash', 'zh-TW')
+      const results = await provider.translateBatch(REQS, 'bad-key', 'deepseek-flash', 'zh-TW')
 
       expect(results[0]).toEqual({
         id: 'm1',
@@ -67,7 +67,7 @@ describe('DeepSeek provider', () => {
       }))
       const provider = createDeepSeekProvider(fetchFn)
 
-      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-flash', 'zh-TW')
 
       expect(results[0]).toEqual({
         id: 'm1',
@@ -81,7 +81,7 @@ describe('DeepSeek provider', () => {
       const fetchFn = mockFetch(200, {})
       const provider = createDeepSeekProvider(fetchFn)
 
-      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-flash', 'zh-TW')
 
       expect(results[0]!.error).toBe('Empty response from DeepSeek')
     })
@@ -90,7 +90,7 @@ describe('DeepSeek provider', () => {
       const fetchFn = vi.fn().mockRejectedValue(new Error('Network error'))
       const provider = createDeepSeekProvider(fetchFn)
 
-      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-v4-flash', 'zh-TW')
+      const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-flash', 'zh-TW')
 
       expect(results[0]!.error).toBe('Network error')
       expect(results[0]!.errorType).toBe('network')
@@ -99,7 +99,7 @@ describe('DeepSeek provider', () => {
 
   describe('validateKey', () => {
     it('validates a correct key', async () => {
-      const fetchFn = mockFetch(200, { data: [{ id: 'deepseek-v4-flash' }] })
+      const fetchFn = mockFetch(200, { data: [{ id: 'deepseek-flash' }] })
       const provider = createDeepSeekProvider(fetchFn)
 
       const result = await provider.validateKey('good-key')
@@ -107,14 +107,14 @@ describe('DeepSeek provider', () => {
       expect(result.valid).toBe(true)
     })
 
-    it('rejects a key whose model list does not include DeepSeek V4 Flash', async () => {
+    it('rejects a key whose model list does not include DeepSeek Flash', async () => {
       const fetchFn = mockFetch(200, { data: [{ id: 'another-model' }] })
       const provider = createDeepSeekProvider(fetchFn)
 
-      const result = await provider.validateKey('valid-key-without-v4-flash')
+      const result = await provider.validateKey('valid-key-without-flash')
 
       expect(result.valid).toBe(false)
-      expect(result.error).toContain('deepseek-v4-flash')
+      expect(result.error).toContain('deepseek-flash')
     })
 
     it('rejects an invalid key', async () => {

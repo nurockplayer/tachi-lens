@@ -107,6 +107,18 @@ describe('settings storage', () => {
     expect(profiles['gemini-2.5-flash']).not.toBe(profiles['gemini-2.5-pro'])
   })
 
+  it('migrates the legacy DeepSeek Flash model id at the storage boundary', async () => {
+    const storage = createChromeStorage()
+    storage.local.data.userSettings = {
+      selectedProvider: 'deepseek',
+      selectedModel: 'deepseek-v4-flash',
+    }
+
+    const settings = await getUserSettings(storage)
+
+    expect(settings.selectedModel).toBe('deepseek-flash')
+  })
+
   it('migrates a legacy Gemini quota profile to every known Gemini model', async () => {
     const storage = createChromeStorage()
     const legacyProfile = {
@@ -271,6 +283,15 @@ describe('settings storage', () => {
       minTextLength: 4,
     })
     expect(storage.session.set).not.toHaveBeenCalled()
+  })
+
+  it('migrates a legacy DeepSeek Flash model id from a per-channel override', () => {
+    const settings = mergeSettings(DEFAULT_SETTINGS, {
+      selectedProvider: 'deepseek',
+      selectedModel: 'deepseek-v4-flash',
+    })
+
+    expect(settings.selectedModel).toBe('deepseek-flash')
   })
 
   describe('speech config', () => {

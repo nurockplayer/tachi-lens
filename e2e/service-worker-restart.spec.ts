@@ -183,7 +183,7 @@ test.describe('Service Worker restart recovery', () => {
             const apiKeys = stored.providerApiKeys as Record<string, string> | undefined
             expect(userSettings?.translationEnabled).toBe(true)
             expect(userSettings?.selectedProvider).toBe('deepseek')
-            expect(userSettings?.selectedModel).toBe('deepseek-v4-flash')
+            expect(userSettings?.selectedModel).toBe('deepseek-flash')
             expect(apiKeys?.deepseek).toBe(DEEPSEEK_MOCK_KEY)
             return // success
           } catch {
