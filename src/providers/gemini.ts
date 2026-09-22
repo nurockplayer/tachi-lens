@@ -3,11 +3,17 @@ import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const GEMINI_MODELS: ProviderModel[] = [
+  { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash' },
   { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
   { id: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
 ]
 
-export const GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
+export const GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash'
+
+export const getGeminiGenerationConfig = (model: string): Record<string, unknown> | undefined =>
+  model.startsWith('gemini-3.')
+    ? { thinkingConfig: { thinkingLevel: 'low' } }
+    : undefined
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -35,6 +41,9 @@ export const createGeminiProvider = (
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: prompt.system }] },
             contents: [{ parts: [{ text: prompt.user }] }],
+            ...(getGeminiGenerationConfig(model)
+              ? { generationConfig: getGeminiGenerationConfig(model) }
+              : {}),
           }),
         },
       )

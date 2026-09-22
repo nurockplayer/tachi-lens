@@ -19,11 +19,12 @@ export const isSpeechProviderId = (value: string): value is SpeechProviderId =>
  * this list only drives the settings default and the Popup model select.
  */
 export const SPEECH_GEMINI_MODELS: readonly ProviderModel[] = [
+  { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash' },
   { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
   { id: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
 ]
 
-export const SPEECH_GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
+export const SPEECH_GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash'
 
 /** Storage-facing speech configuration. Global-only in v0.3 (no per-channel overrides). */
 export interface SpeechTranslationConfig {

@@ -15,6 +15,16 @@ describe('provider registry', () => {
   })
 
   it('exposes provider-owned model lists and default models', () => {
+    expect(getProviderMetadata('gemini')).toMatchObject({
+      id: 'gemini',
+      defaultModel: 'gemini-3.8-flash',
+      models: [
+        { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash' },
+        { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
+        { id: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
+      ],
+    })
+
     expect(getProviderMetadata('deepseek')).toMatchObject({
       id: 'deepseek',
       defaultModel: 'deepseek-flash',

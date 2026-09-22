@@ -34,6 +34,32 @@ describe('Gemini provider', () => {
       expect(result?.retryAfterMs).toBeGreaterThan(50_000)
       expect(result?.retryAfterMs).toBeLessThanOrEqual(60_000)
     })
+    it('uses low thinking for Gemini 3.8 Flash real-time translation', async () => {
+      const fetchFn = mockFetch(200, GEMINI_BODY('[{"id":"m1","translated_text":"你好"},{"id":"m2","translated_text":"你好嗎"}]'))
+      const provider = createGeminiProvider(fetchFn)
+
+      await provider.translateBatch(REQS, 'fake-key', 'gemini-3.8-flash', 'zh-TW')
+
+      const request = vi.mocked(fetchFn).mock.calls[0]![1] as RequestInit
+      expect(JSON.parse(request.body as string)).toMatchObject({
+        generationConfig: {
+          thinkingConfig: {
+            thinkingLevel: 'low',
+          },
+        },
+      })
+    })
+
+    it('does not send Gemini 3 thinkingLevel to legacy 2.5 models', async () => {
+      const fetchFn = mockFetch(200, GEMINI_BODY('[{"id":"m1","translated_text":"你好"},{"id":"m2","translated_text":"你好嗎"}]'))
+      const provider = createGeminiProvider(fetchFn)
+
+      await provider.translateBatch(REQS, 'fake-key', 'gemini-2.5-flash', 'zh-TW')
+
+      const request = vi.mocked(fetchFn).mock.calls[0]![1] as RequestInit
+      expect(JSON.parse(request.body as string)).not.toHaveProperty('generationConfig')
+    })
+
     it('translates a batch of messages', async () => {
       const fetchFn = mockFetch(200, GEMINI_BODY('[{"id":"m1","translated_text":"你好"},{"id":"m2","translated_text":"你好嗎"}]'))
       const provider = createGeminiProvider(fetchFn)
