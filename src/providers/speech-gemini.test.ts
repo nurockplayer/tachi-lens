@@ -63,6 +63,25 @@ describe('Gemini speech provider', () => {
       expect(textPart).toContain('Transcribe')
     })
 
+    it('uses low thinking for Gemini 3.8 Flash speech translation', async () => {
+      const fetchFn = mockFetch(
+        200,
+        SPEECH_BODY(JSON.stringify({ transcript: 'hello', translation: '你好' })),
+      )
+      const provider = createGeminiSpeechProvider(fetchFn)
+
+      await provider.transcribeChunk(CHUNK, 'fake-key', 'gemini-3.8-flash', 'zh-TW')
+
+      const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+      expect(JSON.parse(String(init.body))).toMatchObject({
+        generationConfig: {
+          thinkingConfig: {
+            thinkingLevel: 'low',
+          },
+        },
+      })
+    })
+
     it('wraps PCM in a minimal audio/wav container', () => {
       expect(SPEECH_AUDIO_MIME_TYPE).toBe('audio/wav')
 
