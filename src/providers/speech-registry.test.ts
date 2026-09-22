@@ -17,8 +17,9 @@ describe('speech provider registry', () => {
     expect(getSpeechProviderMetadata('gemini')).toMatchObject({
       id: 'gemini',
       displayName: 'Gemini',
-      defaultModel: 'gemini-2.5-flash',
+      defaultModel: 'gemini-3.8-flash',
       models: [
+        { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash' },
         { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
         { id: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
       ],
@@ -44,7 +45,7 @@ describe('speech provider registry', () => {
 
       expect(provider).toBeDefined()
       expect(provider!.id).toBe('gemini')
-      expect(provider!.defaultModel).toBe('gemini-2.5-flash')
+      expect(provider!.defaultModel).toBe('gemini-3.8-flash')
       expect(provider!.models.length).toBeGreaterThan(0)
       expect(typeof provider!.transcribeChunk).toBe('function')
       expect(typeof provider!.validateKey).toBe('function')

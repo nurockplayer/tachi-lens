@@ -6,6 +6,7 @@
 // The Live WebSocket API is explicitly deferred (Spec §13).
 
 import type { ProviderError } from '@/shared/messages'
+import { getGeminiGenerationConfig } from './gemini'
 import {
   getGeminiErrorMessage,
   getGeminiErrorStatus,
@@ -24,8 +25,8 @@ import {
 export const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
 /**
- * D2 decision (verified-by-adapter, Issue #159): the frozen Gemini 2.5 audio
- * input surface is the `inlineData` audio part. The Gemini API does not accept
+ * D2 decision (verified-by-adapter, Issue #159): the Gemini generateContent
+ * audio input surface is the `inlineData` audio part. The Gemini API does not accept
  * raw `audio/pcm;rate=16000` bytes as `inlineData` — inline audio parts must be
  * a recognized container such as `audio/wav` (documented; e.g. the curl
  * generateContent + `include_audio` code samples ship WAV files). Raw PCM bytes
@@ -194,6 +195,9 @@ export const createGeminiSpeechProvider = (
             ],
           },
         ],
+        ...(getGeminiGenerationConfig(model)
+          ? { generationConfig: getGeminiGenerationConfig(model) }
+          : {}),
       }
 
       const response = await fetchFn(`${BASE_URL}/models/${model}:generateContent`, {

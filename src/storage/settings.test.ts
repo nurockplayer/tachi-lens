@@ -103,7 +103,8 @@ describe('settings storage', () => {
     const profiles = (DEFAULT_SETTINGS as UserSettings & {
       geminiQuotaProfiles: Record<string, typeof DEFAULT_SETTINGS.geminiQuota>
     }).geminiQuotaProfiles
-    expect(Object.keys(profiles)).toEqual(['gemini-2.5-flash', 'gemini-2.5-pro'])
+    expect(Object.keys(profiles)).toEqual(['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'])
+    expect(profiles['gemini-3.8-flash']).not.toBe(profiles['gemini-2.5-flash'])
     expect(profiles['gemini-2.5-flash']).not.toBe(profiles['gemini-2.5-pro'])
   })
 
@@ -132,6 +133,7 @@ describe('settings storage', () => {
       geminiQuotaProfiles: Record<string, typeof legacyProfile>
     }
 
+    expect(settings.geminiQuotaProfiles['gemini-3.8-flash']).toEqual(legacyProfile)
     expect(settings.geminiQuotaProfiles['gemini-2.5-flash']).toEqual(legacyProfile)
     expect(settings.geminiQuotaProfiles['gemini-2.5-pro']).toEqual(legacyProfile)
   })
