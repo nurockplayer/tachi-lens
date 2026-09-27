@@ -1026,8 +1026,17 @@ export function App() {
         credentialAcknowledgedVersionRef.current[credentialKey] = version
         setSpeechCredentialConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
         speechCredentialConfiguredRef.current[providerId] = Boolean(preview)
-        if (generation === credentialDraftGenerationRef.current[credentialKey] &&
-          !credentialDirtyRef.current[credentialKey] && !credentialEditingRef.current[credentialKey]) {
+        const currentDraft = generation === credentialDraftGenerationRef.current[credentialKey]
+        const presentationIsCurrent = currentDraft && !credentialEditingRef.current[credentialKey]
+        if (presentationIsCurrent && normalized === '' && preview === '') {
+          credentialDirtyRef.current[credentialKey] = false
+          setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: false }))
+          setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: '' }))
+          setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: false }))
+          setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: false }))
+          return true
+        }
+        if (presentationIsCurrent && !credentialDirtyRef.current[credentialKey]) {
           setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
           setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
         }

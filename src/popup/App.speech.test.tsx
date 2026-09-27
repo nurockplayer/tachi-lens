@@ -486,6 +486,114 @@ describe('Popup speech settings', () => {
     expect(storedSharedKey).toBe('persisted-shared-secret')
   })
 
+  it('completes an empty speech draft deletion when persistence succeeds but its acknowledgement is lost', async () => {
+    const user = userEvent.setup()
+    const storedKeys: { speech?: string; shared?: string } = {
+      speech: 'persisted-speech-secret',
+      shared: 'persisted-shared-secret',
+    }
+    let deleteCount = 0
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        const speech = request.payload?.scope === 'speech'
+        const key = speech ? storedKeys.speech : storedKeys.shared
+        return {
+          type: 'api_key_preview',
+          payload: { preview: key ? (speech ? 'spe***ret' : 'sha***ret') : '', success: true },
+        }
+      }
+      if (request.type === 'delete_api_key') {
+        if (request.payload?.scope !== 'speech') {
+          storedKeys.shared = undefined
+          return { type: 'delete_api_key_result', payload: { success: true } }
+        }
+        deleteCount += 1
+        storedKeys.speech = undefined
+        throw new Error('delete acknowledgement lost after persistence')
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    const toggle = await screen.findByRole('checkbox', { name: '使用語音專用 API Key' })
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true))
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    await user.click(input)
+    await user.type(input, 'replacement-draft')
+    await user.clear(input)
+    fireEvent.blur(input)
+
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(false))
+    expect(screen.queryByLabelText('語音專用 API Key')).toBeNull()
+    expect(screen.getByText('此提供者已設定共用 API Key')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(deleteCount).toBe(1)
+    expect(storedKeys.speech).toBeUndefined()
+    expect(storedKeys.shared).toBe('persisted-shared-secret')
+
+    await user.click(toggle)
+    const emptyInput = await screen.findByLabelText('語音專用 API Key')
+    fireEvent.focus(emptyInput)
+    fireEvent.blur(emptyInput)
+    expect(deleteCount).toBe(1)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('preserves a newer speech draft while empty-draft deletion reconciliation is pending', async () => {
+    const user = userEvent.setup()
+    const storedKeys: { speech?: string; shared?: string } = {
+      speech: 'persisted-speech-secret',
+      shared: 'persisted-shared-secret',
+    }
+    let speechPreviewReads = 0
+    let resolveReconciliation!: (value: unknown) => void
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        if (request.payload?.scope === 'speech') {
+          speechPreviewReads += 1
+          if (speechPreviewReads > 1) {
+            return new Promise((resolve) => { resolveReconciliation = resolve })
+          }
+          return { type: 'api_key_preview', payload: { preview: storedKeys.speech ? 'spe***ret' : '', success: true } }
+        }
+        return { type: 'api_key_preview', payload: { preview: storedKeys.shared ? 'sha***ret' : '', success: true } }
+      }
+      if (request.type === 'delete_api_key' && request.payload?.scope === 'speech') {
+        storedKeys.speech = undefined
+        throw new Error('delete acknowledgement lost after persistence')
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    const toggle = await screen.findByRole('checkbox', { name: '使用語音專用 API Key' })
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true))
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    await user.click(input)
+    await user.type(input, 'replacement-draft')
+    await user.clear(input)
+    fireEvent.blur(input)
+    await waitFor(() => expect(speechPreviewReads).toBe(2))
+
+    fireEvent.focus(input)
+    await user.type(input, 'newer-draft')
+    await act(async () => {
+      resolveReconciliation({ type: 'api_key_preview', payload: { preview: '', success: true } })
+    })
+
+    expect(input.value).toBe('newer-draft')
+    expect((toggle as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByLabelText('語音專用 API Key')).toBeTruthy()
+    expect(screen.getByText('此提供者已設定共用 API Key')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(storedKeys.speech).toBeUndefined()
+    expect(storedKeys.shared).toBe('persisted-shared-secret')
+  })
+
   it('retries an unchanged speech draft after a failed commit', async () => {
     let saveCount = 0
     sendMessage.mockImplementation(async (message) => {
