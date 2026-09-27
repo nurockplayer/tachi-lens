@@ -235,12 +235,13 @@ export function SecretInput({ id, label, value, onChange, onFocus, onBlur, place
 
 /* ---- Toggle row (native checkbox styled as a switch) -------------- */
 
-export function ToggleRow({ label, checked, onChange, compact, className }: {
+export function ToggleRow({ label, checked, onChange, compact, className, disabled }: {
   label: string
   checked: boolean
   onChange: (checked: boolean) => void
   compact?: boolean
   className?: string
+  disabled?: boolean
 }): React.JSX.Element {
   return (
     <label className={['toggle-row', compact ? 'toggle-row--compact' : '', className].filter(Boolean).join(' ')}>
@@ -248,6 +249,7 @@ export function ToggleRow({ label, checked, onChange, compact, className }: {
         className="toggle-row__input"
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="toggle-row__track" aria-hidden="true">

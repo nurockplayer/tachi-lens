@@ -539,11 +539,12 @@ describe('Popup speech consent flow (#162)', () => {
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'save_api_key' })))
 
     await act(async () => {
-      pendingReads[0]!.resolve({ type: 'api_key_preview', payload: { preview: 'old***' } })
+      pendingReads[0]!.resolve({ type: 'api_key_preview', payload: { preview: '', success: false } })
     })
     fireEvent.focus(input)
     fireEvent.blur(input)
 
     expect(input.value).toBe('current***')
+    expect(screen.queryByText('API Key 狀態暫時無法確認。重新開啟設定可重試。')).toBeNull()
   })
 })

@@ -9,6 +9,8 @@
   "model": { "message": "模型" },
   "apiKey": { "message": "API Key" },
   "apiKeyPlaceholder": { "message": "輸入 API Key" },
+  "credentialPreviewLoading": { "message": "正在檢查 API Key 狀態…" },
+  "credentialPreviewUnavailable": { "message": "API Key 狀態暫時無法確認。重新開啟設定可重試。" },
   "targetLanguage": { "message": "目標語言" },
   "displayMode": { "message": "顯示模式" },
   "displayBelow": { "message": "原文下方" },

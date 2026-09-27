@@ -19,6 +19,8 @@ export type MessageKey =
   | 'modelPolicyStatus'
   | 'apiKey'
   | 'apiKeyPlaceholder'
+  | 'credentialPreviewLoading'
+  | 'credentialPreviewUnavailable'
   | 'targetLanguage'
   | 'displayMode'
   | 'displayBelow'
@@ -176,6 +178,8 @@ export const MESSAGE_KEYS: readonly string[] = [
   'modelPolicyStatus',
   'apiKey',
   'apiKeyPlaceholder',
+  'credentialPreviewLoading',
+  'credentialPreviewUnavailable',
   'targetLanguage',
   'displayMode',
   'displayBelow',
@@ -329,6 +333,8 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   model: '模型',
   apiKey: 'API Key',
   apiKeyPlaceholder: '輸入 API Key',
+  credentialPreviewLoading: '正在檢查 API Key 狀態…',
+  credentialPreviewUnavailable: 'API Key 狀態暫時無法確認。重新開啟設定可重試。',
   targetLanguage: '目標語言',
   displayMode: '顯示模式',
   displayBelow: '原文下方',

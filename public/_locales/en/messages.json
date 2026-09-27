@@ -9,6 +9,8 @@
   "model": { "message": "Model" },
   "apiKey": { "message": "API Key" },
   "apiKeyPlaceholder": { "message": "Enter API Key" },
+  "credentialPreviewLoading": { "message": "Checking API key status…" },
+  "credentialPreviewUnavailable": { "message": "API key status is unavailable. Reopen settings to try again." },
   "targetLanguage": { "message": "Target Language" },
   "displayMode": { "message": "Display Mode" },
   "displayBelow": { "message": "Below Original" },
