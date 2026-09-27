@@ -9,7 +9,7 @@ import {
 } from '../shared/messages'
 import type { TranslationRequest, TranslationResult } from '../shared/messages'
 import type { CredentialScope } from '../shared/messages'
-import type { RuntimeState } from '../storage/settings'
+import { maskApiKey, type RuntimeState } from '../storage/settings'
 import type { SpeechProviderId } from '@/providers/speech-types'
 import { Translator } from './translator'
 
@@ -186,7 +186,7 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
 
     if (isCredentialSaveRequestMessage(message)) {
       if (!isTrustedPopupSender(sender, deps.extensionId)) return false
-      void enqueueCredentialMutation(`credential:${message.payload.providerId}`, () =>
+      void enqueueCredentialMutation('credential', () =>
         handleSaveApiKey(message.payload, sendResponse, deps),
       )
       return true
@@ -194,7 +194,7 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
 
     if (isCredentialDeleteRequestMessage(message)) {
       if (!isTrustedPopupSender(sender, deps.extensionId)) return false
-      void enqueueCredentialMutation(`credential:${message.payload.providerId}`, () =>
+      void enqueueCredentialMutation('credential', () =>
         handleDeleteApiKey(message.payload, sendResponse, deps),
       )
       return true
@@ -289,9 +289,7 @@ const handleSaveApiKey = async (
       if (!deps.saveApiKey) throw new Error('shared credential storage unavailable')
       await deps.saveApiKey(payload.providerId as ProviderId, payload.apiKey)
     }
-    const preview = speechScope
-      ? await deps.getMaskedSpeechApiKeyForPopup?.(payload.providerId as SpeechProviderId)
-      : await deps.getMaskedApiKeyForPopup?.(payload.providerId as ProviderId)
+    const preview = maskApiKey(payload.apiKey.trim())
     sendResponse({ type: 'save_api_key_result', payload: { success: true, preview } })
   } catch {
     sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } })

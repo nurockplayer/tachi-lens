@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
@@ -436,5 +436,91 @@ describe('Popup speech consent flow (#162)', () => {
 
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'validate_key' })))
     expect(sendMessage.mock.calls.some(([message]) => (message as { type?: string }).type === 'save_api_key')).toBe(false)
+  })
+
+  it('keeps a shared-key typing draft through each save acknowledgement and validates the final key', async () => {
+    const user = userEvent.setup()
+    let persistedKey = ''
+    let validatedKey = ''
+    const pendingSaves: Array<{ apiKey: string; acknowledge: () => void }> = []
+    sendMessage.mockImplementation((message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; apiKey?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return Promise.resolve({ type: 'api_key_preview', payload: { preview: '' } })
+      }
+      if (request.type === 'save_api_key' && request.payload?.apiKey) {
+        const apiKey = request.payload.apiKey
+        return new Promise((resolve) => {
+          pendingSaves.push({
+            apiKey,
+            acknowledge: () => {
+              persistedKey = apiKey
+              resolve({ type: 'save_api_key_result', payload: { success: true, preview: maskApiKey(apiKey) } })
+            },
+          })
+        })
+      }
+      if (request.type === 'validate_key') {
+        validatedKey = persistedKey
+        return Promise.resolve({ type: 'key_validation_result', payload: { valid: true } })
+      }
+      return Promise.resolve({ type: 'ok', payload: {} })
+    })
+    render(<App />)
+
+    await waitFor(() => expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string }).type === 'get_api_key_preview')).toBe(true))
+    fireEvent.click(document.getElementById('providers-button')!)
+    const input = await screen.findByLabelText('API Key') as HTMLInputElement
+    await user.type(input, 'a')
+    await waitFor(() => expect(pendingSaves).toHaveLength(1))
+    await act(async () => { pendingSaves[0]!.acknowledge() })
+    expect(input.value).toBe('a')
+
+    await user.type(input, 'b')
+    await waitFor(() => expect(pendingSaves).toHaveLength(2))
+    expect(pendingSaves[1]?.apiKey).toBe('ab')
+    await act(async () => { pendingSaves[1]!.acknowledge() })
+    expect(input.value).toBe('ab')
+
+    await user.type(input, 'c')
+    await waitFor(() => expect(pendingSaves).toHaveLength(3))
+    expect(pendingSaves[2]?.apiKey).toBe('abc')
+    await act(async () => { pendingSaves[2]!.acknowledge() })
+    expect(input.value).toBe('abc')
+
+    await user.click(screen.getByRole('button', { name: /驗證|Validate/ }))
+    await waitFor(() => expect(validatedKey).toBe('abc'))
+  })
+
+  it('does not let a delayed initial shared preview replace a newer save acknowledgement', async () => {
+    const pendingReads: Array<{ resolve: (value: unknown) => void }> = []
+    sendMessage.mockImplementation((message) => {
+      const request = message as { type?: string; payload?: { apiKey?: string; providerId?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return new Promise((resolve) => {
+          if (request.payload?.providerId === 'deepseek') pendingReads.push({ resolve })
+          else resolve({ type: 'api_key_preview', payload: { preview: '' } })
+        })
+      }
+      if (request.type === 'save_api_key') {
+        return Promise.resolve({ type: 'save_api_key_result', payload: { success: true, preview: 'current***' } })
+      }
+      return Promise.resolve({ type: 'ok', payload: {} })
+    })
+    render(<App />)
+
+    await waitFor(() => expect(pendingReads).toHaveLength(1))
+    fireEvent.click(document.getElementById('providers-button')!)
+    const input = await screen.findByLabelText('API Key') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'new-credential' } })
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'save_api_key' })))
+
+    await act(async () => {
+      pendingReads[0]!.resolve({ type: 'api_key_preview', payload: { preview: 'old***' } })
+    })
+    fireEvent.blur(input)
+
+    expect(input.value).toBe('current***')
   })
 })

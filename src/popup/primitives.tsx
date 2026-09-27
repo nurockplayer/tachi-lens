@@ -199,12 +199,13 @@ export function IconButton({ children, onClick, ariaLabel, title, bare, classNam
 
 /* ---- Secret input (mono input + visibility toggle) ------------------ */
 
-export function SecretInput({ id, label, value, onChange, onFocus, placeholder, visible, onToggleVisible, showLabel, hideLabel }: {
+export function SecretInput({ id, label, value, onChange, onFocus, onBlur, placeholder, visible, onToggleVisible, showLabel, hideLabel }: {
   id: string
   label: string
   value: string
   onChange: (value: string) => void
   onFocus?: () => void
+  onBlur?: () => void
   placeholder?: string
   visible: boolean
   onToggleVisible: () => void
@@ -221,6 +222,7 @@ export function SecretInput({ id, label, value, onChange, onFocus, placeholder, 
           value={value}
           placeholder={placeholder}
           onFocus={onFocus}
+          onBlur={onBlur}
           onChange={(event) => onChange(event.target.value)}
         />
         <IconButton ariaLabel={visible ? hideLabel : showLabel} title={visible ? hideLabel : showLabel} onClick={onToggleVisible}>

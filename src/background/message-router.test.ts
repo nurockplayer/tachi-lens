@@ -4,6 +4,7 @@ import { TranslationCache } from './cache'
 import { RateLimiter } from './rate-limiter'
 import { Translator } from './translator'
 import { createMessageRouter, type RouterDependencies } from './message-router'
+import { maskApiKey } from '@/storage/settings'
 
 const createMockProvider = (): TranslationProvider => ({
   id: 'deepseek',
@@ -89,7 +90,7 @@ describe('MessageRouter', () => {
       }, sendResponse)
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
         type: 'save_api_key_result',
-        payload: { success: true, preview: 'over***view' },
+        payload: { success: true, preview: maskApiKey('fixture-speech-secret') },
       }))
       expect(saveSpeechApiKeyOverride).toHaveBeenCalledWith('gemini', 'fixture-speech-secret')
       expect(saveApiKey).not.toHaveBeenCalled()
@@ -145,6 +146,30 @@ describe('MessageRouter', () => {
       expect(JSON.stringify(sendResponse.mock.calls)).not.toContain('fixture-secret')
     })
 
+    it('acknowledges a committed save when the separate preview read fails', async () => {
+      const saveApiKey = vi.fn(async () => undefined)
+      const { router } = makeRouter({
+        saveApiKey,
+        getMaskedApiKeyForPopup: vi.fn(async () => { throw new Error('preview read unavailable') }),
+      })
+      const sendResponse = vi.fn()
+
+      router.handleMessage({
+        type: 'save_api_key',
+        payload: { providerId: 'gemini', apiKey: '  fixture-committed-key  ' },
+      }, {
+        id: 'extension-id',
+        url: 'chrome-extension://extension-id/src/popup/index.html',
+      }, sendResponse)
+
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+        type: 'save_api_key_result',
+        payload: { success: true, preview: maskApiKey('fixture-committed-key') },
+      }))
+      expect(saveApiKey).toHaveBeenCalledWith('gemini', '  fixture-committed-key  ')
+      expect(JSON.stringify(sendResponse.mock.calls)).not.toContain('fixture-committed-key')
+    })
+
     it('serializes same-provider save and delete mutations in request order', async () => {
       let finishSave!: () => void
       const saveGate = new Promise<void>((resolve) => { finishSave = resolve })
@@ -164,6 +189,88 @@ describe('MessageRouter', () => {
       await vi.waitFor(() => expect(operations).toEqual(['save-start']))
       finishSave()
       await vi.waitFor(() => expect(operations).toEqual(['save-start', 'save-finish', 'delete']))
+    })
+
+    it('serializes different-provider saves across the shared map read-modify-write', async () => {
+      let apiKeys: Record<string, string> = {}
+      let previews: Record<string, string> = {}
+      const started: string[] = []
+      const releases: Array<() => void> = []
+      const saveApiKey = vi.fn(async (providerId: ProviderId, apiKey: string) => {
+        const keysSnapshot = { ...apiKeys }
+        const previewsSnapshot = { ...previews }
+        started.push(providerId)
+        await new Promise<void>((resolve) => releases.push(resolve))
+        apiKeys = { ...keysSnapshot, [providerId]: apiKey.trim() }
+        previews = { ...previewsSnapshot, [providerId]: maskApiKey(apiKey.trim()) }
+      })
+      const { router } = makeRouter({
+        saveApiKey,
+        getMaskedApiKeyForPopup: vi.fn(async (providerId) => previews[providerId] ?? ''),
+      })
+      const sender = { id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html' }
+      const sendResponse = vi.fn()
+
+      router.handleMessage({ type: 'save_api_key', payload: { providerId: 'gemini', apiKey: 'gem-key' } }, sender, sendResponse)
+      router.handleMessage({ type: 'save_api_key', payload: { providerId: 'deepseek', apiKey: 'deep-key' } }, sender, sendResponse)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      const simultaneousMutations = started.length
+
+      releases[0]!()
+      await vi.waitFor(() => expect(started).toHaveLength(2))
+      releases[1]!()
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(2))
+
+      expect(simultaneousMutations).toBe(1)
+      expect(apiKeys).toEqual({ gemini: 'gem-key', deepseek: 'deep-key' })
+      expect(previews).toEqual({ gemini: maskApiKey('gem-key'), deepseek: maskApiKey('deep-key') })
+    })
+
+    it('serializes a different-provider save and delete without losing or restoring map entries', async () => {
+      let apiKeys: Record<string, string> = { deepseek: 'deep-old' }
+      let previews: Record<string, string> = { deepseek: maskApiKey('deep-old') }
+      const started: string[] = []
+      const releases: Array<() => void> = []
+      const mutate = async (kind: string, providerId: ProviderId, apiKey?: string): Promise<void> => {
+        const keysSnapshot = { ...apiKeys }
+        const previewsSnapshot = { ...previews }
+        started.push(kind)
+        await new Promise<void>((resolve) => releases.push(resolve))
+        if (kind === 'save') {
+          apiKeys = { ...keysSnapshot, [providerId]: apiKey!.trim() }
+          previews = { ...previewsSnapshot, [providerId]: maskApiKey(apiKey!.trim()) }
+        } else {
+          delete keysSnapshot[providerId]
+          delete previewsSnapshot[providerId]
+          apiKeys = keysSnapshot
+          previews = previewsSnapshot
+        }
+      }
+      const { router } = makeRouter({
+        saveApiKey: vi.fn(async (providerId: ProviderId, apiKey: string) => mutate('save', providerId, apiKey)),
+        deleteApiKey: vi.fn(async (providerId: ProviderId) => mutate('delete', providerId)),
+        getMaskedApiKeyForPopup: vi.fn(async (providerId) => previews[providerId] ?? ''),
+      })
+      const sender = { id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html' }
+      const sendResponse = vi.fn()
+
+      router.handleMessage({ type: 'save_api_key', payload: { providerId: 'gemini', apiKey: 'gem-new' } }, sender, sendResponse)
+      router.handleMessage({ type: 'delete_api_key', payload: { providerId: 'deepseek' } }, sender, sendResponse)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      const simultaneousMutations = started.length
+
+      releases[0]!()
+      await vi.waitFor(() => expect(started).toHaveLength(2))
+      releases[1]!()
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(2))
+
+      expect(simultaneousMutations).toBe(1)
+      expect(apiKeys).toEqual({ gemini: 'gem-new' })
+      expect(previews).toEqual({ gemini: maskApiKey('gem-new') })
     })
   })
 
