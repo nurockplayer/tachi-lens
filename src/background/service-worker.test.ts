@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { initializeStorageAccess } from '@/storage/settings'
 import { getGeminiProviderDayId } from './gemini-quota'
 
+vi.mock('./model-policy-store', async () => {
+  const { BUNDLED_MODEL_POLICY } = await import('@/providers/model-policy')
+  return { ModelPolicyStore: class { async get() { return { manifest: BUNDLED_MODEL_POLICY, source: 'bundled' } } } }
+})
+
 vi.mock('@/storage/settings', () => ({
   initializeStorageAccess: vi.fn(async () => undefined),
   getUserSettings: vi.fn(async () => ({
@@ -64,6 +69,21 @@ describe('service worker startup', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.mocked(initializeStorageAccess).mockClear()
+  })
+
+  it('returns model policy only to the exact packaged popup sender', async () => {
+    const chromeRuntime = createChromeRuntime()
+    Object.assign(chromeRuntime.runtime, { id: 'extension-id', getURL: (path: string) => `chrome-extension://extension-id/${path}` })
+    vi.stubGlobal('chrome', chromeRuntime)
+    await import('./service-worker')
+    const handler = chromeRuntime.runtime.onMessage.addListener.mock.calls[0]![0]
+    const response = vi.fn()
+    expect(handler({ type: 'get_model_policy', payload: {} }, { id: 'extension-id', url: 'https://www.twitch.tv/user' }, response)).toBe(false)
+    expect(handler({ type: 'get_model_policy', payload: {} }, { id: 'other-id', url: 'chrome-extension://extension-id/src/popup/index.html' }, response)).toBe(false)
+    expect(handler({ type: 'get_model_policy', payload: { untrusted: true } }, { id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html' }, response)).toBe(false)
+    expect(response).not.toHaveBeenCalled()
+    expect(handler({ type: 'get_model_policy', payload: {} }, { id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html' }, response)).toBe(true)
+    await vi.waitFor(() => expect(response).toHaveBeenCalledWith(expect.objectContaining({ type: 'model_policy_snapshot' })))
   })
 
   it('initializes storage access on startup and when the extension is installed', async () => {

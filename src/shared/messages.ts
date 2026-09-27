@@ -24,6 +24,8 @@ export type MessageType =
   | 'api_key_preview'
   | 'diagnostic_event'
   | 'get_diagnostics'
+  | 'get_model_policy'
+  | 'model_policy_snapshot'
   | 'diagnostics_snapshot'
   | 'get_quota_health'
   | 'quota_health_result'
@@ -55,6 +57,8 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'api_key_preview',
   'diagnostic_event',
   'get_diagnostics',
+  'get_model_policy',
+  'model_policy_snapshot',
   'diagnostics_snapshot',
   'get_quota_health',
   'quota_health_result',
@@ -640,3 +644,10 @@ export const isSpeechCaptionClearedMessage = (
     SPEECH_CAPTION_CLEARED_REASONS.includes(payload.reason as SpeechCaptionClearedPayload['reason'])
   )
 }
+
+
+/** Only the trusted packaged popup may request this data; sender checks belong in the SW. */
+export const isGetModelPolicyMessage = (value: unknown): value is BaseMessage<'get_model_policy', Record<string, never>> =>
+  isBaseMessage(value) && value.type === 'get_model_policy' && isRecord(value.payload) && Object.keys(value.payload).length === 0
+
+export { isModelPolicySnapshotMessage } from './model-policy-messages'

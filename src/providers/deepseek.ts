@@ -79,13 +79,13 @@ export const createDeepSeekProvider = (
       }
 
       const body: unknown = await response.json()
-      const models = isRecord(body) && Array.isArray(body.data) ? body.data : []
-      const hasDefaultModel = models.some((model) => isRecord(model) && model.id === DEEPSEEK_DEFAULT_MODEL)
-
-      return {
-        valid: hasDefaultModel,
-        error: hasDefaultModel ? undefined : `DeepSeek model "${DEEPSEEK_DEFAULT_MODEL}" is unavailable`,
+      if (!isRecord(body) || !Array.isArray(body.data) || !body.data.every(model => isRecord(model) && typeof model.id === 'string' && model.id.length > 0)) {
+        return { valid: false, error: 'Invalid DeepSeek model catalog' }
       }
+      // Authentication succeeds independently of any packaged or selected model.
+      // Availability failures remain translation errors, not invalid credentials.
+      return { valid: true }
+
     } catch (err) {
       return { valid: false, error: err instanceof Error ? err.message : 'Unknown error' }
     }

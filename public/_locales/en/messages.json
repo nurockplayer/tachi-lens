@@ -141,5 +141,7 @@
   "speechConsentConfirm": { "message": "Enable and start" },
   "speechConsentCancel": { "message": "Cancel" },
   "speechStatus": { "message": "Speech subtitle status" },
-  "speechStateIdle": { "message": "Speech subtitles are off" }
+  "speechStateIdle": { "message": "Speech subtitles are off" },
+  "modelRecommended": { "message": "Auto / Recommended" },
+  "modelPolicyStatus": { "message": "Model policy" }
 }

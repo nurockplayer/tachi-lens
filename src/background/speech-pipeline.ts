@@ -1,3 +1,4 @@
+import type { ModelConfiguration } from '@/providers/model-policy'
 // Service Worker speech pipeline (v0.3 speech, Spec §2/§6/§9/§10).
 //
 // Owns everything between the capture primitive and the provider:
@@ -52,7 +53,7 @@ export interface SpeechPipelineDependencies {
   source: SpeechSource
   getProvider: (id: SpeechProviderId) => SpeechProvider | undefined
   getApiKey: (id: SpeechProviderId) => Promise<string | undefined>
-  getSettings: () => Promise<UserSettings>
+  getSettings: () => Promise<UserSettings & { speechModelConfiguration?: ModelConfiguration }>
   budget: SpeechBudget
   rateLimiter: RateLimiter
   /** Emit a speech_state broadcast payload (the SW forwards it to content scripts). */
@@ -135,6 +136,7 @@ export class SpeechPipeline {
   private provider: SpeechProvider | undefined
   private apiKey: string | undefined
   private model = ''
+  private modelConfiguration?: ModelConfiguration
   private targetLang = ''
 
   private pending: BufferedChunk[] = []
@@ -236,6 +238,7 @@ export class SpeechPipeline {
     this.provider = provider
     this.apiKey = apiKey
     this.model = config.speechModel
+    this.modelConfiguration = settings.speechModelConfiguration
     this.targetLang = config.speechTargetLanguage
     this.budget.setSessionCapMinutes(config.maxSessionMinutes)
     this.running = true
@@ -388,8 +391,10 @@ export class SpeechPipeline {
     const provider = this.provider!
     const apiKey = this.apiKey!
     const signal = this.abortController?.signal
-    void provider
-      .transcribeChunk(chunk, apiKey, this.model, this.targetLang, signal)
+    const transcription = this.modelConfiguration
+      ? provider.transcribeChunk(chunk, apiKey, this.model, this.targetLang, signal, this.modelConfiguration)
+      : provider.transcribeChunk(chunk, apiKey, this.model, this.targetLang, signal)
+    void transcription
       .then((results) => this.handleTranscriptionResults(results))
       .catch(() => this.handleProviderError({ type: 'network', message: 'Speech transcription failed' }))
   }

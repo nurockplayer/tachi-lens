@@ -1,6 +1,6 @@
 {
   "name": "tachi-lens",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Twitch 聊天室沉浸式翻譯 Chrome Extension",
   "type": "module",
@@ -16,7 +16,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check:agent-docs": "node scripts/check-agent-doc-sync.mjs",
-    "classify:risk": "node scripts/classify-risk.mjs"
+    "classify:risk": "node scripts/classify-risk.mjs",
+    "check:model-policy": "tsx scripts/model-policy/run.ts check",
+    "models:discover": "tsx scripts/model-policy/run.ts discover",
+    "models:probe": "tsx scripts/model-policy/run.ts probe"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.0",
@@ -34,6 +37,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.9.0",
     "jsdom": "^29.1.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.66.0",
     "vite": "^7.3.6",

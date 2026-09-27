@@ -141,5 +141,7 @@
   "speechConsentConfirm": { "message": "啟用並開始" },
   "speechConsentCancel": { "message": "取消" },
   "speechStatus": { "message": "語音字幕狀態" },
-  "speechStateIdle": { "message": "語音字幕已關閉" }
+  "speechStateIdle": { "message": "語音字幕已關閉" },
+  "modelRecommended": { "message": "自動 / 推薦" },
+  "modelPolicyStatus": { "message": "模型政策" }
 }

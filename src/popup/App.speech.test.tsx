@@ -136,7 +136,7 @@ describe('Popup speech settings', () => {
       expect(localSet).toHaveBeenCalledWith({
         userSettings: expect.objectContaining({
           selectedProvider: 'deepseek',
-          selectedModel: 'deepseek-flash',
+          selectedModel: 'auto',
           targetLanguage: 'zh-TW',
           speechConfig: expect.objectContaining({
             speechModel: 'gemini-2.5-pro',
