@@ -207,11 +207,11 @@ const loadSettings = async (): Promise<UserSettings> => {
   return getUserSettings()
 }
 
-const loadApiKeyPreview = async (providerId: string): Promise<string> => {
+const loadApiKeyPreview = async (providerId: string, scope?: 'speech'): Promise<string> => {
   try {
     const response = (await chrome.runtime.sendMessage({
       type: 'get_api_key_preview',
-      payload: { providerId },
+      payload: scope ? { providerId, scope } : { providerId },
     })) as { type: string; payload: { preview?: string } }
 
     return response.payload?.preview ?? ''
@@ -290,6 +290,8 @@ const mergeDiagnostics = (current: DiagnosticEvent[], incoming: DiagnosticEvent[
 export function App() {
   const [settings, setSettings] = useState<UserSettings | null>(null)
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({})
+  const [speechApiKeyInputs, setSpeechApiKeyInputs] = useState<Record<string, string>>({})
+  const [speechOverrideEnabled, setSpeechOverrideEnabled] = useState<Record<string, boolean>>({})
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
   const [validationStatus, setValidationStatus] = useState<Record<string, ValidationStatus>>({})
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
@@ -395,6 +397,14 @@ export function App() {
       loadApiKeyPreview(p.id).then((preview) => {
         if (cancelled) return
         setApiKeyInputs((prev) => ({ ...prev, [p.id]: preview }))
+      })
+    }
+
+    for (const providerId of SPEECH_PROVIDER_IDS) {
+      loadApiKeyPreview(providerId, 'speech').then((preview) => {
+        if (cancelled) return
+        setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+        setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
       })
     }
 
@@ -825,6 +835,29 @@ export function App() {
     [],
   )
 
+  const handleSpeechApiKeyChange = useCallback(async (providerId: SpeechProviderId, value: string): Promise<void> => {
+    setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: value }))
+    const trimmed = value.trim()
+    if (trimmed.includes('***')) return
+    if (!trimmed) {
+      setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: false }))
+      await chrome.runtime.sendMessage({ type: 'delete_api_key', payload: { providerId, scope: 'speech' } })
+      return
+    }
+    setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: true }))
+    await chrome.runtime.sendMessage({
+      type: 'save_api_key',
+      payload: { providerId, apiKey: trimmed, scope: 'speech' },
+    })
+  }, [])
+
+  const handleSpeechOverrideToggle = useCallback(async (providerId: SpeechProviderId, enabled: boolean): Promise<void> => {
+    setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: enabled }))
+    if (enabled) return
+    setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: '' }))
+    await chrome.runtime.sendMessage({ type: 'delete_api_key', payload: { providerId, scope: 'speech' } })
+  }, [])
+
   const toggleKeyVisibility = useCallback((providerId: string) => {
     setVisibleKeys((prev) => ({ ...prev, [providerId]: !prev[providerId] }))
   }, [])
@@ -926,7 +959,9 @@ export function App() {
           <div className="speech-status">
             <span className="speech-status__label">{t('speechStatus')}：</span>
             <span>
-              {speechState.errorKey ? t(speechState.errorKey as Parameters<typeof t>[0]) : t(SPEECH_STATE_LABELS[speechState.state])}
+              {speechState.errorKey
+                ? `${settings.speechConfig.speechProvider}: ${t(speechState.errorKey as Parameters<typeof t>[0])}`
+                : t(SPEECH_STATE_LABELS[speechState.state])}
             </span>
           </div>
         )}
@@ -1250,6 +1285,34 @@ export function App() {
               </option>
             ))}
           </SelectField>
+
+          <div className="field">
+            <p className="section-hint">
+              {speechOverrideEnabled[settings.speechConfig.speechProvider]
+                ? t('speechCredentialOverrideActive')
+                : apiKeyInputs[settings.speechConfig.speechProvider]
+                  ? t('speechCredentialSharedAvailable')
+                  : t('speechCredentialMissing')}
+            </p>
+            <ToggleRow
+              label={t('speechCredentialOverrideToggle')}
+              checked={Boolean(speechOverrideEnabled[settings.speechConfig.speechProvider])}
+              onChange={(enabled) => void handleSpeechOverrideToggle(settings.speechConfig.speechProvider, enabled)}
+            />
+            {speechOverrideEnabled[settings.speechConfig.speechProvider] && (
+              <SecretInput
+                id="speech-api-key-override"
+                label={t('speechCredentialOverrideField')}
+                value={speechApiKeyInputs[settings.speechConfig.speechProvider] ?? ''}
+                onChange={(value) => void handleSpeechApiKeyChange(settings.speechConfig.speechProvider, value)}
+                placeholder={t('apiKeyPlaceholder')}
+                visible={Boolean(visibleKeys[`speech:${settings.speechConfig.speechProvider}`])}
+                onToggleVisible={() => toggleKeyVisibility(`speech:${settings.speechConfig.speechProvider}`)}
+                showLabel={t('show')}
+                hideLabel={t('hide')}
+              />
+            )}
+          </div>
 
           <SelectField
             id="speech-model-select"

@@ -62,6 +62,47 @@ describe('MessageRouter', () => {
     vi.useRealTimers()
   })
 
+  describe('provider credential scope', () => {
+    it('routes explicit speech overrides through masked popup previews', async () => {
+      const saveApiKey = vi.fn(async () => undefined)
+      const deleteApiKey = vi.fn(async () => undefined)
+      const saveSpeechApiKeyOverride = vi.fn(async () => undefined)
+      const deleteSpeechApiKeyOverride = vi.fn(async () => undefined)
+      const { router } = makeRouter({
+        saveApiKey,
+        deleteApiKey,
+        getMaskedApiKeyForPopup: vi.fn(async () => 'shared***view'),
+        saveSpeechApiKeyOverride,
+        deleteSpeechApiKeyOverride,
+        getMaskedSpeechApiKeyForPopup: vi.fn(async () => 'over***view'),
+      })
+      const sendResponse = vi.fn()
+
+      router.handleMessage({
+        type: 'save_api_key',
+        payload: { providerId: 'gemini', apiKey: 'fixture-speech-secret', scope: 'speech' },
+      }, undefined, sendResponse)
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+        type: 'save_api_key_result',
+        payload: { success: true, preview: 'over***view' },
+      }))
+      expect(saveSpeechApiKeyOverride).toHaveBeenCalledWith('gemini', 'fixture-speech-secret')
+      expect(saveApiKey).not.toHaveBeenCalled()
+      expect(JSON.stringify(sendResponse.mock.calls)).not.toContain('fixture-speech-secret')
+
+      sendResponse.mockClear()
+      router.handleMessage({
+        type: 'delete_api_key',
+        payload: { providerId: 'gemini', scope: 'speech' },
+      }, undefined, sendResponse)
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+        type: 'delete_api_key_result', payload: { success: true },
+      }))
+      expect(deleteSpeechApiKeyOverride).toHaveBeenCalledWith('gemini')
+      expect(deleteApiKey).not.toHaveBeenCalled()
+    })
+  })
+
   describe('translate_request', () => {
     it('routes a valid translation request to the translator', async () => {
       const { router } = makeRouter()

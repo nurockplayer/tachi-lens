@@ -78,6 +78,59 @@ describe('Popup speech settings', () => {
     expect((providerSelect as HTMLSelectElement).value).toBe('gemini')
   })
 
+  it('shows that speech inherits the shared provider key without fetching full key material', async () => {
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; scope?: string } }
+      if (request.type === 'get_api_key_preview' && request.payload?.providerId === 'gemini') {
+        return {
+          type: 'api_key_preview',
+          payload: { preview: request.payload.scope === 'speech' ? '' : 'gem***red' },
+        }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    expect(await screen.findByText('此提供者已設定共用 API Key')).toBeTruthy()
+    const requests = sendMessage.mock.calls.map(([message]) => message as { type?: string; payload?: unknown })
+    expect(requests).toContainEqual(expect.objectContaining({
+      type: 'get_api_key_preview',
+      payload: { providerId: 'gemini', scope: 'speech' },
+    }))
+    expect(JSON.stringify(requests)).not.toContain('gemini-real-key')
+  })
+
+  it('saves a deliberate speech override through the Service Worker and removes only that override', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await waitForSpeechControls()
+    const overrideToggle = screen.getByRole('checkbox', { name: '使用語音專用 API Key' })
+    await user.click(overrideToggle)
+    const overrideField = await screen.findByLabelText('語音專用 API Key')
+    fireEvent.change(overrideField, { target: { value: 'fixture-speech-override' } })
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'save_api_key',
+        payload: { providerId: 'gemini', apiKey: 'fixture-speech-override', scope: 'speech' },
+      })
+    })
+
+    await user.click(overrideToggle)
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'delete_api_key',
+        payload: { providerId: 'gemini', scope: 'speech' },
+      })
+    })
+    expect(sendMessage).not.toHaveBeenCalledWith({
+      type: 'delete_api_key',
+      payload: { providerId: 'gemini' },
+    })
+  })
+
   it('persists speech config and broadcasts speech_settings_updated on save', async () => {
     const user = userEvent.setup()
     render(<App />)

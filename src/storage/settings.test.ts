@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   API_KEY_PREVIEWS_STORAGE_KEY,
   API_KEYS_STORAGE_KEY,
+  SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY,
+  SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY,
   RUNTIME_STATE_STORAGE_KEY,
   SPEECH_API_KEY_PREVIEWS_STORAGE_KEY,
   SPEECH_API_KEYS_STORAGE_KEY,
   DEFAULT_SETTINGS,
   deleteApiKey,
   deleteChannelSettings,
-  deleteSpeechApiKey,
+  deleteSpeechApiKeyOverride,
   getApiKeyForServiceWorker,
   getChannelSettings,
   getMaskedApiKeyForPopup,
@@ -16,6 +18,7 @@ import {
   getPerChannelSettings,
   getRuntimeState,
   getSpeechApiKeyForServiceWorker,
+  getSpeechApiKeyOverrideForServiceWorker,
   getUserSettings,
   initializeStorageAccess,
   maskApiKey,
@@ -25,7 +28,8 @@ import {
   saveApiKey,
   saveChannelSettings,
   saveRuntimeState,
-  saveSpeechApiKey,
+  saveSpeechApiKeyOverride,
+  migrateSpeechCredentials,
   saveUserSettings,
   type StorageAreaLike,
   type UserSettings,
@@ -469,14 +473,126 @@ describe('settings storage', () => {
     })
   })
 
-  describe('speech API key namespace', () => {
+  describe('provider credentials', () => {
+    it('returns missing when a fresh install has no shared or override credential', async () => {
+      const storage = createChromeStorage()
+
+      await expect(getApiKeyForServiceWorker('gemini', storage)).resolves.toBeUndefined()
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBeUndefined()
+    })
+
+    it('resolves speech to the shared provider credential when no override exists', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-shared' }
+
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-shared')
+      await expect(getSpeechApiKeyOverrideForServiceWorker('gemini', storage)).resolves.toBeUndefined()
+    })
+
+    it('keeps chat and speech provider selection independent', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = {
+        deepseek: 'fixture-chat-provider',
+        gemini: 'fixture-speech-provider',
+      }
+
+      await expect(getApiKeyForServiceWorker('deepseek', storage)).resolves.toBe('fixture-chat-provider')
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-speech-provider')
+    })
+
+    it('uses a speech override for speech only and returns to the shared credential after removal', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-shared' }
+
+      await saveSpeechApiKeyOverride('gemini', 'fixture-override', storage)
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-override')
+      await expect(getApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-shared')
+
+      await deleteSpeechApiKeyOverride('gemini', storage)
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-shared')
+    })
+
+    it('migrates a speech-only legacy credential into shared storage and is idempotent', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'fixture-legacy' }
+      storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: 'untrusted-preview' }
+
+      await migrateSpeechCredentials(storage)
+      await migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'fixture-legacy' })
+      expect(storage.local.data[API_KEY_PREVIEWS_STORAGE_KEY]).toEqual({ gemini: maskApiKey('fixture-legacy') })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data).not.toHaveProperty(SPEECH_API_KEYS_STORAGE_KEY)
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-legacy')
+    })
+
+    it('drops an equal legacy speech credential into inheritance without making an override', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-same' }
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'fixture-same' }
+
+      await migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-same')
+    })
+
+    it('preserves a conflicting legacy speech credential as an explicit override', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-chat' }
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'fixture-speech' }
+
+      await migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'fixture-chat' })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({ gemini: 'fixture-speech' })
+      await expect(getApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-chat')
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-speech')
+    })
+
+    it('retains existing credentials when legacy speech state is malformed', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-chat' }
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: { malformed: true } }
+
+      await migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'fixture-chat' })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-chat')
+    })
+
+    it('keeps legacy credentials when replacement storage cannot be read back', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'fixture-legacy' }
+      storage.local.set = vi.fn(async (items) => {
+        Object.assign(storage.local.data, items)
+        delete storage.local.data[API_KEYS_STORAGE_KEY]
+      })
+
+      await expect(migrateSpeechCredentials(storage)).rejects.toThrow('Credential migration could not verify replacement storage')
+      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'fixture-legacy' })
+    })
+
+    it('stores speech overrides separately from shared credentials', async () => {
+      const storage = createChromeStorage()
+
+      await saveSpeechApiKeyOverride('gemini', 'fixture-speech', storage)
+
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({ gemini: 'fixture-speech' })
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toBeUndefined()
+    })
+  })
+
+  describe('legacy speech API key namespace', () => {
     it('stores speech keys under separate storage keys', async () => {
       const storage = createChromeStorage()
 
-      await saveSpeechApiKey('gemini', 'sk-speech-secret', storage)
+      await saveSpeechApiKeyOverride('gemini', 'fixture-speech', storage)
 
-      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'sk-speech-secret' })
-      expect(storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]).toEqual({ gemini: 'sk-*********cret' })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({ gemini: 'fixture-speech' })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY]).toEqual({ gemini: maskApiKey('fixture-speech') })
       expect(storage.local.data[API_KEYS_STORAGE_KEY]).toBeUndefined()
       expect(storage.local.data[API_KEY_PREVIEWS_STORAGE_KEY]).toBeUndefined()
     })
@@ -484,7 +600,7 @@ describe('settings storage', () => {
     it('never returns a chat key from the speech accessor and vice versa', async () => {
       const storage = createChromeStorage()
       storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'chat-key' }
-      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'speech-key' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY] = { gemini: 'speech-key' }
 
       await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('speech-key')
       await expect(getApiKeyForServiceWorker('gemini', storage)).resolves.toBe('chat-key')
@@ -492,32 +608,32 @@ describe('settings storage', () => {
 
     it('returns only masked speech keys for the popup', async () => {
       const storage = createChromeStorage()
-      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'sk-full-speech-key-here' }
-      storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: 'sk-******ere' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY] = { gemini: 'fixture-full-speech' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY] = { gemini: maskApiKey('fixture-full-speech') }
 
-      await expect(getMaskedSpeechApiKeyForPopup('gemini', storage)).resolves.toBe('sk-******ere')
+      await expect(getMaskedSpeechApiKeyForPopup('gemini', storage)).resolves.toBe(maskApiKey('fixture-full-speech'))
     })
 
     it('deletes speech keys without touching chat keys', async () => {
       const storage = createChromeStorage()
-      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'speech-old' }
-      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'chat-old' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY] = { gemini: 'fixture-old-speech' }
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-chat' }
 
-      await deleteSpeechApiKey('gemini', storage)
+      await deleteSpeechApiKeyOverride('gemini', storage)
 
-      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({})
-      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'chat-old' })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'fixture-chat' })
     })
 
     it('clears an existing speech key when saving an empty value', async () => {
       const storage = createChromeStorage()
-      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'speech-old' }
-      storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: 'sp***old' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY] = { gemini: 'fixture-old-speech' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY] = { gemini: 'fixture-preview' }
 
-      await saveSpeechApiKey('gemini', '   ', storage)
+      await saveSpeechApiKeyOverride('gemini', '   ', storage)
 
-      expect(storage.local.data[SPEECH_API_KEYS_STORAGE_KEY]).toEqual({})
-      expect(storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY]).toEqual({})
     })
   })
 
@@ -538,12 +654,20 @@ describe('settings storage', () => {
     await expect(getApiKeyForServiceWorker('openai', storage)).resolves.toBe('sk-openai-secret')
   })
 
+  it('derives bounded popup previews from keys instead of trusting stored preview data', async () => {
+    const storage = createChromeStorage()
+    storage.local.data[API_KEYS_STORAGE_KEY] = { deepseek: 'fixture-full-provider-key' }
+    storage.local.data[API_KEY_PREVIEWS_STORAGE_KEY] = { deepseek: 'fixture-full-provider-key' }
+
+    await expect(getMaskedApiKeyForPopup('deepseek', storage)).resolves.toBe(maskApiKey('fixture-full-provider-key'))
+  })
+
   it('returns only masked API keys for popup display', async () => {
     const storage = createChromeStorage()
     storage.local.data[API_KEYS_STORAGE_KEY] = { claude: 'this-full-key-would-mask-differently' }
     storage.local.data[API_KEY_PREVIEWS_STORAGE_KEY] = { claude: 'sk-**********7890' }
 
-    await expect(getMaskedApiKeyForPopup('claude', storage)).resolves.toBe('sk-**********7890')
+    await expect(getMaskedApiKeyForPopup('claude', storage)).resolves.toBe(maskApiKey('this-full-key-would-mask-differently'))
   })
 
   it('does not reveal short API keys when masking', () => {

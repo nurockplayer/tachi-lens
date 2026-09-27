@@ -99,6 +99,8 @@ export const API_KEYS_STORAGE_KEY = 'providerApiKeys'
 export const API_KEY_PREVIEWS_STORAGE_KEY = 'providerApiKeyPreviews'
 export const SPEECH_API_KEYS_STORAGE_KEY = 'speechProviderApiKeys'
 export const SPEECH_API_KEY_PREVIEWS_STORAGE_KEY = 'speechProviderApiKeyPreviews'
+export const SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY = 'speechProviderApiKeyOverrides'
+export const SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY = 'speechProviderApiKeyOverridePreviews'
 export const RUNTIME_STATE_STORAGE_KEY = 'runtimeState'
 export const PER_CHANNEL_SETTINGS_STORAGE_KEY = 'perChannelSettings'
 
@@ -190,6 +192,7 @@ export const initializeStorageAccess = async (storage = getDefaultStorage()): Pr
     storage.local.setAccessLevel({ accessLevel }),
     storage.session.setAccessLevel({ accessLevel }),
   ])
+  await migrateSpeechCredentials(storage)
 }
 
 export const getUserSettings = async (storage = getDefaultStorage()): Promise<UserSettings> => {
@@ -248,6 +251,7 @@ export const saveApiKey = async (
   apiKey: string,
   storage = getDefaultStorage(),
 ): Promise<void> => {
+  await migrateSpeechCredentials(storage)
   const normalizedKey = apiKey.trim()
 
   if (!normalizedKey) {
@@ -273,6 +277,7 @@ export const saveApiKey = async (
 export const rotateApiKey = saveApiKey
 
 export const deleteApiKey = async (providerId: ProviderId, storage = getDefaultStorage()): Promise<void> => {
+  await migrateSpeechCredentials(storage)
   const apiKeys = await readApiKeys(storage)
   const apiKeyPreviews = await readApiKeyPreviews(storage)
 
@@ -289,66 +294,155 @@ export const getApiKeyForServiceWorker = async (
   providerId: ProviderId,
   storage = getDefaultStorage(),
 ): Promise<string | undefined> => {
+  await migrateSpeechCredentials(storage)
   const apiKeys = await readApiKeys(storage)
+  const apiKey = apiKeys[providerId]
 
-  return apiKeys[providerId]
+  return hasCredential(apiKey) ? apiKey : undefined
 }
 
 export const getMaskedApiKeyForPopup = async (
   providerId: ProviderId,
   storage = getDefaultStorage(),
 ): Promise<string | undefined> => {
-  const apiKeyPreviews = await readApiKeyPreviews(storage)
+  await migrateSpeechCredentials(storage)
+  const apiKeys = await readApiKeys(storage)
+  const apiKey = apiKeys[providerId]
 
-  return apiKeyPreviews[providerId]
+  return hasCredential(apiKey) ? maskApiKey(apiKey) : undefined
 }
 
-const readSpeechApiKeys = async (storage: ChromeStorageLike): Promise<SpeechApiKeyMap> =>
-  readRecord(storage.local, SPEECH_API_KEYS_STORAGE_KEY) as SpeechApiKeyMap
+const readSpeechCredentialOverrides = async (storage: ChromeStorageLike): Promise<SpeechApiKeyMap> =>
+  readRecord(storage.local, SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY) as SpeechApiKeyMap
 
-const readSpeechApiKeyPreviews = async (storage: ChromeStorageLike): Promise<SpeechApiKeyPreviewMap> =>
-  readRecord(storage.local, SPEECH_API_KEY_PREVIEWS_STORAGE_KEY) as SpeechApiKeyPreviewMap
+const readSpeechCredentialOverridePreviews = async (storage: ChromeStorageLike): Promise<SpeechApiKeyPreviewMap> =>
+  readRecord(storage.local, SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY) as SpeechApiKeyPreviewMap
 
-export const saveSpeechApiKey = async (
+const credentialMigrations = new WeakMap<StorageAreaLike, Promise<void>>()
+
+const hasCredential = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0
+
+const migrateSpeechCredentialsOnce = async (storage: ChromeStorageLike): Promise<void> => {
+  const legacyItems = await storage.local.get([SPEECH_API_KEYS_STORAGE_KEY, SPEECH_API_KEY_PREVIEWS_STORAGE_KEY])
+  const legacyKeys = isRecord(legacyItems[SPEECH_API_KEYS_STORAGE_KEY])
+    ? legacyItems[SPEECH_API_KEYS_STORAGE_KEY] as Record<string, unknown>
+    : {}
+  const hasLegacyState = legacyItems[SPEECH_API_KEYS_STORAGE_KEY] !== undefined ||
+    legacyItems[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] !== undefined
+  if (!hasLegacyState) return
+
+  const sharedKeys = await readApiKeys(storage)
+  const sharedPreviews = await readApiKeyPreviews(storage)
+  const overrides = await readSpeechCredentialOverrides(storage)
+  const overridePreviews = await readSpeechCredentialOverridePreviews(storage)
+
+  for (const [providerId, legacyKey] of Object.entries(legacyKeys)) {
+    if (!hasCredential(legacyKey)) continue
+    const sharedKey = sharedKeys[providerId as ProviderId]
+    if (!hasCredential(sharedKey)) {
+      sharedKeys[providerId as ProviderId] = legacyKey
+      sharedPreviews[providerId as ProviderId] = maskApiKey(legacyKey)
+    } else if (sharedKey !== legacyKey && !hasCredential(overrides[providerId as SpeechProviderId])) {
+      overrides[providerId as SpeechProviderId] = legacyKey
+      overridePreviews[providerId as SpeechProviderId] = maskApiKey(legacyKey)
+    }
+  }
+
+  await storage.local.set({
+    [API_KEYS_STORAGE_KEY]: sharedKeys,
+    [API_KEY_PREVIEWS_STORAGE_KEY]: sharedPreviews,
+    [SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]: overrides,
+    [SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY]: overridePreviews,
+  })
+
+  // Chrome storage has no transaction API. Read back every replacement map
+  // before removing legacy secrets so a partial write remains recoverable.
+  const persisted = await storage.local.get([
+    API_KEYS_STORAGE_KEY,
+    API_KEY_PREVIEWS_STORAGE_KEY,
+    SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY,
+    SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY,
+  ])
+  const persistedShared = persisted[API_KEYS_STORAGE_KEY]
+  const persistedSharedPreviews = persisted[API_KEY_PREVIEWS_STORAGE_KEY]
+  const persistedOverrides = persisted[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]
+  const persistedOverridePreviews = persisted[SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY]
+  if (!isRecord(persistedShared) || !isRecord(persistedSharedPreviews) ||
+      !isRecord(persistedOverrides) || !isRecord(persistedOverridePreviews)) {
+    throw new Error('Credential migration could not verify replacement storage')
+  }
+  for (const [providerId, legacyKey] of Object.entries(legacyKeys)) {
+    if (!hasCredential(legacyKey)) continue
+    const sharedKey = sharedKeys[providerId as ProviderId]
+    const replacement = hasCredential(sharedKey) && sharedKey !== legacyKey
+      ? persistedOverrides[providerId]
+      : persistedShared[providerId]
+    if (replacement !== legacyKey) {
+      throw new Error('Credential migration could not verify replacement storage')
+    }
+  }
+
+  await storage.local.remove([SPEECH_API_KEYS_STORAGE_KEY, SPEECH_API_KEY_PREVIEWS_STORAGE_KEY])
+}
+
+export const migrateSpeechCredentials = async (storage = getDefaultStorage()): Promise<void> => {
+  const area = storage.local
+  const current = credentialMigrations.get(area)
+  if (current) return current
+
+  const migration = migrateSpeechCredentialsOnce(storage)
+  credentialMigrations.set(area, migration)
+  try {
+    await migration
+  } catch (error) {
+    credentialMigrations.delete(area)
+    throw error
+  }
+}
+
+export const saveSpeechApiKeyOverride = async (
   providerId: SpeechProviderId,
   apiKey: string,
   storage = getDefaultStorage(),
 ): Promise<void> => {
+  await migrateSpeechCredentials(storage)
   const normalizedKey = apiKey.trim()
 
   if (!normalizedKey) {
-    await deleteSpeechApiKey(providerId, storage)
+    await deleteSpeechApiKeyOverride(providerId, storage)
     return
   }
 
-  const speechApiKeys = await readSpeechApiKeys(storage)
-  const speechApiKeyPreviews = await readSpeechApiKeyPreviews(storage)
+  const speechApiKeys = await readSpeechCredentialOverrides(storage)
+  const speechApiKeyPreviews = await readSpeechCredentialOverridePreviews(storage)
 
   await storage.local.set({
-    [SPEECH_API_KEYS_STORAGE_KEY]: {
+    [SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]: {
       ...speechApiKeys,
       [providerId]: normalizedKey,
     },
-    [SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]: {
+    [SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY]: {
       ...speechApiKeyPreviews,
       [providerId]: maskApiKey(normalizedKey),
     },
   })
 }
 
-export const deleteSpeechApiKey = async (
+export const deleteSpeechApiKeyOverride = async (
   providerId: SpeechProviderId,
   storage = getDefaultStorage(),
 ): Promise<void> => {
-  const speechApiKeys = await readSpeechApiKeys(storage)
-  const speechApiKeyPreviews = await readSpeechApiKeyPreviews(storage)
+  await migrateSpeechCredentials(storage)
+  const speechApiKeys = await readSpeechCredentialOverrides(storage)
+  const speechApiKeyPreviews = await readSpeechCredentialOverridePreviews(storage)
 
   delete speechApiKeys[providerId]
   delete speechApiKeyPreviews[providerId]
 
   await storage.local.set({
-    [SPEECH_API_KEYS_STORAGE_KEY]: speechApiKeys,
-    [SPEECH_API_KEY_PREVIEWS_STORAGE_KEY]: speechApiKeyPreviews,
+    [SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]: speechApiKeys,
+    [SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY]: speechApiKeyPreviews,
   })
 }
 
@@ -356,18 +450,42 @@ export const getSpeechApiKeyForServiceWorker = async (
   providerId: SpeechProviderId,
   storage = getDefaultStorage(),
 ): Promise<string | undefined> => {
-  const speechApiKeys = await readSpeechApiKeys(storage)
+  await migrateSpeechCredentials(storage)
+  const speechApiKeys = await readSpeechCredentialOverrides(storage)
+  const sharedApiKeys = await readApiKeys(storage)
 
-  return speechApiKeys[providerId]
+  const override = speechApiKeys[providerId]
+  if (hasCredential(override)) return override
+  const shared = sharedApiKeys[providerId]
+  return hasCredential(shared) ? shared : undefined
 }
+
+export const getSpeechApiKeyOverrideForServiceWorker = async (
+  providerId: SpeechProviderId,
+  storage = getDefaultStorage(),
+): Promise<string | undefined> => {
+  await migrateSpeechCredentials(storage)
+  const speechApiKeys = await readSpeechCredentialOverrides(storage)
+
+  const apiKey = speechApiKeys[providerId]
+
+  return hasCredential(apiKey) ? apiKey : undefined
+}
+
+/** @deprecated Prefer the explicit override name. */
+export const saveSpeechApiKey = saveSpeechApiKeyOverride
+/** @deprecated Prefer the explicit override name. */
+export const deleteSpeechApiKey = deleteSpeechApiKeyOverride
 
 export const getMaskedSpeechApiKeyForPopup = async (
   providerId: SpeechProviderId,
   storage = getDefaultStorage(),
 ): Promise<string | undefined> => {
-  const speechApiKeyPreviews = await readSpeechApiKeyPreviews(storage)
+  await migrateSpeechCredentials(storage)
+  const speechApiKeys = await readSpeechCredentialOverrides(storage)
+  const apiKey = speechApiKeys[providerId]
 
-  return speechApiKeyPreviews[providerId]
+  return hasCredential(apiKey) ? maskApiKey(apiKey) : undefined
 }
 
 export const saveRuntimeState = async (

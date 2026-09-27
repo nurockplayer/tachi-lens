@@ -340,6 +340,6 @@ describe('Popup speech consent flow (#162)', () => {
     })
     expect(await screen.findByText(/語音字幕狀態/)).toBeTruthy()
     // Reuses the fixed #160 error key, never a raw provider message.
-    expect(screen.getByText('語音時段或每日用量已達上限')).toBeTruthy()
+    expect(screen.getByText('gemini: 語音時段或每日用量已達上限')).toBeTruthy()
   })
 })

@@ -6,6 +6,8 @@ import {
 } from '../shared/messages'
 import type { TranslationRequest, TranslationResult } from '../shared/messages'
 import type { RuntimeState } from '../storage/settings'
+import type { SpeechProviderId } from '@/providers/speech-types'
+import { isSpeechProviderId } from '@/providers/speech-types'
 import { Translator } from './translator'
 
 export interface RouterDependencies {
@@ -17,6 +19,9 @@ export interface RouterDependencies {
   saveApiKey?: (providerId: ProviderId, apiKey: string) => Promise<void>
   deleteApiKey?: (providerId: ProviderId) => Promise<void>
   getMaskedApiKeyForPopup?: (providerId: ProviderId) => Promise<string | undefined>
+  saveSpeechApiKeyOverride?: (providerId: SpeechProviderId, apiKey: string) => Promise<void>
+  deleteSpeechApiKeyOverride?: (providerId: SpeechProviderId) => Promise<void>
+  getMaskedSpeechApiKeyForPopup?: (providerId: SpeechProviderId) => Promise<string | undefined>
 }
 
 type SendResponse = (response: unknown) => void
@@ -246,14 +251,33 @@ const handleSaveApiKey = async (
     return
   }
 
-  if (!deps.saveApiKey) {
-    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'saveApiKey not available' } })
+  const requestedScope = p?.scope
+  if (requestedScope !== undefined && requestedScope !== 'chat' && requestedScope !== 'speech') {
+    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Invalid credential scope' } })
     return
   }
+  const speechScope = p?.scope === 'speech'
+  if (speechScope) {
+    if (!isSpeechProviderId(providerId)) {
+      sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Invalid speech provider' } })
+      return
+    }
+    if (!deps.saveSpeechApiKeyOverride) {
+      sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Speech credentials unavailable' } })
+      return
+    }
+    await deps.saveSpeechApiKeyOverride(providerId as SpeechProviderId, apiKey ?? '')
+  } else {
+    if (!deps.saveApiKey) {
+      sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'saveApiKey not available' } })
+      return
+    }
+    await deps.saveApiKey(providerId as ProviderId, apiKey ?? '')
+  }
 
-  await deps.saveApiKey(providerId as ProviderId, apiKey ?? '')
-
-  const preview = await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
+  const preview = speechScope
+    ? await deps.getMaskedSpeechApiKeyForPopup?.(providerId as SpeechProviderId)
+    : await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
 
   sendResponse({ type: 'save_api_key_result', payload: { success: true, preview } })
 }
@@ -270,7 +294,21 @@ const handleDeleteApiKey = async (
     return
   }
 
-  await deps.deleteApiKey?.(providerId as ProviderId)
+  const requestedScope = (payload as Record<string, unknown> | undefined)?.scope
+  if (requestedScope !== undefined && requestedScope !== 'chat' && requestedScope !== 'speech') {
+    sendResponse({ type: 'delete_api_key_result', payload: { success: false, error: 'Invalid credential scope' } })
+    return
+  }
+  const speechScope = requestedScope === 'speech'
+  if (speechScope) {
+    if (!isSpeechProviderId(providerId)) {
+      sendResponse({ type: 'delete_api_key_result', payload: { success: false, error: 'Invalid speech provider' } })
+      return
+    }
+    await deps.deleteSpeechApiKeyOverride?.(providerId as SpeechProviderId)
+  } else {
+    await deps.deleteApiKey?.(providerId as ProviderId)
+  }
   sendResponse({ type: 'delete_api_key_result', payload: { success: true } })
 }
 
@@ -286,7 +324,19 @@ const handleGetApiKeyPreview = async (
     return
   }
 
-  const preview = await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
+  const requestedScope = (payload as Record<string, unknown> | undefined)?.scope
+  if (requestedScope !== undefined && requestedScope !== 'chat' && requestedScope !== 'speech') {
+    sendResponse({ type: 'api_key_preview', payload: { preview: '' } })
+    return
+  }
+  const speechScope = requestedScope === 'speech'
+  if (speechScope && !isSpeechProviderId(providerId)) {
+    sendResponse({ type: 'api_key_preview', payload: { preview: '' } })
+    return
+  }
+  const preview = speechScope
+    ? await deps.getMaskedSpeechApiKeyForPopup?.(providerId as SpeechProviderId)
+    : await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
 
   sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '' } })
 }

@@ -2,15 +2,18 @@ import { getProvider } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
 import {
   deleteApiKey,
+  deleteSpeechApiKeyOverride,
   getApiKeyForServiceWorker,
   getChannelSettings,
   getMaskedApiKeyForPopup,
+  getMaskedSpeechApiKeyForPopup,
   getRuntimeState,
   getSpeechApiKeyForServiceWorker,
   getUserSettings,
   initializeStorageAccess,
   mergeSettings,
   saveApiKey,
+  saveSpeechApiKeyOverride,
   saveUserSettings,
 } from '@/storage/settings'
 import {
@@ -109,6 +112,9 @@ const router = createMessageRouter({
   saveApiKey: (providerId, apiKey) => saveApiKey(providerId, apiKey),
   deleteApiKey: (providerId) => deleteApiKey(providerId),
   getMaskedApiKeyForPopup: (providerId) => getMaskedApiKeyForPopup(providerId),
+  saveSpeechApiKeyOverride: (providerId, apiKey) => saveSpeechApiKeyOverride(providerId, apiKey),
+  deleteSpeechApiKeyOverride: (providerId) => deleteSpeechApiKeyOverride(providerId),
+  getMaskedSpeechApiKeyForPopup: (providerId) => getMaskedSpeechApiKeyForPopup(providerId),
 })
 
 const DIAGNOSTIC_STORAGE_KEY = 'translationDiagnostics'
