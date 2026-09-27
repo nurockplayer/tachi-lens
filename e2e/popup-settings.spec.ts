@@ -118,9 +118,10 @@ test.describe('Packaged Popup render and settings persistence', () => {
     // Model → deepseek-flash (set by provider change; select explicitly)
     await page.locator('#model-select').selectOption('deepseek-flash')
 
-    // API key → fill the secret (triggers save_api_key runtime message)
+    // API key drafts commit when editing ends.
     const apiKeyInput = page.locator('#api-key-input')
     await apiKeyInput.fill(POPUP_SECRET_KEY)
+    await apiKeyInput.blur()
 
     // Wait for the Service Worker to persist the key to storage
     await expect(async () => {

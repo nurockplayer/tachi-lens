@@ -1,11 +1,16 @@
 import type { ProviderId, TranslationProvider } from '../providers/types'
 import {
   isBaseMessage,
+  isCredentialDeleteRequestMessage,
+  isCredentialPreviewRequestMessage,
+  isCredentialSaveRequestMessage,
   isContentSettingsRequestMessage,
   isTranslationRequestMessage,
 } from '../shared/messages'
 import type { TranslationRequest, TranslationResult } from '../shared/messages'
-import type { RuntimeState } from '../storage/settings'
+import type { CredentialScope } from '../shared/messages'
+import { maskApiKey, type RuntimeState } from '../storage/settings'
+import type { SpeechProviderId } from '@/providers/speech-types'
 import { Translator } from './translator'
 
 export interface RouterDependencies {
@@ -17,6 +22,10 @@ export interface RouterDependencies {
   saveApiKey?: (providerId: ProviderId, apiKey: string) => Promise<void>
   deleteApiKey?: (providerId: ProviderId) => Promise<void>
   getMaskedApiKeyForPopup?: (providerId: ProviderId) => Promise<string | undefined>
+  saveSpeechApiKeyOverride?: (providerId: SpeechProviderId, apiKey: string) => Promise<void>
+  deleteSpeechApiKeyOverride?: (providerId: SpeechProviderId) => Promise<void>
+  getMaskedSpeechApiKeyForPopup?: (providerId: SpeechProviderId) => Promise<string | undefined>
+  extensionId?: string
 }
 
 type SendResponse = (response: unknown) => void
@@ -42,6 +51,35 @@ const isChatTranslationDisabled = (settings: unknown): boolean =>
 interface RuntimeMessageSender {
   tab?: { url?: unknown }
   url?: unknown
+  id?: unknown
+}
+
+const isTrustedPopupSender = (sender: unknown, extensionId: string | undefined): boolean => {
+  if (!extensionId || typeof sender !== 'object' || sender === null || Array.isArray(sender)) return false
+  const candidate = sender as RuntimeMessageSender
+  if (candidate.id !== extensionId || typeof candidate.url !== 'string') return false
+  try {
+    const url = new URL(candidate.url)
+    // Extension Popup pages may run in a browser tab during packaged tests or
+    // developer workflows. Sender URL and extension ID, rather than `tab`
+    // absence, identify the credential UI; Twitch/content URLs never match.
+    return url.protocol === 'chrome-extension:' && url.host === extensionId &&
+      url.pathname === '/src/popup/index.html'
+  } catch {
+    return false
+  }
+}
+
+const credentialMutationQueues = new Map<string, Promise<void>>()
+
+const enqueueCredentialMutation = (key: string, operation: () => Promise<void>): Promise<void> => {
+  const previous = credentialMutationQueues.get(key) ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(operation)
+  credentialMutationQueues.set(key, next)
+  void next.finally(() => {
+    if (credentialMutationQueues.get(key) === next) credentialMutationQueues.delete(key)
+  }).catch(() => undefined)
+  return next
 }
 
 /**
@@ -146,6 +184,28 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
       return true
     }
 
+    if (isCredentialSaveRequestMessage(message)) {
+      if (!isTrustedPopupSender(sender, deps.extensionId)) return false
+      void enqueueCredentialMutation('credential', () =>
+        handleSaveApiKey(message.payload, sendResponse, deps),
+      )
+      return true
+    }
+
+    if (isCredentialDeleteRequestMessage(message)) {
+      if (!isTrustedPopupSender(sender, deps.extensionId)) return false
+      void enqueueCredentialMutation('credential', () =>
+        handleDeleteApiKey(message.payload, sendResponse, deps),
+      )
+      return true
+    }
+
+    if (isCredentialPreviewRequestMessage(message)) {
+      if (!isTrustedPopupSender(sender, deps.extensionId)) return false
+      void handleGetApiKeyPreview(message.payload, sendResponse, deps)
+      return true
+    }
+
     if (isBaseMessage(message)) {
       if (message.type === 'validate_key') {
         handleValidateKey(message.payload, sendResponse, deps)
@@ -166,23 +226,6 @@ export const createMessageRouter = (deps: RouterDependencies): MessageRouter => 
         return true
       }
 
-      if (message.type === 'save_api_key') {
-        handleSaveApiKey(message.payload, sendResponse, deps)
-
-        return true
-      }
-
-      if (message.type === 'delete_api_key') {
-        handleDeleteApiKey(message.payload, sendResponse, deps)
-
-        return true
-      }
-
-      if (message.type === 'get_api_key_preview') {
-        handleGetApiKeyPreview(message.payload, sendResponse, deps)
-
-        return true
-      }
     }
 
     return false
@@ -233,62 +276,58 @@ const handleValidateKey = async (
 }
 
 const handleSaveApiKey = async (
-  payload: unknown,
+  payload: { providerId: string; apiKey: string; scope?: CredentialScope },
   sendResponse: SendResponse,
   deps: RouterDependencies,
 ): Promise<void> => {
-  const p = payload as Record<string, unknown> | undefined
-  const providerId = p?.providerId as string | undefined
-  const apiKey = p?.apiKey as string | undefined
-
-  if (!providerId) {
-    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Missing providerId' } })
-    return
+  try {
+    const speechScope = payload.scope === 'speech'
+    if (speechScope) {
+      if (!deps.saveSpeechApiKeyOverride) throw new Error('speech credential storage unavailable')
+      await deps.saveSpeechApiKeyOverride(payload.providerId as SpeechProviderId, payload.apiKey)
+    } else {
+      if (!deps.saveApiKey) throw new Error('shared credential storage unavailable')
+      await deps.saveApiKey(payload.providerId as ProviderId, payload.apiKey)
+    }
+    const preview = maskApiKey(payload.apiKey.trim())
+    sendResponse({ type: 'save_api_key_result', payload: { success: true, preview } })
+  } catch {
+    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } })
   }
-
-  if (!deps.saveApiKey) {
-    sendResponse({ type: 'save_api_key_result', payload: { success: false, error: 'saveApiKey not available' } })
-    return
-  }
-
-  await deps.saveApiKey(providerId as ProviderId, apiKey ?? '')
-
-  const preview = await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
-
-  sendResponse({ type: 'save_api_key_result', payload: { success: true, preview } })
 }
 
 const handleDeleteApiKey = async (
-  payload: unknown,
+  payload: { providerId: string; scope?: CredentialScope },
   sendResponse: SendResponse,
   deps: RouterDependencies,
 ): Promise<void> => {
-  const providerId = (payload as Record<string, unknown> | undefined)?.providerId as string | undefined
-
-  if (!providerId) {
-    sendResponse({ type: 'delete_api_key_result', payload: { success: false, error: 'Missing providerId' } })
-    return
+  try {
+    if (payload.scope === 'speech') {
+      if (!deps.deleteSpeechApiKeyOverride) throw new Error('speech credential storage unavailable')
+      await deps.deleteSpeechApiKeyOverride(payload.providerId as SpeechProviderId)
+    } else {
+      if (!deps.deleteApiKey) throw new Error('shared credential storage unavailable')
+      await deps.deleteApiKey(payload.providerId as ProviderId)
+    }
+    sendResponse({ type: 'delete_api_key_result', payload: { success: true } })
+  } catch {
+    sendResponse({ type: 'delete_api_key_result', payload: { success: false, error: 'Credential delete failed' } })
   }
-
-  await deps.deleteApiKey?.(providerId as ProviderId)
-  sendResponse({ type: 'delete_api_key_result', payload: { success: true } })
 }
 
 const handleGetApiKeyPreview = async (
-  payload: unknown,
+  payload: { providerId: string; scope?: CredentialScope },
   sendResponse: SendResponse,
   deps: RouterDependencies,
 ): Promise<void> => {
-  const providerId = (payload as Record<string, unknown> | undefined)?.providerId as string | undefined
-
-  if (!providerId) {
-    sendResponse({ type: 'api_key_preview', payload: { preview: '' } })
-    return
+  try {
+    const preview = payload.scope === 'speech'
+      ? await deps.getMaskedSpeechApiKeyForPopup?.(payload.providerId as SpeechProviderId)
+      : await deps.getMaskedApiKeyForPopup?.(payload.providerId as ProviderId)
+    sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '', success: true } })
+  } catch {
+    sendResponse({ type: 'api_key_preview', payload: { preview: '', success: false } })
   }
-
-  const preview = await deps.getMaskedApiKeyForPopup?.(providerId as ProviderId)
-
-  sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '' } })
 }
 
 const getErrorMessage = (err: unknown): string =>

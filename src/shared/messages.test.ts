@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   isBaseMessage,
+  isCredentialPreviewRequestMessage,
+  isCredentialSaveRequestMessage,
+  isCredentialDeleteRequestMessage,
   isContentSettingsRequestMessage,
   isDiagnosticEventMessage,
   isErrorNotificationMessage,
@@ -26,6 +29,17 @@ import {
 } from './messages'
 
 describe('message protocol guards', () => {
+  it('strictly guards credential provider, scope, and key fields', () => {
+    expect(isCredentialSaveRequestMessage({ type: 'save_api_key', payload: { providerId: 'gemini', apiKey: 'key', scope: 'speech' } })).toBe(true)
+    expect(isCredentialSaveRequestMessage({ type: 'save_api_key', payload: { providerId: 'gemini', apiKey: 5 } })).toBe(false)
+    expect(isCredentialSaveRequestMessage({ type: 'save_api_key', payload: { providerId: 'unknown', apiKey: 'key' } })).toBe(false)
+    expect(isCredentialSaveRequestMessage({ type: 'save_api_key', payload: { providerId: 'openai', apiKey: 'key', scope: 'speech' } })).toBe(false)
+    expect(isCredentialDeleteRequestMessage({ type: 'delete_api_key', payload: { providerId: 'gemini', scope: 'speech' } })).toBe(true)
+    expect(isCredentialDeleteRequestMessage({ type: 'delete_api_key', payload: { providerId: 'gemini', scope: 1 } })).toBe(false)
+    expect(isCredentialPreviewRequestMessage({ type: 'get_api_key_preview', payload: { providerId: 'gemini' } })).toBe(true)
+    expect(isCredentialPreviewRequestMessage({ type: 'get_api_key_preview', payload: { providerId: 'gemini', scope: 'other' } })).toBe(false)
+  })
+
   it('accepts a base message with a known type and object payload', () => {
     expect(isBaseMessage({ type: 'translate_request', payload: { messageId: 'm1', text: 'Hello' } })).toBe(true)
   })

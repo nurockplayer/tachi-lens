@@ -204,21 +204,28 @@ export const extractChannelFromUrl = (url: string): string | undefined => {
 }
 
 type ValidationStatus = 'valid' | 'invalid' | 'checking' | null
+type CredentialPreviewKnowledge = 'pending' | 'known' | 'unavailable'
 
 const loadSettings = async (): Promise<UserSettings> => {
   return getUserSettings()
 }
 
-const loadApiKeyPreview = async (providerId: string): Promise<string> => {
+const readApiKeyPreview = async (providerId: string, scope?: 'speech'): Promise<string | undefined> => {
   try {
-    const response = (await chrome.runtime.sendMessage({
+    const response = await chrome.runtime.sendMessage({
       type: 'get_api_key_preview',
-      payload: { providerId },
-    })) as { type: string; payload: { preview?: string } }
+      payload: scope ? { providerId, scope } : { providerId },
+    }) as unknown
+    if (typeof response !== 'object' || response === null || Array.isArray(response)) return undefined
+    const candidate = response as { type?: unknown; payload?: unknown }
+    if (candidate.type !== 'api_key_preview' || typeof candidate.payload !== 'object' || candidate.payload === null || Array.isArray(candidate.payload)) return undefined
+    const payload = candidate.payload as { preview?: unknown; success?: unknown }
+    if (typeof payload.preview !== 'string' || payload.success === false ||
+      (payload.success !== undefined && typeof payload.success !== 'boolean')) return undefined
 
-    return response.payload?.preview ?? ''
+    return payload.preview
   } catch {
-    return ''
+    return undefined
   }
 }
 
@@ -293,8 +300,17 @@ export function App() {
   const [modelPolicy, setModelPolicy] = useState<ModelPolicySnapshotPayload>({ manifest: BUNDLED_MODEL_POLICY, source: 'bundled', resolutions: [] })
   const [settings, setSettings] = useState<UserSettings | null>(null)
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({})
+  const [apiKeyConfigured, setApiKeyConfigured] = useState<Record<string, boolean>>({})
+  const [credentialPreviewKnowledge, setCredentialPreviewKnowledge] = useState<Record<string, CredentialPreviewKnowledge>>({})
+  const [apiKeyPreviewActive, setApiKeyPreviewActive] = useState<Record<string, boolean>>({})
+  const [speechApiKeyInputs, setSpeechApiKeyInputs] = useState<Record<string, string>>({})
+  const [speechCredentialConfigured, setSpeechCredentialConfigured] = useState<Record<string, boolean>>({})
+  const speechCredentialConfiguredRef = useRef<Record<string, boolean>>({})
+  const [speechApiKeyPreviewActive, setSpeechApiKeyPreviewActive] = useState<Record<string, boolean>>({})
+  const [speechOverrideEnabled, setSpeechOverrideEnabled] = useState<Record<string, boolean>>({})
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
   const [validationStatus, setValidationStatus] = useState<Record<string, ValidationStatus>>({})
+  const [speechCredentialMutationFailed, setSpeechCredentialMutationFailed] = useState<Record<string, boolean>>({})
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [blacklistInput, setBlacklistInput] = useState('')
   const [channelName, setChannelName] = useState<string | undefined>(undefined)
@@ -314,6 +330,13 @@ export function App() {
   const [liveControlError, setLiveControlError] = useState(false)
   const errorListenerRef = useRef<((message: unknown) => void) | null>(null)
   const liveUpdateQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const credentialRequestVersionRef = useRef<Record<string, number>>({})
+  const credentialAcknowledgedVersionRef = useRef<Record<string, number>>({})
+  const credentialEditingRef = useRef<Record<string, boolean>>({})
+  const credentialPreviewRef = useRef<Record<string, string>>({})
+  const credentialDirtyRef = useRef<Record<string, boolean>>({})
+  const credentialDraftGenerationRef = useRef<Record<string, number>>({})
+  const credentialCommitPromiseRef = useRef<Record<string, { generation: number; promise: Promise<boolean> }>>({})
 
   const providers = listProviderMetadata()
 
@@ -398,9 +421,48 @@ export function App() {
 
     // Load API key previews for all providers
     for (const p of providers) {
-      loadApiKeyPreview(p.id).then((preview) => {
-        if (cancelled) return
-        setApiKeyInputs((prev) => ({ ...prev, [p.id]: preview }))
+      const credentialKey = `chat:${p.id}`
+      const previewVersion = credentialRequestVersionRef.current[credentialKey] ?? 0
+      const previewDraftGeneration = credentialDraftGenerationRef.current[credentialKey] ?? 0
+      readApiKeyPreview(p.id).then((preview) => {
+        if (cancelled || (credentialRequestVersionRef.current[credentialKey] ?? 0) !== previewVersion ||
+          (credentialDraftGenerationRef.current[credentialKey] ?? 0) !== previewDraftGeneration) return
+        if (preview === undefined) {
+          setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'unavailable' }))
+          return
+        }
+        setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'known' }))
+        credentialPreviewRef.current[credentialKey] = preview
+        if ((credentialRequestVersionRef.current[credentialKey] ?? 0) === 0 && !credentialEditingRef.current[credentialKey]) {
+          credentialAcknowledgedVersionRef.current[credentialKey] = 0
+          setApiKeyInputs((prev) => ({ ...prev, [p.id]: preview }))
+          setApiKeyPreviewActive((prev) => ({ ...prev, [p.id]: Boolean(preview) }))
+        }
+        setApiKeyConfigured((prev) => ({ ...prev, [p.id]: Boolean(preview) }))
+      })
+    }
+
+    for (const providerId of SPEECH_PROVIDER_IDS) {
+      const credentialKey = `speech:${providerId}`
+      const previewVersion = credentialRequestVersionRef.current[credentialKey] ?? 0
+      const previewDraftGeneration = credentialDraftGenerationRef.current[credentialKey] ?? 0
+      readApiKeyPreview(providerId, 'speech').then((preview) => {
+        if (cancelled || (credentialRequestVersionRef.current[credentialKey] ?? 0) !== previewVersion ||
+          (credentialDraftGenerationRef.current[credentialKey] ?? 0) !== previewDraftGeneration) return
+        if (preview === undefined) {
+          setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'unavailable' }))
+          return
+        }
+        setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'known' }))
+        credentialPreviewRef.current[credentialKey] = preview
+        if ((credentialRequestVersionRef.current[credentialKey] ?? 0) === 0 && !credentialEditingRef.current[credentialKey]) {
+          credentialAcknowledgedVersionRef.current[credentialKey] = 0
+          setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+          setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        }
+        setSpeechCredentialConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        speechCredentialConfiguredRef.current[providerId] = Boolean(preview)
+        setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
       })
     }
 
@@ -782,59 +844,294 @@ export function App() {
     })
   }, [settings, blacklistInput, useChannelSettings, channelName, enqueueLiveUpdate, modelPolicy])
 
-  const handleValidateKey = useCallback(
-    async (providerId: string) => {
-      setValidationStatus((prev) => ({ ...prev, [providerId]: 'checking' }))
+  const handleApiKeyChange = useCallback((providerId: string, value: string): void => {
+    const credentialKey = `chat:${providerId}`
+    if (apiKeyPreviewActive[providerId] && !credentialEditingRef.current[credentialKey]) return
+    credentialDraftGenerationRef.current[credentialKey] = (credentialDraftGenerationRef.current[credentialKey] ?? 0) + 1
+    credentialDirtyRef.current[credentialKey] = true
+    setApiKeyInputs((previous) => ({ ...previous, [providerId]: value }))
+    setValidationStatus((previous) => ({ ...previous, [providerId]: null }))
+  }, [apiKeyPreviewActive])
 
-      // Ensure the key is saved to storage first
-      const inputValue = apiKeyInputs[providerId] ?? ''
-      if (inputValue.trim() && !inputValue.includes('***')) {
-        await handleApiKeyChange(providerId, inputValue)
-      }
+  const commitApiKeyDraft = useCallback((providerId: string): Promise<boolean> => {
+    const credentialKey = `chat:${providerId}`
+    if (!credentialDirtyRef.current[credentialKey]) return Promise.resolve(true)
+    const generation = credentialDraftGenerationRef.current[credentialKey] ?? 0
+    const existing = credentialCommitPromiseRef.current[credentialKey]
+    if (existing?.generation === generation) return existing.promise
 
+    const draft = apiKeyInputs[providerId] ?? ''
+    const normalized = draft.trim()
+    const version = (credentialRequestVersionRef.current[credentialKey] ?? 0) + 1
+    credentialRequestVersionRef.current[credentialKey] = version
+    const promise = (async (): Promise<boolean> => {
+      let response: { payload?: { success?: boolean; preview?: string } } | undefined
       try {
-        const response = (await chrome.runtime.sendMessage({
-          type: 'validate_key',
-          payload: { providerId },
-        })) as { type: string; payload: { valid: boolean } }
-
-        setValidationStatus((prev) => ({
-          ...prev,
-          [providerId]: response.payload.valid ? 'valid' : 'invalid',
-        }))
+        response = normalized
+          ? await chrome.runtime.sendMessage({ type: 'save_api_key', payload: { providerId, apiKey: normalized } }) as typeof response
+          : await chrome.runtime.sendMessage({ type: 'delete_api_key', payload: { providerId } }) as typeof response
       } catch {
-        setValidationStatus((prev) => ({ ...prev, [providerId]: 'invalid' }))
-      }
-    },
-    [],
-  )
-
-  const handleApiKeyChange = useCallback(
-    async (providerId: string, value: string) => {
-      setApiKeyInputs((prev) => ({ ...prev, [providerId]: value }))
-      setValidationStatus((prev) => ({ ...prev, [providerId]: null }))
-
-      const trimmed = value.trim()
-
-      // Skip auto-save for masked preview values (contain "***")
-      if (trimmed.includes('***')) return
-
-      // Save or delete via SW message — Popup never reads/writes full keys directly
-      if (!trimmed) {
-        await chrome.runtime.sendMessage({
-          type: 'delete_api_key',
-          payload: { providerId },
-        })
-        return
+        response = undefined
       }
 
-      await chrome.runtime.sendMessage({
-        type: 'save_api_key',
-        payload: { providerId, apiKey: trimmed },
-      })
-    },
-    [],
-  )
+      if (credentialRequestVersionRef.current[credentialKey] !== version) return false
+      if (response?.payload?.success) {
+        const preview = normalized ? response.payload.preview ?? '' : ''
+        setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'known' }))
+        credentialPreviewRef.current[credentialKey] = preview
+        credentialAcknowledgedVersionRef.current[credentialKey] = version
+        setApiKeyConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        if (generation === credentialDraftGenerationRef.current[credentialKey]) {
+          credentialDirtyRef.current[credentialKey] = false
+          if (!credentialEditingRef.current[credentialKey]) {
+            setApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+            setApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+          }
+        }
+        return true
+      }
+
+      setValidationStatus((previous) => ({ ...previous, [providerId]: 'invalid' }))
+      const preview = await readApiKeyPreview(providerId)
+      if (credentialRequestVersionRef.current[credentialKey] !== version) return false
+      setCredentialPreviewKnowledge((previous) => ({
+        ...previous,
+        [credentialKey]: preview === undefined ? 'unavailable' : 'known',
+      }))
+      if (preview !== undefined) {
+        credentialPreviewRef.current[credentialKey] = preview
+        credentialAcknowledgedVersionRef.current[credentialKey] = version
+        setApiKeyConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        if (generation === credentialDraftGenerationRef.current[credentialKey] &&
+          !credentialDirtyRef.current[credentialKey] && !credentialEditingRef.current[credentialKey]) {
+          setApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+          setApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        }
+      }
+      return false
+    })()
+    credentialCommitPromiseRef.current[credentialKey] = { generation, promise }
+    void promise.finally(() => {
+      if (credentialCommitPromiseRef.current[credentialKey]?.promise === promise) {
+        delete credentialCommitPromiseRef.current[credentialKey]
+      }
+    }).catch(() => undefined)
+    return promise
+  }, [apiKeyInputs])
+
+  const handleValidateKey = useCallback(async (providerId: string) => {
+    setValidationStatus((previous) => ({ ...previous, [providerId]: 'checking' }))
+    if (!await commitApiKeyDraft(providerId)) return
+
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: 'validate_key',
+        payload: { providerId },
+      })) as { type: string; payload: { valid: boolean } }
+
+      setValidationStatus((previous) => ({
+        ...previous,
+        [providerId]: response.payload.valid ? 'valid' : 'invalid',
+      }))
+    } catch {
+      setValidationStatus((previous) => ({ ...previous, [providerId]: 'invalid' }))
+    }
+  }, [commitApiKeyDraft])
+
+  const handleApiKeyPreviewFocus = useCallback((providerId: string): void => {
+    const credentialKey = `chat:${providerId}`
+    credentialEditingRef.current[credentialKey] = true
+    if (!apiKeyPreviewActive[providerId]) return
+    setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }))
+    setApiKeyPreviewActive((prev) => ({ ...prev, [providerId]: false }))
+  }, [apiKeyPreviewActive])
+
+  const handleApiKeyPreviewBlur = useCallback((providerId: string): void => {
+    const credentialKey = `chat:${providerId}`
+    credentialEditingRef.current[credentialKey] = false
+    if (credentialDirtyRef.current[credentialKey]) {
+      void commitApiKeyDraft(providerId)
+      return
+    }
+    const version = credentialRequestVersionRef.current[credentialKey] ?? 0
+    const preview = credentialPreviewRef.current[credentialKey]
+    if (credentialAcknowledgedVersionRef.current[credentialKey] !== version || preview === undefined) return
+    setApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+    setApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+  }, [commitApiKeyDraft])
+
+  const handleSpeechApiKeyChange = useCallback((providerId: SpeechProviderId, value: string): void => {
+    const credentialKey = `speech:${providerId}`
+    if (speechApiKeyPreviewActive[providerId] && !credentialEditingRef.current[credentialKey]) return
+    credentialDraftGenerationRef.current[credentialKey] = (credentialDraftGenerationRef.current[credentialKey] ?? 0) + 1
+    credentialDirtyRef.current[credentialKey] = true
+    setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: value }))
+    setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: false }))
+  }, [speechApiKeyPreviewActive])
+
+  const commitSpeechApiKeyDraft = useCallback((providerId: SpeechProviderId): Promise<boolean> => {
+    const credentialKey = `speech:${providerId}`
+    if (!credentialDirtyRef.current[credentialKey]) return Promise.resolve(true)
+    const generation = credentialDraftGenerationRef.current[credentialKey] ?? 0
+    const existing = credentialCommitPromiseRef.current[credentialKey]
+    if (existing?.generation === generation) return existing.promise
+
+    const draft = speechApiKeyInputs[providerId] ?? ''
+    const normalized = draft.trim()
+    const version = (credentialRequestVersionRef.current[credentialKey] ?? 0) + 1
+    credentialRequestVersionRef.current[credentialKey] = version
+    const promise = (async (): Promise<boolean> => {
+      let response: { payload?: { success?: boolean; preview?: string } } | undefined
+      try {
+        response = normalized
+          ? await chrome.runtime.sendMessage({
+            type: 'save_api_key', payload: { providerId, apiKey: normalized, scope: 'speech' },
+          }) as typeof response
+          : await chrome.runtime.sendMessage({
+            type: 'delete_api_key', payload: { providerId, scope: 'speech' },
+          }) as typeof response
+      } catch {
+        response = undefined
+      }
+
+      if (credentialRequestVersionRef.current[credentialKey] !== version) return false
+      if (response?.payload?.success) {
+        const preview = normalized ? response.payload.preview ?? '' : ''
+        setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'known' }))
+        credentialPreviewRef.current[credentialKey] = preview
+        credentialAcknowledgedVersionRef.current[credentialKey] = version
+        setSpeechCredentialConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        speechCredentialConfiguredRef.current[providerId] = Boolean(preview)
+        if (generation === credentialDraftGenerationRef.current[credentialKey]) {
+          credentialDirtyRef.current[credentialKey] = false
+          if (!credentialEditingRef.current[credentialKey]) {
+            setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+            setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+          }
+          setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        }
+        setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: false }))
+        return true
+      }
+
+      setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: true }))
+      const preview = await readApiKeyPreview(providerId, 'speech')
+      if (credentialRequestVersionRef.current[credentialKey] !== version) return false
+      setCredentialPreviewKnowledge((previous) => ({
+        ...previous,
+        [credentialKey]: preview === undefined ? 'unavailable' : 'known',
+      }))
+      if (preview !== undefined) {
+        credentialPreviewRef.current[credentialKey] = preview
+        credentialAcknowledgedVersionRef.current[credentialKey] = version
+        setSpeechCredentialConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        speechCredentialConfiguredRef.current[providerId] = Boolean(preview)
+        const currentDraft = generation === credentialDraftGenerationRef.current[credentialKey]
+        const presentationIsCurrent = currentDraft && !credentialEditingRef.current[credentialKey]
+        if (presentationIsCurrent && normalized === '' && preview === '') {
+          credentialDirtyRef.current[credentialKey] = false
+          setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: false }))
+          setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: '' }))
+          setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: false }))
+          setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: false }))
+          return true
+        }
+        if (presentationIsCurrent && !credentialDirtyRef.current[credentialKey]) {
+          setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+          setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+        }
+      }
+      return false
+    })()
+    credentialCommitPromiseRef.current[credentialKey] = { generation, promise }
+    void promise.finally(() => {
+      if (credentialCommitPromiseRef.current[credentialKey]?.promise === promise) {
+        delete credentialCommitPromiseRef.current[credentialKey]
+      }
+    }).catch(() => undefined)
+    return promise
+  }, [speechApiKeyInputs])
+
+  const handleSpeechApiKeyPreviewFocus = useCallback((providerId: SpeechProviderId): void => {
+    const credentialKey = `speech:${providerId}`
+    credentialEditingRef.current[credentialKey] = true
+    if (!speechApiKeyPreviewActive[providerId]) return
+    setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: '' }))
+    setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: false }))
+  }, [speechApiKeyPreviewActive])
+
+  const handleSpeechApiKeyPreviewBlur = useCallback((providerId: SpeechProviderId): void => {
+    const credentialKey = `speech:${providerId}`
+    credentialEditingRef.current[credentialKey] = false
+    if (credentialDirtyRef.current[credentialKey]) {
+      void commitSpeechApiKeyDraft(providerId)
+      return
+    }
+    const version = credentialRequestVersionRef.current[credentialKey] ?? 0
+    const preview = credentialPreviewRef.current[credentialKey]
+    if (credentialAcknowledgedVersionRef.current[credentialKey] !== version || preview === undefined) return
+    setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+    setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+  }, [commitSpeechApiKeyDraft])
+
+  const handleSpeechOverrideToggle = useCallback(async (providerId: SpeechProviderId, enabled: boolean): Promise<void> => {
+    if (enabled) {
+      setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: true }))
+      if (!speechCredentialConfigured[providerId]) setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: '' }))
+      return
+    }
+    const credentialKey = `speech:${providerId}`
+    credentialDraftGenerationRef.current[credentialKey] = (credentialDraftGenerationRef.current[credentialKey] ?? 0) + 1
+    const draftGeneration = credentialDraftGenerationRef.current[credentialKey] ?? 0
+    credentialDirtyRef.current[credentialKey] = false
+    const version = (credentialRequestVersionRef.current[credentialKey] ?? 0) + 1
+    credentialRequestVersionRef.current[credentialKey] = version
+    let response: { payload?: { success?: boolean } } | undefined
+    try {
+      response = await chrome.runtime.sendMessage({
+        type: 'delete_api_key', payload: { providerId, scope: 'speech' },
+      }) as typeof response
+    } catch {
+      response = undefined
+    }
+
+    if (credentialRequestVersionRef.current[credentialKey] === version && response?.payload?.success) {
+      setCredentialPreviewKnowledge((previous) => ({ ...previous, [credentialKey]: 'known' }))
+      credentialPreviewRef.current[credentialKey] = ''
+      credentialAcknowledgedVersionRef.current[credentialKey] = version
+      setSpeechCredentialConfigured((previous) => ({ ...previous, [providerId]: false }))
+      speechCredentialConfiguredRef.current[providerId] = false
+      if (draftGeneration === credentialDraftGenerationRef.current[credentialKey] &&
+        !credentialDirtyRef.current[credentialKey] && !credentialEditingRef.current[credentialKey]) {
+        setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: '' }))
+        setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: false }))
+        setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: false }))
+      }
+      setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: false }))
+      return
+    }
+
+    if (credentialRequestVersionRef.current[credentialKey] !== version) return
+    setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: true }))
+    const preview = await readApiKeyPreview(providerId, 'speech')
+    if (credentialRequestVersionRef.current[credentialKey] !== version) return
+    setCredentialPreviewKnowledge((previous) => ({
+      ...previous,
+      [credentialKey]: preview === undefined ? 'unavailable' : 'known',
+    }))
+    if (preview === undefined) return
+    credentialPreviewRef.current[credentialKey] = preview
+    credentialAcknowledgedVersionRef.current[credentialKey] = version
+    setSpeechCredentialConfigured((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+    speechCredentialConfiguredRef.current[providerId] = Boolean(preview)
+    if (draftGeneration === credentialDraftGenerationRef.current[credentialKey] &&
+      !credentialDirtyRef.current[credentialKey] && !credentialEditingRef.current[credentialKey]) {
+      setSpeechCredentialMutationFailed((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+      setSpeechApiKeyInputs((previous) => ({ ...previous, [providerId]: preview }))
+      setSpeechApiKeyPreviewActive((previous) => ({ ...previous, [providerId]: Boolean(preview) }))
+      if (!preview) setSpeechOverrideEnabled((previous) => ({ ...previous, [providerId]: false }))
+    }
+  }, [speechCredentialConfigured])
 
   const toggleKeyVisibility = useCallback((providerId: string) => {
     setVisibleKeys((prev) => ({ ...prev, [providerId]: !prev[providerId] }))
@@ -843,6 +1140,13 @@ export function App() {
   if (!settings) {
     return <div className="app__loading">{t('loading')}</div>
   }
+
+  const selectedCredentialKnowledge = credentialPreviewKnowledge[`chat:${settings.selectedProvider}`] ?? 'pending'
+  const speechProviderId = settings.speechConfig.speechProvider
+  const speechCredentialKnowledge = credentialPreviewKnowledge[`speech:${speechProviderId}`] ?? 'pending'
+  const speechSharedCredentialKnowledge = credentialPreviewKnowledge[`chat:${speechProviderId}`] ?? 'pending'
+  const knowledgeMessageKey = (knowledge: CredentialPreviewKnowledge): Parameters<typeof t>[0] =>
+    knowledge === 'pending' ? 'credentialPreviewLoading' : 'credentialPreviewUnavailable'
 
   const selectedPolicy = modelPolicy.manifest.policies.find(entry => entry.provider === settings.selectedProvider && entry.workload === 'chat')
   const currentModels = [...getModelsForProvider(settings.selectedProvider)]
@@ -952,7 +1256,9 @@ export function App() {
           <div className="speech-status">
             <span className="speech-status__label">{t('speechStatus')}：</span>
             <span>
-              {speechState.errorKey ? t(speechState.errorKey as Parameters<typeof t>[0]) : t(SPEECH_STATE_LABELS[speechState.state])}
+              {speechState.errorKey
+                ? `${settings.speechConfig.speechProvider}: ${t(speechState.errorKey as Parameters<typeof t>[0])}`
+                : t(SPEECH_STATE_LABELS[speechState.state])}
             </span>
           </div>
         )}
@@ -1066,12 +1372,17 @@ export function App() {
               label={t('apiKey')}
               value={apiKeyInputs[settings.selectedProvider] ?? ''}
               onChange={(value) => handleApiKeyChange(settings.selectedProvider, value)}
+              onFocus={() => handleApiKeyPreviewFocus(settings.selectedProvider)}
+              onBlur={() => handleApiKeyPreviewBlur(settings.selectedProvider)}
               placeholder={t('apiKeyPlaceholder')}
               visible={Boolean(visibleKeys[settings.selectedProvider])}
               onToggleVisible={() => toggleKeyVisibility(settings.selectedProvider)}
               showLabel={t('show')}
               hideLabel={t('hide')}
             />
+            {selectedCredentialKnowledge !== 'known' && (
+              <p className="section-hint" role="status">{t(knowledgeMessageKey(selectedCredentialKnowledge))}</p>
+            )}
             <div className="inline-actions">
               <Button
                 variant="secondary"
@@ -1284,6 +1595,44 @@ export function App() {
               </option>
             ))}
           </SelectField>
+
+          <div className="field">
+            <p className="section-hint">
+              {speechCredentialKnowledge !== 'known'
+                ? t(knowledgeMessageKey(speechCredentialKnowledge))
+                : speechCredentialConfigured[speechProviderId]
+                ? t('speechCredentialOverrideActive')
+                : speechSharedCredentialKnowledge !== 'known'
+                  ? t(knowledgeMessageKey(speechSharedCredentialKnowledge))
+                  : apiKeyConfigured[speechProviderId]
+                  ? t('speechCredentialSharedAvailable')
+                : t('speechCredentialMissing')}
+            </p>
+            {speechCredentialMutationFailed[speechProviderId] && (
+              <p className="section-hint" role="alert">{t('invalid')}</p>
+            )}
+            <ToggleRow
+              label={t('speechCredentialOverrideToggle')}
+              checked={Boolean(speechOverrideEnabled[speechProviderId])}
+              disabled={speechCredentialKnowledge !== 'known'}
+              onChange={(enabled) => void handleSpeechOverrideToggle(speechProviderId, enabled)}
+            />
+            {speechOverrideEnabled[speechProviderId] && (
+              <SecretInput
+                id="speech-api-key-override"
+                label={t('speechCredentialOverrideField')}
+                value={speechApiKeyInputs[speechProviderId] ?? ''}
+                onChange={(value) => void handleSpeechApiKeyChange(speechProviderId, value)}
+                onFocus={() => handleSpeechApiKeyPreviewFocus(speechProviderId)}
+                onBlur={() => handleSpeechApiKeyPreviewBlur(speechProviderId)}
+                placeholder={t('apiKeyPlaceholder')}
+                visible={Boolean(visibleKeys[`speech:${speechProviderId}`])}
+                onToggleVisible={() => toggleKeyVisibility(`speech:${speechProviderId}`)}
+                showLabel={t('show')}
+                hideLabel={t('hide')}
+              />
+            )}
+          </div>
 
           <SelectField
             id="speech-model-select"

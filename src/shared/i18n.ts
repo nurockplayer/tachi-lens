@@ -19,6 +19,8 @@ export type MessageKey =
   | 'modelPolicyStatus'
   | 'apiKey'
   | 'apiKeyPlaceholder'
+  | 'credentialPreviewLoading'
+  | 'credentialPreviewUnavailable'
   | 'targetLanguage'
   | 'displayMode'
   | 'displayBelow'
@@ -124,6 +126,11 @@ export type MessageKey =
   | 'speechCaptionsSection'
   | 'speechEnabled'
   | 'speechProvider'
+  | 'speechCredentialSharedAvailable'
+  | 'speechCredentialMissing'
+  | 'speechCredentialOverrideToggle'
+  | 'speechCredentialOverrideField'
+  | 'speechCredentialOverrideActive'
   | 'speechModel'
   | 'speechTargetLanguage'
   | 'speechCaptionMaxLines'
@@ -171,6 +178,8 @@ export const MESSAGE_KEYS: readonly string[] = [
   'modelPolicyStatus',
   'apiKey',
   'apiKeyPlaceholder',
+  'credentialPreviewLoading',
+  'credentialPreviewUnavailable',
   'targetLanguage',
   'displayMode',
   'displayBelow',
@@ -276,6 +285,11 @@ export const MESSAGE_KEYS: readonly string[] = [
   'speechCaptionsSection',
   'speechEnabled',
   'speechProvider',
+  'speechCredentialSharedAvailable',
+  'speechCredentialMissing',
+  'speechCredentialOverrideToggle',
+  'speechCredentialOverrideField',
+  'speechCredentialOverrideActive',
   'speechModel',
   'speechTargetLanguage',
   'speechCaptionMaxLines',
@@ -319,6 +333,8 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   model: '模型',
   apiKey: 'API Key',
   apiKeyPlaceholder: '輸入 API Key',
+  credentialPreviewLoading: '正在檢查 API Key 狀態…',
+  credentialPreviewUnavailable: 'API Key 狀態暫時無法確認。重新開啟設定可重試。',
   targetLanguage: '目標語言',
   displayMode: '顯示模式',
   displayBelow: '原文下方',
@@ -424,6 +440,11 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   speechCaptionsSection: '語音與字幕',
   speechEnabled: '啟用語音字幕',
   speechProvider: '語音提供者',
+  speechCredentialSharedAvailable: '此提供者已設定共用 API Key',
+  speechCredentialMissing: '尚未設定此提供者的 API Key。請至「提供者與 API Key」設定。',
+  speechCredentialOverrideToggle: '使用語音專用 API Key',
+  speechCredentialOverrideField: '語音專用 API Key',
+  speechCredentialOverrideActive: '語音使用此專用 API Key。關閉此設定即可改用共用 API Key。',
   speechModel: '語音模型',
   speechTargetLanguage: '語音目標語言',
   speechCaptionMaxLines: '字幕最大行數',
