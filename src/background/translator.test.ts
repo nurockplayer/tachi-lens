@@ -95,6 +95,26 @@ describe('Translator', () => {
       expect(provider.translateBatch).not.toHaveBeenCalled()
     })
 
+    it('dispatches channel-effective model identities in separate batches', async () => {
+      const provider = createMockProvider('gemini')
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests, _key, model) =>
+        requests.map(request => ({ id: request.id, translatedText: model })))
+      deps.getProvider = vi.fn(() => provider)
+      deps.getSettings = vi.fn(async channelName => ({
+        selectedProvider: 'gemini' as ProviderId,
+        selectedModel: channelName === 'pinned' ? 'gemini-2.5-pro' : 'gemini-4.0-flash',
+        targetLanguage: 'ja',
+      }))
+      const pinned = translator.translate({ messageId: 'pinned', text: 'same' }, { channelName: 'pinned' })
+      const automatic = translator.translate({ messageId: 'automatic', text: 'same' }, { channelName: 'automatic' })
+      await vi.advanceTimersByTimeAsync(300)
+      await expect(pinned).resolves.toMatchObject({ translatedText: 'gemini-2.5-pro' })
+      await expect(automatic).resolves.toMatchObject({ translatedText: 'gemini-4.0-flash' })
+      expect(vi.mocked(provider.translateBatch).mock.calls.map(call => call[2])).toEqual(['gemini-2.5-pro', 'gemini-4.0-flash'])
+      expect(deps.getSettings).toHaveBeenCalledWith('pinned')
+      expect(deps.getSettings).toHaveBeenCalledWith('automatic')
+    })
+
     it('uses channel-effective enablement instead of the global setting at flush', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([
@@ -237,6 +257,7 @@ describe('Translator', () => {
       enabled.set('disabled-channel', false)
       await translator.cancelQueuedTranslations('disabled-channel')
       releaseApiKey('test-api-key')
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(disabled).resolves.toEqual({ messageId: 'disabled-leader' })
       await expect(enabledFollower).resolves.toEqual({
@@ -277,6 +298,7 @@ describe('Translator', () => {
       enabled.set('disabled-channel', false)
       await translator.cancelQueuedTranslations('disabled-channel')
       releaseApiKey('test-api-key')
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(disabled).resolves.toEqual({ messageId: 'shared-message' })
       await expect(enabledFollower).resolves.toEqual({
@@ -779,7 +801,7 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
 
-    it('preserves DeepSeek fallback success when Gemini is quota-denied', async () => {
+    it('uses the resolved DeepSeek fallback identity when Gemini is quota-denied', async () => {
       const now = Date.UTC(2026, 6, 14, 12)
       const session: Record<string, unknown> = {}
       const local: Record<string, unknown> = {}
@@ -811,6 +833,7 @@ describe('Translator', () => {
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'gemini' as ProviderId,
         selectedModel: 'gemini-2.5-pro',
+        deepseekFallbackModel: 'deepseek-candidate-flash',
         targetLanguage: 'zh-TW',
         geminiQuotaProfiles: {
           'gemini-2.5-pro': rpmProfile,
@@ -828,6 +851,9 @@ describe('Translator', () => {
       expect(result.translatedText).toBe('d-hello')
       expect(gemini.translateBatch).not.toHaveBeenCalled()
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(deepseek.translateBatch).mock.calls[0]?.[2]).toBe('deepseek-candidate-flash')
+      expect(deps.cache.get(cacheKey('hello', 'deepseek', 'deepseek-candidate-flash'))).toMatchObject({ translatedText: 'd-hello' })
+      expect(deps.cache.get(cacheKey('hello', 'deepseek', 'deepseek-flash'))).toBeUndefined()
     })
 
     it('queues backlog work behind a live Gemini batch waiting for quota under single-flight', async () => {

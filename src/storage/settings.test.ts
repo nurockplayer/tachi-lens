@@ -920,3 +920,19 @@ describe('settings storage', () => {
     })
   })
 })
+
+
+describe('model policy selection migration (#200)', () => {
+  it('uses Auto only for missing selections and preserves concrete global, channel, and speech pins', async () => {
+    const storage = createChromeStorage()
+    expect((await getUserSettings(storage)).selectedModel).toBe('auto')
+    expect((await getUserSettings(storage)).speechConfig.speechModel).toBe('auto')
+    storage.local.data.userSettings = { selectedProvider: 'gemini', selectedModel: 'gemini-2.5-flash', speechConfig: { speechModel: 'gemini-2.5-pro' } }
+    const pinned = await getUserSettings(storage)
+    expect(pinned.selectedModel).toBe('gemini-2.5-flash')
+    expect(pinned.speechConfig.speechModel).toBe('gemini-2.5-pro')
+    expect(mergeSettings(pinned, { selectedModel: 'gemini-3.8-flash' }).selectedModel).toBe('gemini-3.8-flash')
+    expect(mergeSettings(pinned, { selectedModel: 'auto' }).selectedModel).toBe('auto')
+    expect((await saveUserSettings({ targetLanguage: 'en' }, storage)).selectedModel).toBe('gemini-2.5-flash')
+  })
+})

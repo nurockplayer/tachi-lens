@@ -1,3 +1,5 @@
+import { AUTO_MODEL, BUNDLED_MODEL_POLICY, resolvePolicyModel } from '@/providers/model-policy'
+import { isModelPolicySnapshotMessage, type ModelPolicySnapshotPayload } from '@/shared/model-policy-messages'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listProviderMetadata } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
@@ -288,6 +290,7 @@ const mergeDiagnostics = (current: DiagnosticEvent[], incoming: DiagnosticEvent[
 }
 
 export function App() {
+  const [modelPolicy, setModelPolicy] = useState<ModelPolicySnapshotPayload>({ manifest: BUNDLED_MODEL_POLICY, source: 'bundled', resolutions: [] })
   const [settings, setSettings] = useState<UserSettings | null>(null)
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({})
   const [apiKeyConfigured, setApiKeyConfigured] = useState<Record<string, boolean>>({})
@@ -395,6 +398,9 @@ export function App() {
         if (!cancelled) setDiagnosticsLoading(false)
       }
     }
+    void chrome.runtime.sendMessage({ type: 'get_model_policy', payload: {} }).then((response: unknown) => {
+      if (!cancelled && isModelPolicySnapshotMessage(response)) setModelPolicy(response.payload)
+    }).catch(() => undefined)
     void loadDiagnostics()
     void refreshQuotaHealth()
 
@@ -493,19 +499,22 @@ export function App() {
     (key: keyof GeminiQuotaSettings, value: number) => {
       setSettings((previous) => {
         if (!previous) return previous
-        const current = previous.geminiQuotaProfiles[previous.selectedModel] ?? previous.geminiQuota
+        const quotaModel = previous.selectedModel === AUTO_MODEL
+          ? resolvePolicyModel(modelPolicy, 'gemini', 'chat', AUTO_MODEL).model
+          : previous.selectedModel
+        const current = previous.geminiQuotaProfiles[quotaModel] ?? previous.geminiQuota
         const nextProfile = { ...current, [key]: value }
         return {
           ...previous,
           geminiQuota: nextProfile,
           geminiQuotaProfiles: {
             ...previous.geminiQuotaProfiles,
-            [previous.selectedModel]: nextProfile,
+            [quotaModel]: nextProfile,
           },
         }
       })
     },
-    [],
+    [modelPolicy],
   )
 
   const updateSpeechConfig = useCallback(
@@ -689,7 +698,7 @@ export function App() {
       const meta = providers.find((p) => p.id === providerId)
       updateSetting('selectedProvider', providerId as ProviderId)
       if (meta) {
-        updateSetting('selectedModel', meta.defaultModel)
+        updateSetting('selectedModel', providerId === 'gemini' || providerId === 'deepseek' ? AUTO_MODEL : meta.defaultModel)
       }
     },
     [providers, updateSetting],
@@ -719,7 +728,9 @@ export function App() {
         .map((s) => s.trim())
         .filter(Boolean)
 
-      const selectedGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
+      const quotaModel = settings.selectedProvider === 'gemini' && settings.selectedModel === AUTO_MODEL
+        ? resolvePolicyModel(modelPolicy, 'gemini', 'chat', AUTO_MODEL).model : settings.selectedModel
+      const selectedGeminiQuota = settings.geminiQuotaProfiles[quotaModel] ?? settings.geminiQuota
       const updatedSettings = {
         ...settings,
         // Live controls are authoritative in storage. Re-read them after all
@@ -789,7 +800,7 @@ export function App() {
         payload: speechPayload,
       })
     })
-  }, [settings, blacklistInput, useChannelSettings, channelName, enqueueLiveUpdate])
+  }, [settings, blacklistInput, useChannelSettings, channelName, enqueueLiveUpdate, modelPolicy])
 
   const handleApiKeyChange = useCallback(
     async (providerId: string, value: string): Promise<boolean> => {
@@ -993,9 +1004,24 @@ export function App() {
     return <div className="app__loading">{t('loading')}</div>
   }
 
-  const currentModels = getModelsForProvider(settings.selectedProvider)
-  const currentModel = currentModels.find((model) => model.id === settings.selectedModel)
-  const currentGeminiQuota = settings.geminiQuotaProfiles[settings.selectedModel] ?? settings.geminiQuota
+  const selectedPolicy = modelPolicy.manifest.policies.find(entry => entry.provider === settings.selectedProvider && entry.workload === 'chat')
+  const currentModels = [...getModelsForProvider(settings.selectedProvider)]
+  for (const entry of selectedPolicy?.models ?? []) {
+    if (!currentModels.some(model => model.id === entry.id)) currentModels.push({ id: entry.id, displayName: entry.id })
+  }
+  if (settings.selectedModel !== AUTO_MODEL && !currentModels.some(model => model.id === settings.selectedModel)) {
+    currentModels.push({ id: settings.selectedModel, displayName: settings.selectedModel })
+  }
+  const resolvedChatModel = selectedPolicy ? resolvePolicyModel(modelPolicy, selectedPolicy.provider, 'chat', settings.selectedModel).model : settings.selectedModel
+  const speechModels = [...SPEECH_GEMINI_MODELS]
+  for (const entry of modelPolicy.manifest.policies.find(policy => policy.provider === 'gemini' && policy.workload === 'speech')?.models ?? []) {
+    if (!speechModels.some(model => model.id === entry.id)) speechModels.push({ id: entry.id, displayName: entry.id })
+  }
+  if (settings.speechConfig.speechModel !== AUTO_MODEL && !speechModels.some(model => model.id === settings.speechConfig.speechModel)) {
+    speechModels.push({ id: settings.speechConfig.speechModel, displayName: settings.speechConfig.speechModel })
+  }
+  const currentModel = currentModels.find((model) => model.id === resolvedChatModel)
+  const currentGeminiQuota = settings.geminiQuotaProfiles[resolvedChatModel] ?? settings.geminiQuota
 
   return (
     <div className="app">
@@ -1162,6 +1188,7 @@ export function App() {
             value={settings.selectedModel}
             onChange={(value) => updateSetting('selectedModel', value)}
           >
+            {selectedPolicy && <option value={AUTO_MODEL}>{t('modelRecommended')} ({selectedPolicy.recommended})</option>}
             {currentModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.displayName}
@@ -1345,6 +1372,13 @@ export function App() {
 
         {/* Diagnostics */}
         <Accordion id="diagnostics" title={t('diagnosticsSection')}>
+          <Card>
+            <SectionHeader>{t('modelPolicyStatus')}</SectionHeader>
+            <p>{modelPolicy.source} · v{modelPolicy.manifest.schemaVersion} · #{modelPolicy.manifest.revision}</p>
+            {modelPolicy.resolutions.slice(0, 3).map((resolution, index) => (
+              <p key={index}>{resolution.provider} / {resolution.workload}: {resolution.model} ({resolution.selection}, {resolution.source}, #{resolution.revision})</p>
+            ))}
+          </Card>
           {diagnosticsLoading ? (
             <div className="panel-loading" role="status">{t('loading')}</div>
           ) : diagnostics.length === 0 ? (
@@ -1452,7 +1486,8 @@ export function App() {
             value={settings.speechConfig.speechModel}
             onChange={(value) => updateSpeechConfig('speechModel', value)}
           >
-            {SPEECH_GEMINI_MODELS.map((m) => (
+            <option value={AUTO_MODEL}>{t('modelRecommended')} ({modelPolicy.manifest.policies.find(policy => policy.provider === 'gemini' && policy.workload === 'speech')?.recommended})</option>
+            {speechModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.displayName}
               </option>

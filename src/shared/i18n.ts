@@ -15,6 +15,8 @@ export type MessageKey =
   | 'translationProvider'
   | 'providersSection'
   | 'model'
+  | 'modelRecommended'
+  | 'modelPolicyStatus'
   | 'apiKey'
   | 'apiKeyPlaceholder'
   | 'targetLanguage'
@@ -170,6 +172,8 @@ export const MESSAGE_KEYS: readonly string[] = [
   'translationProvider',
   'providersSection',
   'model',
+  'modelRecommended',
+  'modelPolicyStatus',
   'apiKey',
   'apiKeyPlaceholder',
   'targetLanguage',
@@ -320,6 +324,8 @@ const FALLBACK_MESSAGES: Record<MessageKey, string> = {
   enableTranslation: '啟用翻譯',
   translationProvider: '翻譯提供者',
   providersSection: '提供者與 API Key',
+  modelRecommended: '自動 / 推薦',
+  modelPolicyStatus: '模型政策',
   model: '模型',
   apiKey: 'API Key',
   apiKeyPlaceholder: '輸入 API Key',

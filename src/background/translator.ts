@@ -1,3 +1,4 @@
+import type { ModelConfiguration } from '@/providers/model-policy'
 import type { BatchItemResult, ProviderId, TranslationProvider } from '@/providers/types'
 import { buildTranslationPrompt } from '@/providers/prompt'
 import { DEEPSEEK_DEFAULT_MODEL } from '@/providers/deepseek'
@@ -33,9 +34,11 @@ export interface TranslatorDependencies {
    */
   persistentCache?: PersistentTranslationCache
   rateLimiter: RateLimiter
-  getSettings: () => Promise<{
+  getSettings: (channelName?: string) => Promise<{
     selectedProvider: ProviderId
     selectedModel: string
+    modelConfiguration?: ModelConfiguration
+    deepseekFallbackModel?: string
     targetLanguage: string
     translationEnabled?: boolean
     geminiQuota?: GeminiQuotaSettings
@@ -322,7 +325,13 @@ export class Translator {
     this.timer = null
     const selectedPriority = this.selectPriority(priority)
     const queue = selectedPriority === 'live' ? this.liveQueue : this.backlogQueue
-    const items = queue.splice(0, this.options.maxBatchSize)
+    // A channel is a settings and cancellation domain. Keep its contiguous work
+    // together; the next domain drains through the same fair, single-flight queue.
+    const channelName = queue[0]?.channelName
+    const items: PendingItem[] = []
+    while (queue.length > 0 && items.length < this.options.maxBatchSize && queue[0]!.channelName === channelName) {
+      items.push(queue.shift()!)
+    }
 
     if (items.length === 0) return
     this.activeBatchItems.clear()
@@ -337,11 +346,12 @@ export class Translator {
     let ownedItems = items
     try {
 
-    const settings = await this.deps.getSettings()
+    const settings = await this.deps.getSettings(channelName)
     const activeItems = await this.filterEnabledItems(items, settings.translationEnabled)
     if (activeItems.length === 0) return
     ownedItems = activeItems
-    const { selectedModel: model, targetLanguage: targetLang } = settings
+    const { selectedModel: model, targetLanguage: targetLang, modelConfiguration } = settings
+    const fallbackModel = settings.deepseekFallbackModel ?? DEEPSEEK_FALLBACK_MODEL
 
     let uncached: PendingItem[] = []
     // Flush-local deduplication (#56): requests sharing a canonical identity
@@ -515,7 +525,7 @@ export class Translator {
 
     if (schedulerManaged && this.deps.quotaScheduler) {
       const selectedGemini = settings.selectedProvider === 'gemini'
-      const deepseekModel = selectedGemini ? DEEPSEEK_FALLBACK_MODEL : model
+      const deepseekModel = selectedGemini ? fallbackModel : model
       const requestItems = new WeakMap<SchedulerRequest, PendingItem>()
       const scheduledRequests = uncached.map((item) => {
         const request = {
@@ -548,7 +558,9 @@ export class Translator {
           signal,
           isCancelledRequest,
           (activeRequests, activeSignal) => provider
-            ? provider.translateBatch(activeRequests, apiKey!, model, targetLang, activeSignal)
+            ? (modelConfiguration
+              ? provider.translateBatch(activeRequests, apiKey!, model, targetLang, activeSignal, modelConfiguration)
+              : provider.translateBatch(activeRequests, apiKey!, model, targetLang, activeSignal))
             : Promise.resolve(activeRequests.map((request) => ({ id: request.id, error: 'Gemini provider is unavailable' }))),
         ),
         getDeepSeekCachedResults: (requests) => this.getDeepSeekCachedResults(requests, targetLang, deepseekModel),
@@ -598,6 +610,8 @@ export class Translator {
           uncached.filter((item) => !this.cancelledItems.has(item)),
           targetLang,
           retryAfterMs,
+          undefined,
+          fallbackModel,
         )
       } else {
         this.resolveAll(uncached, {
@@ -622,12 +636,9 @@ export class Translator {
     let batchResults: BatchItemResult[]
 
     try {
-      batchResults = await provider.translateBatch(
-        batchRequests,
-        apiKey,
-        model,
-        targetLang,
-      )
+      batchResults = modelConfiguration
+        ? await provider.translateBatch(batchRequests, apiKey, model, targetLang, undefined, modelConfiguration)
+        : await provider.translateBatch(batchRequests, apiKey, model, targetLang)
     } catch (err) {
       const error: ProviderError = {
         type: 'network',
@@ -674,6 +685,7 @@ export class Translator {
               .filter((result) => result.status === 429)
               .map((result) => [result.id, result]),
           ),
+          fallbackModel,
         )
 
         return
@@ -839,6 +851,7 @@ export class Translator {
     targetLang: string,
     geminiRetryAfterMs: number,
     originalResults = new Map<string, BatchItemResult>(),
+    fallbackModel = DEEPSEEK_FALLBACK_MODEL,
   ): Promise<void> {
     if (items.length === 0) return
     const requestItems = new WeakMap<SchedulerRequest, PendingItem>()
@@ -858,7 +871,7 @@ export class Translator {
     const batchResults = await this.runDeepSeekBatch(
       batchRequests,
       targetLang,
-      DEEPSEEK_FALLBACK_MODEL,
+      fallbackModel,
       undefined,
       isCancelledRequest,
     )
@@ -881,7 +894,7 @@ export class Translator {
       available,
       batchResults,
       DEEPSEEK_FALLBACK_PROVIDER,
-      DEEPSEEK_FALLBACK_MODEL,
+      fallbackModel,
       targetLang,
       false,
     )

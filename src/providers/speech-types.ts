@@ -1,3 +1,4 @@
+import type { ModelConfiguration } from './model-policy'
 // Speech provider types — v0.3 speech translation wave (Spec docs/specs/v0.3-speech-translation.md).
 // Reuses ProviderModel (providers/types.ts) and ProviderError / KeyValidationResult
 // (shared/messages.ts). Speech is a separate pipeline from chat translation: it has its
@@ -92,6 +93,7 @@ export interface SpeechProvider {
     model: string,
     targetLang: string,
     signal?: AbortSignal,
+    configuration?: ModelConfiguration,
   ): Promise<SpeechTranslationResult[]>
   validateKey(apiKey: string): Promise<KeyValidationResult>
 }

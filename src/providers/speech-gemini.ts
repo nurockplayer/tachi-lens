@@ -179,7 +179,7 @@ export const createGeminiSpeechProvider = (
   models: SPEECH_GEMINI_MODELS,
   defaultModel: SPEECH_GEMINI_DEFAULT_MODEL,
 
-  async transcribeChunk(chunk, apiKey, model, targetLang, signal) {
+  async transcribeChunk(chunk, apiKey, model, targetLang, signal, configuration) {
     if (!isChunk(chunk)) {
       return [errorResultFor(chunk, { type: 'bad_request', status: 400, message: 'Invalid audio chunk' })]
     }
@@ -195,8 +195,8 @@ export const createGeminiSpeechProvider = (
             ],
           },
         ],
-        ...(getGeminiGenerationConfig(model)
-          ? { generationConfig: getGeminiGenerationConfig(model) }
+        ...(getGeminiGenerationConfig(model, configuration)
+          ? { generationConfig: getGeminiGenerationConfig(model, configuration) }
           : {}),
       }
 
