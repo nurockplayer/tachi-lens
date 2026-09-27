@@ -55,8 +55,8 @@ describe('model policy runtime integration', () => {
     const makeSnapshotManifest = (includeRetired: boolean) => ({
       schemaVersion: 1 as const,
       revision: includeRetired ? 50 : 51,
-      issuedAt: '2026-09-27T00:00:00.000Z',
-      expiresAt: '2026-10-01T00:00:00.000Z',
+      issuedAt: new Date(Date.now() - 60_000).toISOString(),
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
       minimumClientVersion: '0.3.0',
       policies: [
         { provider: 'gemini' as const, workload: 'chat' as const, recommended: 'gemini-test-chat', fallbacks: ['gemini-test-legacy'], models: [
