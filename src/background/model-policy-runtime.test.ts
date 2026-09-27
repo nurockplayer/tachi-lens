@@ -83,4 +83,52 @@ describe('model policy runtime integration', () => {
     expect(payload.resolutions.map(item => item.model)).not.toContain('gemini-user-entered')
     expect(isModelPolicySnapshotMessage({ type: 'model_policy_snapshot', payload })).toBe(true)
   })
+
+  it('records a current recommendation even when bounded history evicts its older identity', async () => {
+    const makeManifest = (replacementCount: number) => {
+      const makeModels = (prefix: string, count: number, replacements: number, configuration: 'default' | 'deepseek-disabled-thinking') => {
+        const recommendation = `${prefix}-recommended`
+        return [
+          { id: recommendation, configuration },
+          ...Array.from({ length: count - 1 - replacements }, (_, i) => ({ id: `${prefix}-old-${i}`, configuration })),
+          ...Array.from({ length: replacements }, (_, i) => ({ id: `${prefix}-new-${i}`, configuration })),
+        ]
+      }
+      const geminiChat = makeModels('gemini-chat', 16, replacementCount === 0 ? 0 : 6, 'default')
+      const geminiSpeech = makeModels('gemini-speech', 16, replacementCount === 0 ? 0 : 6, 'default')
+      const deepseekChat = makeModels('deepseek-chat', 16, replacementCount === 0 ? 0 : 5, 'deepseek-disabled-thinking')
+      const policies = [
+        { provider: 'gemini' as const, workload: 'chat' as const, models: geminiChat },
+        { provider: 'gemini' as const, workload: 'speech' as const, models: geminiSpeech },
+        { provider: 'deepseek' as const, workload: 'chat' as const, models: deepseekChat },
+      ].map(({ provider, workload, models }) => ({
+        provider,
+        workload,
+        recommended: models[0]!.id,
+        fallbacks: [models[1]!.id],
+        models,
+      }))
+      return {
+        schemaVersion: 1 as const,
+        revision: replacementCount === 0 ? 70 : 71,
+        issuedAt: new Date(Date.now() - 60_000).toISOString(),
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        minimumClientVersion: '0.3.0',
+        policies,
+      }
+    }
+    let manifest = makeManifest(0)
+    const runtime = new ModelPolicyRuntime(async () => ({ manifest, source: 'remote' }))
+    await runtime.chatSettings({ ...DEFAULT_SETTINGS, selectedProvider: 'gemini' })
+
+    // Replacing 17 non-recommended entries grows the union from 48 to 65 IDs,
+    // evicting old entries from the 64-ID trust history, including chat's recommendation.
+    manifest = makeManifest(17)
+    await runtime.chatSettings({ ...DEFAULT_SETTINGS, selectedProvider: 'gemini' })
+    const payload = await runtime.snapshot()
+    expect(payload.resolutions.filter(item => item.model === 'gemini-chat-recommended')).toHaveLength(2)
+
+    await runtime.chatSettings({ ...DEFAULT_SETTINGS, selectedProvider: 'gemini', selectedModel: 'gemini-user-entered' })
+    expect((await runtime.snapshot()).resolutions.map(item => item.model)).not.toContain('gemini-user-entered')
+  })
 })

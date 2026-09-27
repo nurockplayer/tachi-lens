@@ -19,8 +19,9 @@ export class ModelPolicyRuntime {
     while (this.trustedModelIds.size > 64) this.trustedModelIds.delete(this.trustedModelIds.values().next().value!)
     // User-controlled invalid pins must never enter privacy-safe diagnostics.
     const key = `${provider}:${workload}:${resolved.model}`
+    const currentKnown = snapshot.manifest.policies.some(policy => policy.provider === provider && policy.workload === workload && policy.models.some(model => model.id === resolved.model))
     const bundledKnown = BUNDLED_MODEL_POLICY.policies.some(policy => policy.provider === provider && policy.workload === workload && policy.models.some(model => model.id === resolved.model))
-    if (isSafePolicyModelId(provider, resolved.model) && (bundledKnown || this.trustedModelIds.has(key))) {
+    if (isSafePolicyModelId(provider, resolved.model) && (currentKnown || bundledKnown || this.trustedModelIds.has(key))) {
       this.resolutions = [{ ...resolved, timestamp: Date.now() }, ...this.resolutions].slice(0, 20)
     }
     return resolved
