@@ -1,3 +1,5 @@
+import { ModelPolicyStore } from './model-policy-store'
+import { ModelPolicyRuntime } from './model-policy-runtime'
 import { getProvider } from '@/providers/registry'
 import type { ProviderId } from '@/providers/types'
 import {
@@ -15,6 +17,7 @@ import {
 } from '@/storage/settings'
 import {
   isBaseMessage,
+  isGetModelPolicyMessage,
   isDiagnosticEventMessage,
   isGetQuotaHealthMessage,
   isSettingsUpdateMessage,
@@ -50,6 +53,9 @@ const initializeTrustedStorageAccess = (): void => {
 
 initializeTrustedStorageAccess()
 
+const modelPolicyStore = new ModelPolicyStore({ storage: { get: key => chrome.storage.local.get(key), set: items => chrome.storage.local.set(items) } })
+const modelPolicyRuntime = new ModelPolicyRuntime(() => modelPolicyStore.get())
+
 const cache = new TranslationCache()
 const clock = createSystemClock()
 const rateLimiter = new RateLimiter({ maxBackoffMs: 60_000, clock })
@@ -83,7 +89,7 @@ const translator = new Translator(
     cache,
     persistentCache,
     rateLimiter,
-    getSettings: () => getUserSettings(),
+    getSettings: async () => modelPolicyRuntime.chatSettings(await getUserSettings()),
     getTranslationEnabled: async (channelName) =>
       (await getEffectiveContentSettings(channelName)).translationEnabled,
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),
@@ -217,6 +223,12 @@ const handleMessage = (
   sender: chrome.runtime.MessageSender,
   sendResponse: (response: unknown) => void,
 ): boolean => {
+  if (isGetModelPolicyMessage(message)) {
+    if (!sender || sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('src/popup/index.html')) return false
+    void modelPolicyRuntime.snapshot().then(payload => sendResponse({ type: 'model_policy_snapshot', payload })).catch(() => sendResponse(undefined))
+    return true
+  }
+
   if (isDiagnosticEventMessage(message)) {
     recordDiagnostic(message.payload)
     return false
@@ -392,7 +404,7 @@ const speechPipeline = new SpeechPipeline({
   source: speechCapture,
   getProvider: (providerId) => getSpeechProvider(providerId),
   getApiKey: (providerId) => getSpeechApiKeyForServiceWorker(providerId),
-  getSettings: () => getUserSettings(),
+  getSettings: async () => modelPolicyRuntime.speechSettings(await getUserSettings()),
   budget: speechBudget,
   rateLimiter: speechRateLimiter,
   onState: (payload) => {

@@ -1,3 +1,4 @@
+import type { ModelConfiguration } from './model-policy'
 // TranslationProvider interface — all LLM API adapters implement this contract.
 // Defined early so SW, Popup, and providers can be built in parallel.
 
@@ -37,6 +38,7 @@ export interface TranslationProvider {
     model: string,
     targetLang: string,
     signal?: AbortSignal,
+    configuration?: ModelConfiguration,
   ): Promise<BatchItemResult[]>
 
   /** Verify the API key is valid by making a minimal API call. */

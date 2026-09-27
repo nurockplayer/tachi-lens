@@ -5,3 +5,9 @@ dist
 /test-results/
 /playwright-report/
 /.omc/
+
+# Local provider model-policy validation evidence
+/model-catalog-previous.json
+/model-drift-tracker.json
+/model-drift-report.json
+/model-compatibility-report.json

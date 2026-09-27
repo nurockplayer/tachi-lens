@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "issuedAt": "2026-09-27T00:00:00.000Z",
+  "expiresAt": "2026-10-27T00:00:00.000Z",
+  "minimumClientVersion": "0.3.3",
+  "policies": [
+    {
+      "provider": "gemini",
+      "workload": "chat",
+      "recommended": "gemini-3.8-flash",
+      "fallbacks": ["gemini-2.5-flash", "gemini-2.5-pro"],
+      "models": [
+        { "id": "gemini-3.8-flash", "configuration": "gemini-low-thinking" },
+        { "id": "gemini-2.5-flash", "configuration": "default" },
+        { "id": "gemini-2.5-pro", "configuration": "default" }
+      ]
+    },
+    {
+      "provider": "gemini",
+      "workload": "speech",
+      "recommended": "gemini-3.8-flash",
+      "fallbacks": ["gemini-2.5-flash", "gemini-2.5-pro"],
+      "models": [
+        { "id": "gemini-3.8-flash", "configuration": "gemini-low-thinking" },
+        { "id": "gemini-2.5-flash", "configuration": "default" },
+        { "id": "gemini-2.5-pro", "configuration": "default" }
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "workload": "chat",
+      "recommended": "deepseek-flash",
+      "fallbacks": ["deepseek-v4-pro"],
+      "models": [
+        { "id": "deepseek-flash", "configuration": "deepseek-disabled-thinking" },
+        { "id": "deepseek-v4-pro", "configuration": "deepseek-disabled-thinking" }
+      ]
+    }
+  ]
+}

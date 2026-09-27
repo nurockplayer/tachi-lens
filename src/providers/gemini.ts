@@ -1,3 +1,4 @@
+import type { ModelConfiguration } from './model-policy'
 import { getGeminiErrorMessage, getGeminiRetryAfterMs, readGeminiErrorBody } from './gemini-errors'
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
@@ -10,8 +11,8 @@ export const GEMINI_MODELS: ProviderModel[] = [
 
 export const GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash'
 
-export const getGeminiGenerationConfig = (model: string): Record<string, unknown> | undefined =>
-  model.startsWith('gemini-3.')
+export const getGeminiGenerationConfig = (model: string, configuration?: ModelConfiguration): Record<string, unknown> | undefined =>
+  configuration === 'gemini-low-thinking' || (configuration === undefined && model.startsWith('gemini-3.'))
     ? { thinkingConfig: { thinkingLevel: 'low' } }
     : undefined
 
@@ -25,7 +26,7 @@ export const createGeminiProvider = (
   models: GEMINI_MODELS,
   defaultModel: GEMINI_DEFAULT_MODEL,
 
-  async translateBatch(requests, apiKey, model, targetLang, signal) {
+  async translateBatch(requests, apiKey, model, targetLang, signal, configuration) {
     const prompt = buildTranslationPrompt(requests, targetLang)
 
     try {
@@ -41,8 +42,8 @@ export const createGeminiProvider = (
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: prompt.system }] },
             contents: [{ parts: [{ text: prompt.user }] }],
-            ...(getGeminiGenerationConfig(model)
-              ? { generationConfig: getGeminiGenerationConfig(model) }
+            ...(getGeminiGenerationConfig(model, configuration)
+              ? { generationConfig: getGeminiGenerationConfig(model, configuration) }
               : {}),
           }),
         },

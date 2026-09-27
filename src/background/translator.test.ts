@@ -779,7 +779,7 @@ describe('Translator', () => {
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
     })
 
-    it('preserves DeepSeek fallback success when Gemini is quota-denied', async () => {
+    it('uses the resolved DeepSeek fallback identity when Gemini is quota-denied', async () => {
       const now = Date.UTC(2026, 6, 14, 12)
       const session: Record<string, unknown> = {}
       const local: Record<string, unknown> = {}
@@ -811,6 +811,7 @@ describe('Translator', () => {
       deps.getSettings = vi.fn(async () => ({
         selectedProvider: 'gemini' as ProviderId,
         selectedModel: 'gemini-2.5-pro',
+        deepseekFallbackModel: 'deepseek-candidate-flash',
         targetLanguage: 'zh-TW',
         geminiQuotaProfiles: {
           'gemini-2.5-pro': rpmProfile,
@@ -828,6 +829,9 @@ describe('Translator', () => {
       expect(result.translatedText).toBe('d-hello')
       expect(gemini.translateBatch).not.toHaveBeenCalled()
       expect(deepseek.translateBatch).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(deepseek.translateBatch).mock.calls[0]?.[2]).toBe('deepseek-candidate-flash')
+      expect(deps.cache.get(cacheKey('hello', 'deepseek', 'deepseek-candidate-flash'))).toMatchObject({ translatedText: 'd-hello' })
+      expect(deps.cache.get(cacheKey('hello', 'deepseek', 'deepseek-flash'))).toBeUndefined()
     })
 
     it('queues backlog work behind a live Gemini batch waiting for quota under single-flight', async () => {

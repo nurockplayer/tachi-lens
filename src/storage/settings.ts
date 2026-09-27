@@ -3,6 +3,7 @@
 
 import type { FilterConfig } from '@/content/message-filter'
 import { DEFAULT_FILTER_CONFIG } from '@/content/message-filter'
+import { AUTO_MODEL } from '@/providers/model-policy'
 import type { ProviderId } from '@/providers/types'
 import { GEMINI_MODELS } from '@/providers/gemini'
 import { DEEPSEEK_DEFAULT_MODEL } from '@/providers/deepseek'
@@ -11,7 +12,7 @@ import {
   normalizeGeminiQuotaSettings,
   type GeminiQuotaSettings,
 } from '@/background/gemini-quota'
-import { SPEECH_GEMINI_DEFAULT_MODEL, isSpeechProviderId } from '@/providers/speech-types'
+import { isSpeechProviderId } from '@/providers/speech-types'
 import type { SpeechProviderId, SpeechTranslationConfig } from '@/providers/speech-types'
 import type { ChineseVariantMode } from '@/shared/language-detection'
 
@@ -50,7 +51,7 @@ export const DEFAULT_SPEECH_CONFIG: SpeechTranslationConfig = {
   speechEnabled: false,
   speechConsentGranted: false,
   speechProvider: 'gemini',
-  speechModel: SPEECH_GEMINI_DEFAULT_MODEL,
+  speechModel: AUTO_MODEL,
   speechTargetLanguage: 'zh-TW',
   captionMaxLines: 2,
   captionOpacity: 100,
@@ -63,7 +64,7 @@ export const DEFAULT_GEMINI_QUOTA_PROFILES: Record<string, GeminiQuotaSettings> 
 export const DEFAULT_SETTINGS: UserSettings = {
   ...DEFAULT_FILTER_CONFIG,
   selectedProvider: 'deepseek',
-  selectedModel: DEEPSEEK_DEFAULT_MODEL,
+  selectedModel: AUTO_MODEL,
   targetLanguage: 'zh-TW',
   displayMode: 'below',
   chineseVariantMode: 'skip_all_chinese',
