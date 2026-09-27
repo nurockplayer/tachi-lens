@@ -9,7 +9,7 @@ const candidate = JSON.parse(await readFile('public/model-policy.json', 'utf8'))
 const base = basePath === 'missing' ? undefined : JSON.parse(await readFile(basePath, 'utf8')) as unknown
 const report = {
   ...classifyQualification(candidate, base, baseSha),
-  candidateSha: process.env.GITHUB_SHA,
+  candidateSha: process.env.MODEL_POLICY_CANDIDATE_SHA,
   candidateFileSha256: createHash('sha256').update(await readFile('public/model-policy.json')).digest('hex'),
 }
 await writeFile('model-qualification-report.json', JSON.stringify(report, null, 2))

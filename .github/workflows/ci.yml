@@ -124,7 +124,7 @@ jobs:
         id: qualification
         if: steps.policy.outputs.changed == 'true'
         env:
-          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+          MODEL_POLICY_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
         run: pnpm exec tsx scripts/model-policy/classify.ts "${{ steps.base.outputs.path }}" "${{ github.event.pull_request.base.sha }}"
       - name: Observe official public metadata without credentials or promotion
         if: steps.policy.outputs.changed == 'true'

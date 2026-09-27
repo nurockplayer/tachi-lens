@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { classifyQualification, INITIAL_BASE_SHA } from '../../scripts/model-policy/qualification'
 
 // Frozen initial fixture, independent of future production promotions.
@@ -82,6 +87,23 @@ const manifest = () => ({ ...structuredClone(initial),
 })
 
 describe('policy qualification boundary', () => {
+  it('binds the CLI report to the candidate head rather than GitHub reserved merge SHA', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'model-policy-qualification-'))
+    try {
+      mkdirSync(join(directory, 'public'))
+      writeFileSync(join(directory, 'public/model-policy.json'), JSON.stringify(manifest()))
+      const candidateSha = 'a'.repeat(40)
+      execFileSync(process.execPath, [
+        '--import', createRequire(import.meta.url).resolve('tsx'),
+        resolve('scripts/model-policy/classify.ts'), 'missing', INITIAL_BASE_SHA,
+      ], { cwd: directory, env: { ...process.env, GITHUB_OUTPUT: '',
+        GITHUB_SHA: 'b'.repeat(40), MODEL_POLICY_CANDIDATE_SHA: candidateSha } })
+      expect(JSON.parse(readFileSync(join(directory, 'model-qualification-report.json'), 'utf8')))
+        .toMatchObject({ candidateSha, required: false, reason: 'initial-preserved-main' })
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
   it('exempts only the proven initial behavior against the exact released base', () => {
     expect(classifyQualification(manifest(), undefined, INITIAL_BASE_SHA).required).toBe(false)
     expect(classifyQualification(manifest(), undefined, '0'.repeat(40)).required).toBe(true)
