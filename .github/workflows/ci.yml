@@ -88,14 +88,13 @@ jobs:
           script: |
             const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: context.issue.number, per_page: 100 });
             core.setOutput('changed', files.some(file => file.filename === 'public/model-policy.json'));
-      - name: Require a new policy revision
+      - name: Read exact base policy
+        id: base
         if: steps.policy.outputs.changed == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('node:fs');
-            const candidate = JSON.parse(fs.readFileSync('public/model-policy.json', 'utf8'));
-            let base;
             try {
               const result = await github.rest.repos.getContent({
                 ...context.repo,
@@ -103,18 +102,13 @@ jobs:
                 ref: context.payload.pull_request.base.sha,
               });
               if (Array.isArray(result.data) || result.data.type !== 'file') throw new Error('Base model policy is not a file');
-              base = JSON.parse(Buffer.from(result.data.content, 'base64').toString('utf8'));
+              const path = '/tmp/model-policy-base.json';
+              fs.writeFileSync(path, Buffer.from(result.data.content, 'base64'));
+              core.setOutput('path', path);
             } catch (error) {
-              if (error.status === 404) {
-                core.info('No model policy exists on the PR base; accepting the initial policy addition.');
-                return;
-              }
-              throw error;
+              if (error.status !== 404) throw error;
+              core.setOutput('path', 'missing');
             }
-            if (!Number.isSafeInteger(base.revision) || !Number.isSafeInteger(candidate.revision) || candidate.revision <= base.revision) {
-              throw new Error('Model policy revision must strictly increase from the PR base.');
-            }
-            core.info(`Model policy revision increases from ${base.revision} to ${candidate.revision}.`);
       - uses: pnpm/action-setup@v4
         if: steps.policy.outputs.changed == 'true'
         with:
@@ -126,21 +120,24 @@ jobs:
           cache: pnpm
       - if: steps.policy.outputs.changed == 'true'
         run: pnpm install --frozen-lockfile
-      - name: Observe candidate provider catalogs without promotion
+      - name: Classify qualification against exact base
+        id: qualification
         if: steps.policy.outputs.changed == 'true'
         env:
-          MODEL_MONITOR_GEMINI_API_KEY: ${{ secrets.MODEL_MONITOR_GEMINI_API_KEY }}
-          MODEL_MONITOR_DEEPSEEK_API_KEY: ${{ secrets.MODEL_MONITOR_DEEPSEEK_API_KEY }}
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm exec tsx scripts/model-policy/classify.ts "${{ steps.base.outputs.path }}" "${{ github.event.pull_request.base.sha }}"
+      - name: Observe official public metadata without credentials or promotion
+        if: steps.policy.outputs.changed == 'true'
         run: pnpm models:discover
       - name: Generate synthetic speech fixture
-        if: steps.policy.outputs.changed == 'true'
+        if: steps.policy.outputs.changed == 'true' && steps.qualification.outputs.required == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq espeak ffmpeg
           espeak -w /tmp/model-speech-source.wav "Hello friends, enjoy the stream."
           ffmpeg -loglevel error -i /tmp/model-speech-source.wav -ar 16000 -ac 1 -c:a pcm_s16le /tmp/model-speech.wav
       - name: Probe exact candidate policy with synthetic inputs
-        if: steps.policy.outputs.changed == 'true'
+        if: steps.policy.outputs.changed == 'true' && steps.qualification.outputs.required == 'true'
         env:
           MODEL_MONITOR_GEMINI_API_KEY: ${{ secrets.MODEL_MONITOR_GEMINI_API_KEY }}
           MODEL_MONITOR_DEEPSEEK_API_KEY: ${{ secrets.MODEL_MONITOR_DEEPSEEK_API_KEY }}
@@ -153,5 +150,6 @@ jobs:
           path: |
             model-compatibility-report.json
             model-drift-report.json
+            model-qualification-report.json
           if-no-files-found: warn
           retention-days: 30

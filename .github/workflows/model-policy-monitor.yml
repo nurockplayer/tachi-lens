@@ -39,11 +39,10 @@ jobs:
               fs.writeFileSync('model-drift-tracker.json', JSON.stringify({ number: tracker.number, body: tracker.body }));
               const catalog = tracker.body.match(/<!-- catalog:(.*?) -->/s);
               if (catalog) fs.writeFileSync('model-catalog-previous.json', catalog[1]);
+              const sources = tracker.body.match(/<!-- sources:(.*?) -->/s);
+              if (sources) fs.writeFileSync('model-sources-previous.json', sources[1]);
             }
-      - name: Observe authoritative catalogs (never promote)
-        env:
-          MODEL_MONITOR_GEMINI_API_KEY: ${{ secrets.MODEL_MONITOR_GEMINI_API_KEY }}
-          MODEL_MONITOR_DEEPSEEK_API_KEY: ${{ secrets.MODEL_MONITOR_DEEPSEEK_API_KEY }}
+      - name: Observe official public metadata (no credentials, never promote)
         run: pnpm models:discover
       - name: Record meaningful drift or an operational failure
         if: always()
@@ -58,14 +57,15 @@ jobs:
             let body;
             if (!report) {
               if (tracker?.body.includes('<!-- observation:operational-failure -->')) return;
-              body = `${marker}\n<!-- observation:operational-failure -->\nCatalog observation failed. Check dedicated monitor secrets, provider availability, and the bounded discovery implementation. No policy was promoted.\n\nEvidence: ${runUrl}\n\n${tracker?.body.match(/<!-- catalog:.*? -->/s)?.[0] ?? ''}`;
+              body = `${marker}\n<!-- observation:operational-failure -->\nCatalog observation failed. Check official public source availability and the bounded structural parser. This is an observation failure, not an empty catalog or model retirement. No policy was promoted.\n\nEvidence: ${runUrl}\n\n${tracker?.body.match(/<!-- catalog:.*? -->/s)?.[0] ?? ''}\n${tracker?.body.match(/<!-- sources:.*? -->/s)?.[0] ?? ''}`;
             } else {
-              const alert = JSON.stringify(report.changes.filter(change => change.kind === 'unavailable' || change.kind === 'renew-policy'));
+              const alert = JSON.stringify(report.changes.filter(change => change.kind === 'not-documented' || change.kind === 'renew-policy'));
               const observation = `${report.fingerprint}:${alert}`;
               if (tracker?.body.includes(`<!-- observation:${observation} -->`)) return;
               if (report.changes.length === 0 && !tracker?.body.includes('operational-failure')) return;
+              const sources = report.sources.map(source => `- ${source.provider}: ${source.url} (normalized fingerprint ${source.fingerprint})`).join('\n');
               const changes = report.changes.map(change => `- ${change.kind}: ${change.provider} / ${change.model}`).join('\n');
-              body = `${marker}\n<!-- observation:${observation} -->\n## Provider model drift — validation required\n\nCatalog changes are candidates only. Do not promote by model name/version ordering. Validate request/response, chat, speech where applicable, request options, fallback/error/privacy regressions, latency and human translation quality before an ordinary reviewed policy PR. Unsupported API contracts require client engineering.\n\n${changes || 'Observation recovered; no catalog drift.'}\n\nPolicy revision: ${report.policyRevision}\nObserved: ${report.checkedAt}\nEvidence: ${runUrl}\n\n<!-- catalog:${JSON.stringify(report.observed)} -->`;
+              body = `${marker}\n<!-- observation:${observation} -->\n## Provider model drift — validation required\n\nOfficial public documentation changes are candidates only; listing presence is not callable availability or compatibility. A missing listing means not documented, not API retirement. Do not promote by model name/version ordering. Validate request/response, chat, speech where applicable, request options, fallback/error/privacy regressions, latency and human translation quality before an ordinary reviewed policy PR. Unsupported API contracts require client engineering.\n\n${changes || 'Observation recovered; no catalog drift.'}\n\nPublic technical sources:\n${sources}\n\nPolicy revision: ${report.policyRevision}\nObserved: ${report.checkedAt}\nEvidence: ${runUrl}\n\n<!-- catalog:${JSON.stringify(report.observed)} -->\n<!-- sources:${JSON.stringify(report.sources)} -->`;
             }
             if (body.length > 60000) throw new Error('Drift evidence exceeds issue bound');
             if (tracker) await github.rest.issues.update({ ...context.repo, issue_number: tracker.number, state: 'open', body });

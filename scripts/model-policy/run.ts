@@ -1,7 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { validateModelPolicy, type ModelPolicyManifest } from '../../src/providers/model-policy'
-import { normalizeCatalog, compareCatalogs, type CatalogModel } from '../../src/providers/model-catalog'
+import { compareCatalogs, type CatalogModel } from '../../src/providers/model-catalog'
+import { discoverPublicCatalog } from './public-catalog'
 import { createGeminiProvider } from '../../src/providers/gemini'
 import { createDeepSeekProvider } from '../../src/providers/deepseek'
 import { createGeminiSpeechProvider } from '../../src/providers/speech-gemini'
@@ -14,11 +15,6 @@ if (!policy) throw new Error('Policy schema, validity, or client compatibility c
 if (mode === 'check') {
   console.log(`Validated policy revision ${policy.revision}; schema ${policy.schemaVersion}`)
 } else {
-  const keys = {
-    gemini: process.env.MODEL_MONITOR_GEMINI_API_KEY,
-    deepseek: process.env.MODEL_MONITOR_DEEPSEEK_API_KEY,
-  }
-  if (!keys.gemini || !keys.deepseek) throw new Error('Dedicated Gemini and DeepSeek monitor secrets are required')
   // Never propagate provider errors, headers, request payloads, or keys to output.
   const boundedFetch: typeof fetch = async (input, init) => {
     const requestSignal = init?.signal
@@ -61,38 +57,22 @@ if (mode === 'check') {
     }
   }
   if (mode === 'discover') {
-    const models: unknown[] = []
-    let token: string | undefined
-    const seenTokens = new Set<string>()
-    for (let page = 0; page < 10; page++) {
-      const url = new URL('https://generativelanguage.googleapis.com/v1beta/models')
-      url.searchParams.set('pageSize', '1000')
-      if (token) url.searchParams.set('pageToken', token)
-      const response = await boundedFetch(url, { headers: { 'x-goog-api-key': keys.gemini } })
-      if (!response.ok) throw new Error(`Gemini discovery failed (${response.status})`)
-      const body = await response.json() as { models?: unknown[]; nextPageToken?: unknown }
-      // Individual pages may contain only embedding models; normalize after pagination.
-      if (!Array.isArray(body.models)) throw new Error('Invalid Gemini discovery response')
-      models.push(...body.models)
-      if (models.length > 1000) throw new Error('Oversized Gemini catalog')
-      if (body.nextPageToken === undefined) break
-      if (typeof body.nextPageToken !== 'string' || body.nextPageToken.length > 1024 || seenTokens.has(body.nextPageToken) || page === 9) throw new Error('Invalid Gemini pagination')
-      token = body.nextPageToken
-      seenTokens.add(token)
-    }
-    const gemini = normalizeCatalog('gemini', { models })
-    const response = await boundedFetch('https://api.deepseek.com/models', { headers: { Authorization: `Bearer ${keys.deepseek}` } })
-    if (!response.ok) throw new Error(`DeepSeek discovery failed (${response.status})`)
-    const observed = [...gemini, ...normalizeCatalog('deepseek', await response.json())]
+    const { observed, sources } = await discoverPublicCatalog(boundedFetch)
     let previous: CatalogModel[] = []
     try { previous = JSON.parse(await readFile('model-catalog-previous.json', 'utf8')) } catch { /* Initial bootstrap. */ }
-    const changes = compareCatalogs(previous, observed)
-    const unavailable = policy.policies.flatMap(entry => [entry.recommended, ...entry.fallbacks].filter(id => !observed.some(model => model.provider === entry.provider && model.id === id)).map(model => ({ kind: 'unavailable', provider: entry.provider, model })))
-    const fingerprint = createHash('sha256').update(JSON.stringify(observed)).digest('hex')
-    await writeFile('model-drift-report.json', JSON.stringify({ fingerprint, observed, changes: [...changes, ...unavailable, ...(Date.parse(policy.expiresAt) - Date.now() < 7 * 86400000 ? [{ kind: 'renew-policy', provider: 'all', model: `revision-${policy.revision}` }] : [])], policyRevision: policy.revision, checkedAt: new Date().toISOString() }, null, 2))
+    let previousSources: Array<{ provider: string; url: string; fingerprint: string }> = []
+    try { previousSources = JSON.parse(await readFile('model-sources-previous.json', 'utf8')) } catch { /* Initial public-source observation. */ }
+    const sourceChanges = sources.filter(source => !previousSources.some(old => old.url === source.url && old.fingerprint === source.fingerprint)).map(source => ({ kind: 'source-changed', provider: source.provider, model: source.url }))
+    const changes = [...compareCatalogs(previous, observed), ...sourceChanges]
+    const unavailable = policy.policies.flatMap(entry => [entry.recommended, ...entry.fallbacks].filter(id => !observed.some(model => model.provider === entry.provider && model.id === id)).map(model => ({ kind: 'not-documented', provider: entry.provider, model })))
+    const fingerprint = createHash('sha256').update(JSON.stringify({ observed, sources })).digest('hex')
+    await writeFile('model-drift-report.json', JSON.stringify({ fingerprint, observed, sources, discovery: 'public-documentation', changes: [...changes, ...unavailable, ...(Date.parse(policy.expiresAt) - Date.now() < 7 * 86400000 ? [{ kind: 'renew-policy', provider: 'all', model: `revision-${policy.revision}` }] : [])], policyRevision: policy.revision, checkedAt: new Date().toISOString() }, null, 2))
     console.log(`Catalog observation ${fingerprint}; ${changes.length} catalog changes`)
   } else if (mode === 'probe') {
-    await probePolicy(policy, boundedFetch, keys as { gemini: string; deepseek: string })
+    const gemini = process.env.MODEL_MONITOR_GEMINI_API_KEY
+    const deepseek = process.env.MODEL_MONITOR_DEEPSEEK_API_KEY
+    if (!gemini || !deepseek) throw new Error('Dedicated Gemini and DeepSeek qualification secrets are required; do not promote')
+    await probePolicy(policy, boundedFetch, { gemini, deepseek })
   } else throw new Error('Unknown model-policy command')
 }
 

@@ -11,3 +11,6 @@ dist
 /model-drift-tracker.json
 /model-drift-report.json
 /model-compatibility-report.json
+
+/model-qualification-report.json
+/model-sources-previous.json
