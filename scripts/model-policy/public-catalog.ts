@@ -52,7 +52,8 @@ const safeIdsIn = (value: string, validate: (id: string) => boolean) => [...new 
   .filter(id => SAFE_ID.test(id) && validate(id))
 
 const technicalText = (sentence: string) => cleanText(sentence
-  .replace(/\b(?:benchmarks?|pricing|prices?|billed at|priced at|cost)\b[^.!?;]*/gi, ' ')
+  // Consume the whole pricing/benchmark clause: periods also occur inside decimals.
+  .replace(/\b(?:(?:api|model)\s+)?(?:benchmarks?|pricing|prices?|billed at|priced at|cost)\b(?:(?![.!?](?:\s|$)|;)[\s\S])*/gi, ' ')
   .replace(/\$\s?\d+(?:\.\d+)?|\b\d+(?:\.\d+)?\s?%/gi, ' '))
 
 const isTechnicalSentence = (sentence: string) =>
@@ -69,19 +70,35 @@ const announcesSupportedModel = (statement: string, provider: 'gemini' | 'deepse
     ? /\bgemini[-\s]+\d+(?:\.\d+)?[-\s]+(?:flash|pro)\b/i.test(statement)
     : /\bdeepseek[-\s]+v?\d+(?:\.\d+)?[-\s]+(?:flash|pro)\b/i.test(statement))
 
-const datedOperationalText = (article: Element) => {
+const datedOperationalText = (article: Element, provider: 'gemini' | 'deepseek') => {
   const selected: string[] = []
   let inDatedSection = false
+  let modelHeading = ''
+  let modelHeadingLevel = 0
   const walker = article.ownerDocument!.createTreeWalker(article, 1 /* NodeFilter.SHOW_ELEMENT */)
   let node = walker.nextNode() as Element | null
   while (node) {
     const tag = node.tagName.toLowerCase()
     if (/^h[1-6]$/.test(tag)) {
       const text = cleanText(node.textContent ?? '')
-      if (/\b(?:date:\s*)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+20\d{2}\b|\bdate:\s*20\d{2}-\d{2}-\d{2}\b/i.test(text)) inDatedSection = true
+      if (/\b(?:date:\s*)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+20\d{2}\b|\bdate:\s*20\d{2}-\d{2}-\d{2}\b/i.test(text)) {
+        inDatedSection = true
+        modelHeading = ''
+        modelHeadingLevel = 0
+      } else if (inDatedSection) {
+        const level = Number(tag.slice(1))
+        if (announcesSupportedModel(text, provider)) {
+          modelHeading = technicalText(text)
+          modelHeadingLevel = level
+          selected.push(modelHeading)
+        } else if (level <= modelHeadingLevel) {
+          modelHeading = ''
+          modelHeadingLevel = 0
+        }
+      }
     } else if (inDatedSection && (tag === 'p' || tag === 'li')) {
       const text = cleanText(node.textContent ?? '')
-      if (text.length <= 4000) selected.push(...operationalSentences(text))
+      if (text.length <= 4000) selected.push(...operationalSentences(text).map(statement => modelHeading ? `${modelHeading}: ${statement}` : statement))
     }
     node = walker.nextNode() as Element | null
   }
@@ -165,7 +182,7 @@ const parseGeminiFacts = (modelsHtml: string, deprecationsHtml: string, changelo
   const lifecycleRows = geminiLifecycleRows(lifecycleArticle)
   const accessNotes = [...new Set([...modelsArticle.querySelectorAll('aside.note, .note')]
     .flatMap(note => operationalSentences(note.textContent ?? '').map(normalizeText)))].sort()
-  const allAnnouncements = datedOperationalText(changelogArticle)
+  const allAnnouncements = datedOperationalText(changelogArticle, 'gemini')
   const announcements = allAnnouncements.filter(statement => announcesSupportedModel(statement, 'gemini') || [...modelRows.keys()].some(id => hasModelMention(id, statement, 'gemini')))
   if (announcements.length === 0 || !announcements.some(statement => /\b(?:gemini|models?|api)\b/i.test(statement))) throw new Error('Gemini dated operational changelog statements are missing')
 
@@ -220,7 +237,7 @@ const parseDeepSeekFacts = (modelsHtml: string, updatesHtml: string) => {
   const ids = deepSeekModelIds(modelsArticle)
   const guideNotes = [...modelsArticle.querySelectorAll('p,li')]
     .flatMap(element => operationalSentences(element.textContent ?? '').map(normalizeText))
-  const allAnnouncements = datedOperationalText(updatesArticle)
+  const allAnnouncements = datedOperationalText(updatesArticle, 'deepseek')
   const announcements = allAnnouncements.filter(statement => announcesSupportedModel(statement, 'deepseek') || ids.some(id => hasModelMention(id, statement, 'deepseek')))
   if (announcements.length === 0 || !announcements.some(statement => /\b(?:deepseek|models?|api)\b/i.test(statement))) throw new Error('DeepSeek dated operational update statements are missing')
   const observed: CatalogModel[] = ids.map(id => ({

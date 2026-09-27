@@ -104,10 +104,50 @@ describe('credential-free public provider documentation discovery', () => {
   })
 
   it('ignores price-only changes within otherwise unchanged operational statements', () => {
-    const before = parseDeepSeekPublicCatalog(deepSeekModels(), deepSeekUpdates('deepseek-flash supports disabled thinking; pricing is $1 per token.'))
-    const after = parseDeepSeekPublicCatalog(deepSeekModels(), deepSeekUpdates('deepseek-flash supports disabled thinking; pricing is $2 per token.'))
+    const before = parseDeepSeekPublicCatalog(deepSeekModels(), deepSeekUpdates('deepseek-flash supports disabled thinking; pricing is $0.10 per token.'))
+    const after = parseDeepSeekPublicCatalog(deepSeekModels(), deepSeekUpdates('deepseek-flash supports disabled thinking; pricing is $0.20 per token.'))
     expect(after.sources.map(source => source.fingerprint)).toEqual(before.sources.map(source => source.fingerprint))
     expect(after.observed).toEqual(before.observed)
+    const geminiBefore = parseGeminiPublicCatalog(
+      geminiModels([{ id: 'gemini-3.8-flash' }]),
+      geminiDeprecations([['gemini-3.8-flash', 'No shutdown date announced', '']]),
+      geminiChangelog('gemini-3.8-flash supports generateContent; pricing is $0.10 per token.'),
+    )
+    const geminiAfter = parseGeminiPublicCatalog(
+      geminiModels([{ id: 'gemini-3.8-flash' }]),
+      geminiDeprecations([['gemini-3.8-flash', 'No shutdown date announced', '']]),
+      geminiChangelog('gemini-3.8-flash supports generateContent; pricing is $0.20 per token.'),
+    )
+    expect(geminiAfter.sources.map(source => source.fingerprint)).toEqual(geminiBefore.sources.map(source => source.fingerprint))
+  })
+
+  it('captures dated supported-model headings with generic technical release details', () => {
+    const geminiModelsHtml = geminiModels([{ id: 'gemini-3.8-flash' }])
+    const lifecycle = geminiDeprecations([['gemini-3.8-flash', 'No shutdown date announced', '']])
+    const geminiBefore = parseGeminiPublicCatalog(geminiModelsHtml, lifecycle, geminiChangelog('gemini-3.8-flash remains available through generateContent.'))
+    const geminiAfter = parseGeminiPublicCatalog(geminiModelsHtml, lifecycle, `
+      <main><h1>Release notes</h1><div class="devsite-article-body"><h2>September 22, 2026</h2>
+      <h3>Gemini 4.0 Flash</h3><p>Introduces a configurable reasoning option and audio input.</p></div></main>`)
+    expect(geminiAfter.sources[2]?.fingerprint).not.toBe(geminiBefore.sources[2]?.fingerprint)
+
+    const deepSeekBefore = parseDeepSeekPublicCatalog(deepSeekModels(), deepSeekUpdates('deepseek-flash supports disabled thinking.'))
+    const deepSeekAfter = parseDeepSeekPublicCatalog(deepSeekModels(), `
+      <main><h1>Change Log</h1><div class="theme-doc-markdown"><h3>Date: 2026-09-10</h3>
+      <h3>DeepSeek V5 Pro Release</h3><p>Adds structured output and a configurable reasoning option.</p></div></main>`)
+    expect(deepSeekAfter.sources[1]?.fingerprint).not.toBe(deepSeekBefore.sources[1]?.fingerprint)
+  })
+
+  it('retains heading-only announcements and model context through nested capability headings', () => {
+    const models = geminiModels([{ id: 'gemini-3.8-flash' }])
+    const lifecycle = geminiDeprecations([['gemini-3.8-flash', 'No shutdown date announced', '']])
+    const baseline = geminiChangelog('gemini-3.8-flash supports generateContent.')
+    const append = (extra: string) => baseline.replace('</div><nav>', `${extra}</div><nav>`)
+    const before = parseGeminiPublicCatalog(models, lifecycle, baseline)
+    const headingOnly = parseGeminiPublicCatalog(models, lifecycle, append('<h3>Gemini 4.0 Flash</h3>'))
+    expect(headingOnly.sources[2]?.fingerprint).not.toBe(before.sources[2]?.fingerprint)
+    const option = (value: string) => parseGeminiPublicCatalog(models, lifecycle,
+      append(`<h3>Gemini 4.0 Flash</h3><h4>Capabilities</h4><p>Supports ${value} thinking.</p>`))
+    expect(option('high').sources[2]?.fingerprint).not.toBe(option('low').sources[2]?.fingerprint)
   })
 
   it('rejects login pages, missing documentation structure, empty and oversized supported catalogs', () => {
