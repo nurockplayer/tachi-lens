@@ -115,6 +115,7 @@ const router = createMessageRouter({
   saveSpeechApiKeyOverride: (providerId, apiKey) => saveSpeechApiKeyOverride(providerId, apiKey),
   deleteSpeechApiKeyOverride: (providerId) => deleteSpeechApiKeyOverride(providerId),
   getMaskedSpeechApiKeyForPopup: (providerId) => getMaskedSpeechApiKeyForPopup(providerId),
+  extensionId: chrome.runtime.id,
 })
 
 const DIAGNOSTIC_STORAGE_KEY = 'translationDiagnostics'

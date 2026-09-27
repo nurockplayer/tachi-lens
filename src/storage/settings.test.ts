@@ -527,6 +527,26 @@ describe('settings storage', () => {
       await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-legacy')
     })
 
+    it('resumes persisted replacement state after a fresh settings module lifetime', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-shared' }
+      storage.local.data[API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: maskApiKey('fixture-shared') }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY] = { gemini: 'fixture-legacy' }
+      storage.local.data[SPEECH_CREDENTIAL_OVERRIDE_PREVIEWS_STORAGE_KEY] = { gemini: maskApiKey('fixture-legacy') }
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'fixture-legacy' }
+      storage.local.data[SPEECH_API_KEY_PREVIEWS_STORAGE_KEY] = { gemini: 'untrusted-preview' }
+
+      vi.resetModules()
+      const freshSettings = await import('./settings')
+      expect(freshSettings.migrateSpeechCredentials).not.toBe(migrateSpeechCredentials)
+      await freshSettings.migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({ gemini: 'fixture-legacy' })
+      expect(storage.local.data).not.toHaveProperty(SPEECH_API_KEYS_STORAGE_KEY)
+      expect(storage.local.data).not.toHaveProperty(SPEECH_API_KEY_PREVIEWS_STORAGE_KEY)
+      await expect(freshSettings.getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-legacy')
+    })
+
     it('drops an equal legacy speech credential into inheritance without making an override', async () => {
       const storage = createChromeStorage()
       storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-same' }

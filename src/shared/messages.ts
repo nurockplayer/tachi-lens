@@ -1,6 +1,7 @@
 // Shared message type definitions for SW ↔ CS ↔ Popup communication
 
 import type { ChineseVariantMode } from './language-detection'
+import { isProviderId } from '@/providers/types'
 import { isSpeechProviderId } from '@/providers/speech-types'
 import type { SpeechTranslationConfig } from '@/providers/speech-types'
 import { SPEECH_ERROR_REASONS, isSpeechState } from './speech-state'
@@ -381,6 +382,40 @@ export const isMessageType = (value: unknown): value is MessageType =>
 
 export const isBaseMessage = (value: unknown): value is BaseMessage<MessageType, unknown> =>
   isRecord(value) && isMessageType(value.type) && Object.hasOwn(value, 'payload')
+
+export type CredentialScope = 'chat' | 'speech'
+
+const isCredentialScope = (value: unknown): value is CredentialScope =>
+  value === undefined || value === 'chat' || value === 'speech'
+
+const isCredentialProvider = (value: unknown, scope: unknown): value is string =>
+  scope === 'speech'
+    ? typeof value === 'string' && isSpeechProviderId(value)
+    : typeof value === 'string' && isProviderId(value)
+
+export const isCredentialSaveRequestMessage = (
+  value: unknown,
+): value is BaseMessage<'save_api_key', { providerId: string; apiKey: string; scope?: CredentialScope }> => {
+  if (!isBaseMessage(value) || value.type !== 'save_api_key' || !isRecord(value.payload)) return false
+  const { providerId, apiKey, scope } = value.payload
+  return isCredentialScope(scope) && isCredentialProvider(providerId, scope) && typeof apiKey === 'string'
+}
+
+export const isCredentialDeleteRequestMessage = (
+  value: unknown,
+): value is BaseMessage<'delete_api_key', { providerId: string; scope?: CredentialScope }> => {
+  if (!isBaseMessage(value) || value.type !== 'delete_api_key' || !isRecord(value.payload)) return false
+  const { providerId, scope } = value.payload
+  return isCredentialScope(scope) && isCredentialProvider(providerId, scope)
+}
+
+export const isCredentialPreviewRequestMessage = (
+  value: unknown,
+): value is BaseMessage<'get_api_key_preview', { providerId: string; scope?: CredentialScope }> => {
+  if (!isBaseMessage(value) || value.type !== 'get_api_key_preview' || !isRecord(value.payload)) return false
+  const { providerId, scope } = value.payload
+  return isCredentialScope(scope) && isCredentialProvider(providerId, scope)
+}
 
 export const isTranslationRequestMessage = (
   value: unknown,

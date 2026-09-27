@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DEFAULT_SETTINGS, maskApiKey } from '@/storage/settings'
 import { PROVIDER_IDS } from '@/providers/types'
@@ -341,5 +341,100 @@ describe('Popup speech consent flow (#162)', () => {
     expect(await screen.findByText(/語音字幕狀態/)).toBeTruthy()
     // Reuses the fixed #160 error key, never a raw provider message.
     expect(screen.getByText('gemini: 語音時段或每日用量已達上限')).toBeTruthy()
+  })
+
+  it('treats short masked speech previews as display-only when edited', async () => {
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return {
+          type: 'api_key_preview',
+          payload: { preview: request.payload?.scope === 'speech' ? 'abc*efgh' : request.payload?.providerId === 'gemini' ? 'shared***' : '' },
+        }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        return { type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitFor(() => expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string }).type === 'get_api_key_preview')).toBe(true))
+    fireEvent.click(document.getElementById('speech-captions-button')!)
+    const overrideToggle = await screen.findByRole('checkbox', { name: '使用語音專用 API Key' })
+    expect((overrideToggle as HTMLInputElement).checked).toBe(true)
+    const input = screen.getByLabelText('語音專用 API Key') as HTMLInputElement
+    expect(input.value).toBe('abc*efgh')
+
+    fireEvent.change(input, { target: { value: 'abc*efgX' } })
+    expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string; payload?: { apiKey?: string } }).payload?.apiKey === 'abc*efgX')).toBe(false)
+    fireEvent.focus(input)
+    expect(input.value).toBe('')
+    fireEvent.change(input, { target: { value: 'fixture-new-speech-key' } })
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'save_api_key',
+      payload: { providerId: 'gemini', apiKey: 'fixture-new-speech-key', scope: 'speech' },
+    })))
+    expect(screen.getByText(/語音使用此專用 API Key/)).toBeTruthy()
+    expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string; payload?: { apiKey?: string } }).payload?.apiKey === 'abc*efgh')).toBe(false)
+  })
+
+  it('keeps speech inherited when enabling an override and saving it fails', async () => {
+    const user = userEvent.setup()
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return {
+          type: 'api_key_preview',
+          payload: { preview: request.payload?.scope === 'speech' ? '' : request.payload?.providerId === 'gemini' ? 'shared***' : '' },
+        }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        return { type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitFor(() => expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string }).type === 'get_api_key_preview')).toBe(true))
+    fireEvent.click(document.getElementById('speech-captions-button')!)
+    await screen.findByText('此提供者已設定共用 API Key')
+    await user.click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    const input = screen.getByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'fixture-failed-speech-save' } })
+
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'save_api_key',
+      payload: { providerId: 'gemini', apiKey: 'fixture-failed-speech-save', scope: 'speech' },
+    })))
+    expect(screen.getByText('此提供者已設定共用 API Key')).toBeTruthy()
+  })
+
+  it('never saves a short shared masked preview when Validate Key is clicked', async () => {
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return {
+          type: 'api_key_preview',
+          payload: { preview: request.payload?.providerId === 'deepseek' ? 'abc*efgh' : '' },
+        }
+      }
+      if (request.type === 'validate_key') return { type: 'key_validation_result', payload: { valid: true } }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitFor(() => expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string }).type === 'get_api_key_preview')).toBe(true))
+    fireEvent.click(document.getElementById('providers-button')!)
+    await waitFor(() => expect((screen.getByLabelText('API Key') as HTMLInputElement).value).toBe('abc*efgh'))
+    await userEvent.setup().click(screen.getByRole('button', { name: /驗證|Validate/ }))
+
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'validate_key' })))
+    expect(sendMessage.mock.calls.some(([message]) => (message as { type?: string }).type === 'save_api_key')).toBe(false)
   })
 })

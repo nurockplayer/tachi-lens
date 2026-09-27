@@ -47,6 +47,7 @@ const makeRouter = (routerDepOverrides?: Partial<RouterDependencies>) => {
         translationEnabled: true,
         targetLanguage: 'zh-TW',
       })),
+      extensionId: 'extension-id',
       ...routerDepOverrides,
     }),
     translator,
@@ -81,7 +82,11 @@ describe('MessageRouter', () => {
       router.handleMessage({
         type: 'save_api_key',
         payload: { providerId: 'gemini', apiKey: 'fixture-speech-secret', scope: 'speech' },
-      }, undefined, sendResponse)
+      }, {
+        id: 'extension-id',
+        url: 'chrome-extension://extension-id/src/popup/index.html',
+        tab: { url: 'chrome-extension://extension-id/src/popup/index.html' },
+      }, sendResponse)
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
         type: 'save_api_key_result',
         payload: { success: true, preview: 'over***view' },
@@ -94,12 +99,71 @@ describe('MessageRouter', () => {
       router.handleMessage({
         type: 'delete_api_key',
         payload: { providerId: 'gemini', scope: 'speech' },
-      }, undefined, sendResponse)
+      }, {
+        id: 'extension-id',
+        url: 'chrome-extension://extension-id/src/popup/index.html',
+        tab: { url: 'chrome-extension://extension-id/src/popup/index.html' },
+      }, sendResponse)
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
         type: 'delete_api_key_result', payload: { success: true },
       }))
       expect(deleteSpeechApiKeyOverride).toHaveBeenCalledWith('gemini')
       expect(deleteApiKey).not.toHaveBeenCalled()
+    })
+
+    it('rejects credential mutation from content scripts and malformed key types', () => {
+      const saveApiKey = vi.fn(async () => undefined)
+      const { router } = makeRouter({ saveApiKey })
+      const sendResponse = vi.fn()
+      const payload = { type: 'save_api_key', payload: { providerId: 'gemini', apiKey: 'key' } }
+
+      expect(router.handleMessage(payload, { id: 'extension-id', tab: { url: 'https://www.twitch.tv/channel' } }, sendResponse)).toBe(false)
+      expect(router.handleMessage({ ...payload, payload: { providerId: 'gemini', apiKey: 42 } }, {
+        id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html',
+      }, sendResponse)).toBe(false)
+      expect(saveApiKey).not.toHaveBeenCalled()
+      expect(sendResponse).not.toHaveBeenCalled()
+    })
+
+    it('returns a bounded failed acknowledgement when credential persistence fails', async () => {
+      const { router } = makeRouter({
+        saveSpeechApiKeyOverride: vi.fn(async () => { throw new Error('storage unavailable') }),
+      })
+      const sendResponse = vi.fn()
+
+      expect(router.handleMessage({
+        type: 'save_api_key',
+        payload: { providerId: 'gemini', apiKey: 'fixture-secret', scope: 'speech' },
+      }, {
+        id: 'extension-id',
+        url: 'chrome-extension://extension-id/src/popup/index.html',
+        tab: { url: 'chrome-extension://extension-id/src/popup/index.html' },
+      }, sendResponse)).toBe(true)
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+        type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' },
+      }))
+      expect(JSON.stringify(sendResponse.mock.calls)).not.toContain('fixture-secret')
+    })
+
+    it('serializes same-provider save and delete mutations in request order', async () => {
+      let finishSave!: () => void
+      const saveGate = new Promise<void>((resolve) => { finishSave = resolve })
+      const operations: string[] = []
+      const { router } = makeRouter({
+        saveSpeechApiKeyOverride: vi.fn(async () => { operations.push('save-start'); await saveGate; operations.push('save-finish') }),
+        deleteSpeechApiKeyOverride: vi.fn(async () => { operations.push('delete') }),
+      })
+      const sender = {
+        id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html',
+        tab: { url: 'chrome-extension://extension-id/src/popup/index.html' },
+      }
+      const sendResponse = vi.fn()
+
+      router.handleMessage({ type: 'save_api_key', payload: { providerId: 'gemini', apiKey: 'first', scope: 'speech' } }, sender, sendResponse)
+      router.handleMessage({ type: 'delete_api_key', payload: { providerId: 'gemini', scope: 'speech' } }, sender, sendResponse)
+      await vi.waitFor(() => expect(operations).toEqual(['save-start']))
+      finishSave()
+      await vi.waitFor(() => expect(operations).toEqual(['save-start', 'save-finish', 'delete']))
     })
   })
 
