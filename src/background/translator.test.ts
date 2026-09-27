@@ -95,6 +95,26 @@ describe('Translator', () => {
       expect(provider.translateBatch).not.toHaveBeenCalled()
     })
 
+    it('dispatches channel-effective model identities in separate batches', async () => {
+      const provider = createMockProvider('gemini')
+      vi.mocked(provider.translateBatch).mockImplementation(async (requests, _key, model) =>
+        requests.map(request => ({ id: request.id, translatedText: model })))
+      deps.getProvider = vi.fn(() => provider)
+      deps.getSettings = vi.fn(async channelName => ({
+        selectedProvider: 'gemini' as ProviderId,
+        selectedModel: channelName === 'pinned' ? 'gemini-2.5-pro' : 'gemini-4.0-flash',
+        targetLanguage: 'ja',
+      }))
+      const pinned = translator.translate({ messageId: 'pinned', text: 'same' }, { channelName: 'pinned' })
+      const automatic = translator.translate({ messageId: 'automatic', text: 'same' }, { channelName: 'automatic' })
+      await vi.advanceTimersByTimeAsync(300)
+      await expect(pinned).resolves.toMatchObject({ translatedText: 'gemini-2.5-pro' })
+      await expect(automatic).resolves.toMatchObject({ translatedText: 'gemini-4.0-flash' })
+      expect(vi.mocked(provider.translateBatch).mock.calls.map(call => call[2])).toEqual(['gemini-2.5-pro', 'gemini-4.0-flash'])
+      expect(deps.getSettings).toHaveBeenCalledWith('pinned')
+      expect(deps.getSettings).toHaveBeenCalledWith('automatic')
+    })
+
     it('uses channel-effective enablement instead of the global setting at flush', async () => {
       const provider = createMockProvider()
       vi.mocked(provider.translateBatch).mockResolvedValue([
@@ -237,6 +257,7 @@ describe('Translator', () => {
       enabled.set('disabled-channel', false)
       await translator.cancelQueuedTranslations('disabled-channel')
       releaseApiKey('test-api-key')
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(disabled).resolves.toEqual({ messageId: 'disabled-leader' })
       await expect(enabledFollower).resolves.toEqual({
@@ -277,6 +298,7 @@ describe('Translator', () => {
       enabled.set('disabled-channel', false)
       await translator.cancelQueuedTranslations('disabled-channel')
       releaseApiKey('test-api-key')
+      await vi.advanceTimersByTimeAsync(300)
 
       await expect(disabled).resolves.toEqual({ messageId: 'shared-message' })
       await expect(enabledFollower).resolves.toEqual({

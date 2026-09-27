@@ -1,4 +1,4 @@
-import { validateModelPolicy, type ModelPolicyManifest, type ResolvedPolicyModel } from '@/providers/model-policy'
+import { isSafePolicyModelId, validateModelPolicy, type ModelPolicyManifest, type PolicyProvider, type ResolvedPolicyModel } from '@/providers/model-policy'
 import packageMetadata from '../../package.json'
 
 export interface ModelPolicySnapshotPayload {
@@ -25,7 +25,7 @@ export const isModelPolicySnapshotMessage = (value: unknown): value is {
     return Object.keys(record).every(key => ['provider', 'workload', 'model', 'configuration', 'source', 'revision', 'selection', 'timestamp'].includes(key))
       && ['gemini', 'deepseek'].includes(String(record.provider))
       && ['chat', 'speech'].includes(String(record.workload))
-      && typeof record.model === 'string' && /^(gemini|deepseek)-[a-z0-9.-]{1,72}$/.test(record.model)
+      && isSafePolicyModelId(record.provider as PolicyProvider, record.model)
       && ['default', 'gemini-low-thinking', 'deepseek-disabled-thinking'].includes(String(record.configuration))
       && ['remote', 'cached', 'bundled'].includes(String(record.source))
       && ['auto', 'pinned'].includes(String(record.selection))

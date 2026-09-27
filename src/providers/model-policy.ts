@@ -58,6 +58,9 @@ const isProviderWorkload = (provider: unknown, workload: unknown): provider is P
   (provider === 'gemini' && (workload === 'chat' || workload === 'speech')) ||
   (provider === 'deepseek' && workload === 'chat')
 
+export const isSafePolicyModelId = (provider: PolicyProvider, id: unknown): id is string =>
+  typeof id === 'string' && id.startsWith(provider === 'gemini' ? 'gemini-' : 'deepseek-') && MODEL_ID_PATTERN.test(id)
+
 const isConfigurationForProvider = (provider: PolicyProvider, configuration: unknown): configuration is ModelConfiguration => {
   if (provider === 'gemini') return configuration === 'default' || configuration === 'gemini-low-thinking'
   return configuration === 'deepseek-disabled-thinking'
@@ -97,13 +100,11 @@ export const validateModelPolicy = (
     const key = `${provider}:${workload}`
     if (seenPolicyKeys.has(key)) return undefined
     seenPolicyKeys.add(key)
-    const prefix = provider === 'gemini' ? 'gemini-' : 'deepseek-'
-    const isSafeId = (id: unknown): id is string => typeof id === 'string' && id.startsWith(prefix) && MODEL_ID_PATTERN.test(id)
-    if (!isSafeId(candidate.recommended) || !Array.isArray(candidate.fallbacks) || candidate.fallbacks.length > MAX_COLLECTION_SIZE || !Array.isArray(candidate.models) || candidate.models.length === 0 || candidate.models.length > MAX_COLLECTION_SIZE) return undefined
+    if (!isSafePolicyModelId(provider, candidate.recommended) || !Array.isArray(candidate.fallbacks) || candidate.fallbacks.length > MAX_COLLECTION_SIZE || !Array.isArray(candidate.models) || candidate.models.length === 0 || candidate.models.length > MAX_COLLECTION_SIZE) return undefined
     const ids = new Set<string>()
     const models: ModelPolicyManifest['policies'][number]['models'] = []
     for (const model of candidate.models) {
-      if (!isRecord(model) || !hasOnlyKeys(model, ['id', 'configuration']) || !isSafeId(model.id) || ids.has(model.id) || !isConfigurationForProvider(provider, model.configuration)) return undefined
+      if (!isRecord(model) || !hasOnlyKeys(model, ['id', 'configuration']) || !isSafePolicyModelId(provider, model.id) || ids.has(model.id) || !isConfigurationForProvider(provider, model.configuration)) return undefined
       ids.add(model.id)
       models.push({ id: model.id, configuration: model.configuration })
     }
@@ -111,7 +112,7 @@ export const validateModelPolicy = (
     const fallbacks: string[] = []
     const seenFallbacks = new Set<string>()
     for (const fallback of candidate.fallbacks) {
-      if (!isSafeId(fallback) || fallback === candidate.recommended || seenFallbacks.has(fallback) || !ids.has(fallback)) return undefined
+      if (!isSafePolicyModelId(provider, fallback) || fallback === candidate.recommended || seenFallbacks.has(fallback) || !ids.has(fallback)) return undefined
       seenFallbacks.add(fallback)
       fallbacks.push(fallback)
     }

@@ -190,7 +190,42 @@ export class ModelPolicyStore {
     } catch {
       // Failure to persist never prevents this session from using its valid response or fallback.
     }
-    if (retained) this.inMemorySnapshot = retained
-    return accepted
+
+    const afterWriteAt = this.now()
+    const acceptedAfterWrite = accepted
+      ? validateModelPolicy(accepted.manifest, afterWriteAt, this.clientVersion)
+      : undefined
+    if (accepted && acceptedAfterWrite) {
+      this.inMemorySnapshot = { manifest: acceptedAfterWrite, source: 'remote' }
+      return this.inMemorySnapshot
+    }
+
+    const priorAfterWrite = previous
+      ? validateModelPolicy(previous.manifest, afterWriteAt, this.clientVersion)
+      : undefined
+    if (!accepted && priorAfterWrite && previous) {
+      this.inMemorySnapshot = { manifest: priorAfterWrite, source: previous.source }
+      return this.inMemorySnapshot
+    }
+
+    // An accepted response expired during persistence. Restore the previous LKG
+    // (or its persisted representation) before deciding what can be admitted.
+    const restoreState: PersistedPolicyState = {
+      ...(previous ? { manifest: previous.manifest } : isRecord(oldState) && oldState.manifest !== undefined ? { manifest: oldState.manifest } : {}),
+      attemptedAt,
+    }
+    try {
+      await this.storage.set({ [MODEL_POLICY_STORAGE_KEY]: restoreState })
+    } catch {
+      // Keep using in-memory fallback if storage remains unavailable.
+    }
+    const finalNow = this.now()
+    const finalPrior = previous
+      ? validateModelPolicy(previous.manifest, finalNow, this.clientVersion)
+      : undefined
+    this.inMemorySnapshot = finalPrior && previous
+      ? { manifest: finalPrior, source: previous.source }
+      : { manifest: BUNDLED_MODEL_POLICY, source: 'bundled' }
+    return this.inMemorySnapshot
   }
 }

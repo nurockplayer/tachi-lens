@@ -126,6 +126,12 @@ jobs:
           cache: pnpm
       - if: steps.policy.outputs.changed == 'true'
         run: pnpm install --frozen-lockfile
+      - name: Observe candidate provider catalogs without promotion
+        if: steps.policy.outputs.changed == 'true'
+        env:
+          MODEL_MONITOR_GEMINI_API_KEY: ${{ secrets.MODEL_MONITOR_GEMINI_API_KEY }}
+          MODEL_MONITOR_DEEPSEEK_API_KEY: ${{ secrets.MODEL_MONITOR_DEEPSEEK_API_KEY }}
+        run: pnpm models:discover
       - name: Generate synthetic speech fixture
         if: steps.policy.outputs.changed == 'true'
         run: |
@@ -144,6 +150,8 @@ jobs:
         if: always() && steps.policy.outputs.changed == 'true'
         with:
           name: model-compatibility-${{ github.event.pull_request.head.sha }}
-          path: model-compatibility-report.json
+          path: |
+            model-compatibility-report.json
+            model-drift-report.json
           if-no-files-found: warn
           retention-days: 30

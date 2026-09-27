@@ -34,7 +34,7 @@ export interface TranslatorDependencies {
    */
   persistentCache?: PersistentTranslationCache
   rateLimiter: RateLimiter
-  getSettings: () => Promise<{
+  getSettings: (channelName?: string) => Promise<{
     selectedProvider: ProviderId
     selectedModel: string
     modelConfiguration?: ModelConfiguration
@@ -325,7 +325,13 @@ export class Translator {
     this.timer = null
     const selectedPriority = this.selectPriority(priority)
     const queue = selectedPriority === 'live' ? this.liveQueue : this.backlogQueue
-    const items = queue.splice(0, this.options.maxBatchSize)
+    // A channel is a settings and cancellation domain. Keep its contiguous work
+    // together; the next domain drains through the same fair, single-flight queue.
+    const channelName = queue[0]?.channelName
+    const items: PendingItem[] = []
+    while (queue.length > 0 && items.length < this.options.maxBatchSize && queue[0]!.channelName === channelName) {
+      items.push(queue.shift()!)
+    }
 
     if (items.length === 0) return
     this.activeBatchItems.clear()
@@ -340,7 +346,7 @@ export class Translator {
     let ownedItems = items
     try {
 
-    const settings = await this.deps.getSettings()
+    const settings = await this.deps.getSettings(channelName)
     const activeItems = await this.filterEnabledItems(items, settings.translationEnabled)
     if (activeItems.length === 0) return
     ownedItems = activeItems

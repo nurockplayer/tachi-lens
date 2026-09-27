@@ -89,7 +89,7 @@ const translator = new Translator(
     cache,
     persistentCache,
     rateLimiter,
-    getSettings: async () => modelPolicyRuntime.chatSettings(await getUserSettings()),
+    getSettings: async (channelName) => modelPolicyRuntime.chatSettings(await getEffectiveContentSettings(channelName)),
     getTranslationEnabled: async (channelName) =>
       (await getEffectiveContentSettings(channelName)).translationEnabled,
     getApiKey: (providerId: ProviderId) => getApiKeyForServiceWorker(providerId),

@@ -52,8 +52,12 @@ describe('model policy validation', () => {
 
   it('resolves Auto from policy and preserves concrete pins', () => {
     const snapshot = { manifest: BUNDLED_MODEL_POLICY, source: 'bundled' as const }
+    const geminiChat = BUNDLED_MODEL_POLICY.policies.find((entry) => entry.provider === 'gemini' && entry.workload === 'chat')!
     expect(resolvePolicyModel(snapshot, 'gemini', 'chat', AUTO_MODEL)).toMatchObject({
-      model: 'gemini-3.8-flash', selection: 'auto', configuration: 'gemini-low-thinking',
+      model: geminiChat.recommended,
+      selection: 'auto',
+      configuration: geminiChat.models.find((model) => model.id === geminiChat.recommended)!.configuration,
+      revision: BUNDLED_MODEL_POLICY.revision,
     })
     expect(resolvePolicyModel(snapshot, 'deepseek', 'chat', 'deepseek-v4-pro')).toMatchObject({
       model: 'deepseek-v4-pro', selection: 'pinned', configuration: 'deepseek-disabled-thinking',

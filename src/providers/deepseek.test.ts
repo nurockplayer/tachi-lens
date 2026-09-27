@@ -107,14 +107,16 @@ describe('DeepSeek provider', () => {
       expect(result.valid).toBe(true)
     })
 
-    it('rejects a key whose model list does not include DeepSeek Flash', async () => {
-      const fetchFn = mockFetch(200, { data: [{ id: 'another-model' }] })
-      const provider = createDeepSeekProvider(fetchFn)
+    it('validates authentication when a replacement exists without the packaged default', async () => {
+      const provider = createDeepSeekProvider(mockFetch(200, { data: [{ id: 'deepseek-compatible-replacement' }] }))
+      await expect(provider.validateKey('valid-key-without-flash')).resolves.toEqual({ valid: true })
+    })
 
-      const result = await provider.validateKey('valid-key-without-flash')
-
-      expect(result.valid).toBe(false)
-      expect(result.error).toContain('deepseek-flash')
+    it('rejects malformed authenticated catalogs without blaming a missing default model', async () => {
+      for (const body of [{}, { data: [{}] }, { data: 'invalid' }]) {
+        const provider = createDeepSeekProvider(mockFetch(200, body))
+        await expect(provider.validateKey('key')).resolves.toMatchObject({ valid: false, error: 'Invalid DeepSeek model catalog' })
+      }
     })
 
     it('rejects an invalid key', async () => {
