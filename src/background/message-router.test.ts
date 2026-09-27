@@ -170,6 +170,23 @@ describe('MessageRouter', () => {
       expect(JSON.stringify(sendResponse.mock.calls)).not.toContain('fixture-committed-key')
     })
 
+    it('marks a failed bounded preview read as unavailable instead of absent', async () => {
+      const { router } = makeRouter({
+        getMaskedSpeechApiKeyForPopup: vi.fn(async () => { throw new Error('preview read unavailable') }),
+      })
+      const sendResponse = vi.fn()
+
+      router.handleMessage({
+        type: 'get_api_key_preview', payload: { providerId: 'gemini', scope: 'speech' },
+      }, {
+        id: 'extension-id', url: 'chrome-extension://extension-id/src/popup/index.html',
+      }, sendResponse)
+
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+        type: 'api_key_preview', payload: { preview: '', success: false },
+      }))
+    })
+
     it('serializes same-provider save and delete mutations in request order', async () => {
       let finishSave!: () => void
       const saveGate = new Promise<void>((resolve) => { finishSave = resolve })

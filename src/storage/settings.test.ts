@@ -583,6 +583,29 @@ describe('settings storage', () => {
       await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-chat')
     })
 
+    it('ignores whitespace-only legacy speech state when a valid shared credential exists', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[API_KEYS_STORAGE_KEY] = { gemini: 'fixture-chat' }
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: '   \t ' }
+
+      await migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({ gemini: 'fixture-chat' })
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBe('fixture-chat')
+    })
+
+    it('does not create a credential from whitespace-only legacy speech state', async () => {
+      const storage = createChromeStorage()
+      storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: '   \t ' }
+
+      await migrateSpeechCredentials(storage)
+
+      expect(storage.local.data[API_KEYS_STORAGE_KEY]).toEqual({})
+      expect(storage.local.data[SPEECH_CREDENTIAL_OVERRIDES_STORAGE_KEY]).toEqual({})
+      await expect(getSpeechApiKeyForServiceWorker('gemini', storage)).resolves.toBeUndefined()
+    })
+
     it('keeps legacy credentials when replacement storage cannot be read back', async () => {
       const storage = createChromeStorage()
       storage.local.data[SPEECH_API_KEYS_STORAGE_KEY] = { gemini: 'fixture-legacy' }

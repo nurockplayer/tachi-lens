@@ -110,6 +110,7 @@ describe('Popup speech settings', () => {
     await user.click(overrideToggle)
     const overrideField = await screen.findByLabelText('語音專用 API Key')
     fireEvent.change(overrideField, { target: { value: 'fixture-speech-override' } })
+    fireEvent.blur(overrideField)
 
     await waitFor(() => {
       expect(sendMessage).toHaveBeenCalledWith({
@@ -129,6 +130,282 @@ describe('Popup speech settings', () => {
       type: 'delete_api_key',
       payload: { providerId: 'gemini' },
     })
+  })
+
+  it('stages rapid speech input events and saves only the complete draft on blur', async () => {
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return { type: 'api_key_preview', payload: { preview: '' } }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        return { type: 'save_api_key_result', payload: { success: true, preview: 'com***raft' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'c' } })
+    fireEvent.change(input, { target: { value: 'com' } })
+    fireEvent.change(input, { target: { value: 'complete-draft' } })
+
+    expect(sendMessage.mock.calls.some(([message]) => (message as { type?: string }).type === 'save_api_key')).toBe(false)
+    fireEvent.blur(input)
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({
+      type: 'save_api_key',
+      payload: { providerId: 'gemini', apiKey: 'complete-draft', scope: 'speech' },
+    }))
+    expect(sendMessage.mock.calls.filter(([message]) => (message as { type?: string }).type === 'save_api_key')).toHaveLength(1)
+  })
+
+  it('reconciles a failed stable override commit to the previous persisted override', async () => {
+    let persistedOverride = ''
+    let saveCount = 0
+    let speechPreviewReads = 0
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; scope?: string; apiKey?: string } }
+      if (request.type === 'get_api_key_preview') {
+        if (request.payload?.scope === 'speech') speechPreviewReads += 1
+        return {
+          type: 'api_key_preview',
+          payload: { preview: request.payload?.scope === 'speech' && persistedOverride ? `${persistedOverride.slice(0, 3)}***` : '' },
+        }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        saveCount += 1
+        if (saveCount === 1) {
+          persistedOverride = request.payload.apiKey ?? ''
+          return { type: 'save_api_key_result', payload: { success: true, preview: 'pri***ide' } }
+        }
+        return { type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'prior-stable-override' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(saveCount).toBe(1))
+    await waitFor(() => expect(input.value).toBe('pri***ide'))
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'newer-stable-override' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(saveCount).toBe(2))
+    await waitFor(() => expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string }).type === 'get_api_key_preview' &&
+      (message as { payload?: { scope?: string } }).payload?.scope === 'speech')).toBe(true))
+
+    expect(input.value).toBe('newer-stable-override')
+    expect(speechPreviewReads).toBeGreaterThan(1)
+    expect(screen.getByText('語音使用此專用 API Key。關閉此設定即可改用共用 API Key。')).toBeTruthy()
+    expect(persistedOverride).toBe('prior-stable-override')
+  })
+
+  it('preserves the last acknowledged override when failed-save reconciliation is unavailable', async () => {
+    let speechPreviewReads = 0
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview') {
+        if (request.payload?.scope === 'speech') {
+          speechPreviewReads += 1
+          if (speechPreviewReads > 1) return { type: 'api_key_preview', payload: { preview: '', success: false } }
+          return { type: 'api_key_preview', payload: { preview: 'old***key', success: true } }
+        }
+        return { type: 'api_key_preview', payload: { preview: '', success: true } }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        return { type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'new-override' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(speechPreviewReads).toBe(2))
+
+    expect(screen.getByText('語音使用此專用 API Key。關閉此設定即可改用共用 API Key。')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('無效')
+  })
+
+  it('does not let failed-delete reconciliation replace a newer speech draft', async () => {
+    let previewReads = 0
+    let resolveDelete!: (value: unknown) => void
+    let resolveReconciliation!: (value: unknown) => void
+    sendMessage.mockImplementation((message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview' && request.payload?.scope === 'speech') {
+        previewReads += 1
+        if (previewReads === 1) return Promise.resolve({ type: 'api_key_preview', payload: { preview: 'old***key', success: true } })
+        return new Promise((resolve) => { resolveReconciliation = resolve })
+      }
+      if (request.type === 'delete_api_key' && request.payload?.scope === 'speech') {
+        return new Promise((resolve) => { resolveDelete = resolve })
+      }
+      return Promise.resolve({ type: 'ok', payload: {} })
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    await waitFor(() => expect(resolveDelete).toBeTypeOf('function'))
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'newer-speech-draft' } })
+
+    await act(async () => {
+      resolveDelete({ type: 'delete_api_key_result', payload: { success: false } })
+    })
+    await waitFor(() => expect(previewReads).toBe(2))
+    await act(async () => {
+      resolveReconciliation({ type: 'api_key_preview', payload: { preview: 'old***key', success: true } })
+    })
+
+    expect(input.value).toBe('newer-speech-draft')
+    expect(screen.getByRole('alert').textContent).toContain('無效')
+  })
+
+  it('keeps a newer speech draft when an older delete succeeds', async () => {
+    let resolveDelete!: (value: unknown) => void
+    sendMessage.mockImplementation((message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview' && request.payload?.scope === 'speech') {
+        return Promise.resolve({ type: 'api_key_preview', payload: { preview: 'old***key', success: true } })
+      }
+      if (request.type === 'delete_api_key' && request.payload?.scope === 'speech') {
+        return new Promise((resolve) => { resolveDelete = resolve })
+      }
+      return Promise.resolve({ type: 'ok', payload: {} })
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    await waitFor(() => expect(resolveDelete).toBeTypeOf('function'))
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'newer-speech-draft' } })
+    await act(async () => {
+      resolveDelete({ type: 'delete_api_key_result', payload: { success: true } })
+    })
+
+    expect(input.value).toBe('newer-speech-draft')
+    expect((screen.getByRole('checkbox', { name: '使用語音專用 API Key' }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText('尚未設定此提供者的 API Key。請至「提供者與 API Key」設定。')).toBeTruthy()
+  })
+
+  it('retries an unchanged speech draft after a failed commit', async () => {
+    let saveCount = 0
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview') return { type: 'api_key_preview', payload: { preview: '' } }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        saveCount += 1
+        return saveCount === 1
+          ? { type: 'save_api_key_result', payload: { success: false, error: 'Credential save failed' } }
+          : { type: 'save_api_key_result', payload: { success: true, preview: 'ret***ied' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'retry-unchanged' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(saveCount).toBe(1))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'get_api_key_preview', payload: { providerId: 'gemini', scope: 'speech' },
+    })))
+
+    fireEvent.focus(input)
+    fireEvent.blur(input)
+    await waitFor(() => expect(saveCount).toBe(2))
+    await waitFor(() => expect(input.value).toBe('ret***ied'))
+  })
+
+  it('keeps a staged speech draft when an older initial preview resolves before commit', async () => {
+    let resolveInitial!: (value: unknown) => void
+    sendMessage.mockImplementation((message) => {
+      const request = message as { type?: string; payload?: { scope?: string } }
+      if (request.type === 'get_api_key_preview' && request.payload?.scope === 'speech') {
+        return new Promise((resolve) => { resolveInitial = resolve })
+      }
+      return Promise.resolve({ type: 'ok', payload: {} })
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'staged-before-load' } })
+
+    await act(async () => {
+      resolveInitial({ type: 'api_key_preview', payload: { preview: '', success: true } })
+    })
+
+    expect(screen.getByLabelText('語音專用 API Key')).toBeTruthy()
+    expect(input.value).toBe('staged-before-load')
+    expect(sendMessage.mock.calls.some(([message]) => (message as { type?: string }).type === 'save_api_key')).toBe(false)
+  })
+
+  it('never copies a shared preview into an enabled but unconfigured speech editor', async () => {
+    sendMessage.mockImplementation(async (message) => {
+      const request = message as { type?: string; payload?: { providerId?: string; scope?: string; apiKey?: string } }
+      if (request.type === 'get_api_key_preview') {
+        return { type: 'api_key_preview', payload: { preview: '' } }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope !== 'speech') {
+        return { type: 'save_api_key_result', payload: { success: true, preview: 'shared***' } }
+      }
+      if (request.type === 'save_api_key' && request.payload?.scope === 'speech') {
+        return { type: 'save_api_key_result', payload: { success: true, preview: 'user***' } }
+      }
+      return { type: 'ok', payload: {} }
+    })
+    render(<App />)
+
+    await waitForSpeechControls()
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
+    const speechInput = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
+    fireEvent.click(document.getElementById('providers-button')!)
+    await userEvent.setup().selectOptions(document.getElementById('provider-select')!, 'gemini')
+    const sharedInput = await screen.findByLabelText('API Key') as HTMLInputElement
+    fireEvent.focus(sharedInput)
+    fireEvent.change(sharedInput, { target: { value: 'rotated-shared-secret' } })
+    fireEvent.blur(sharedInput)
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({
+      type: 'save_api_key',
+      payload: { providerId: 'gemini', apiKey: 'rotated-shared-secret' },
+    }))
+    expect(speechInput.value).toBe('')
+
+    fireEvent.focus(speechInput)
+    fireEvent.change(speechInput, { target: { value: 'user-entered-override' } })
+    fireEvent.blur(speechInput)
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({
+      type: 'save_api_key',
+      payload: { providerId: 'gemini', apiKey: 'user-entered-override', scope: 'speech' },
+    }))
+    expect(sendMessage.mock.calls.some(([message]) =>
+      (message as { type?: string; payload?: { scope?: string; apiKey?: string } }).type === 'save_api_key' &&
+      (message as { payload?: { scope?: string; apiKey?: string } }).payload?.scope === 'speech' &&
+      (message as { payload?: { scope?: string; apiKey?: string } }).payload?.apiKey?.includes('shared'))).toBe(false)
   })
 
   it('keeps a speech-override typing draft through save acknowledgements and masks it on blur', async () => {
@@ -159,25 +436,13 @@ describe('Popup speech settings', () => {
     await waitForSpeechControls()
     await user.click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
     const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
-    await user.type(input, 'a')
-    await waitFor(() => expect(pendingSaves).toHaveLength(1))
-    await act(async () => { pendingSaves[0]!.acknowledge() })
-    expect(input.value).toBe('a')
-
-    await user.type(input, 'b')
-    await waitFor(() => expect(pendingSaves).toHaveLength(2))
-    expect(pendingSaves[1]?.apiKey).toBe('ab')
-    await act(async () => { pendingSaves[1]!.acknowledge() })
-    expect(input.value).toBe('ab')
-
-    await user.type(input, 'c')
-    await waitFor(() => expect(pendingSaves).toHaveLength(3))
-    expect(pendingSaves[2]?.apiKey).toBe('abc')
-    expect(input.value).toBe('abc')
-
+    await user.type(input, 'abc')
+    expect(pendingSaves).toHaveLength(0)
     fireEvent.blur(input)
     expect(input.value).toBe('abc')
-    await act(async () => { pendingSaves[2]!.acknowledge() })
+    await waitFor(() => expect(pendingSaves).toHaveLength(1))
+    expect(pendingSaves[0]?.apiKey).toBe('abc')
+    await act(async () => { pendingSaves[0]!.acknowledge() })
     expect(persistedKey).toBe('abc')
     await waitFor(() => expect(input.value).toBe('***'))
   })
@@ -208,12 +473,14 @@ describe('Popup speech settings', () => {
     await user.click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
     const speechInput = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
     fireEvent.change(speechInput, { target: { value: 'speech-secret' } })
+    fireEvent.blur(speechInput)
     await waitFor(() => expect(pendingSaves).toHaveLength(1))
 
     fireEvent.click(document.getElementById('providers-button')!)
     await user.selectOptions(document.getElementById('provider-select')!, 'gemini')
     const sharedInput = await screen.findByLabelText('API Key') as HTMLInputElement
     fireEvent.change(sharedInput, { target: { value: 'shared-secret' } })
+    fireEvent.blur(sharedInput)
     await waitFor(() => expect(pendingSaves).toHaveLength(2))
 
     await act(async () => { pendingSaves[0]!.acknowledge() })
@@ -246,6 +513,7 @@ describe('Popup speech settings', () => {
     await userEvent.setup().click(screen.getByRole('checkbox', { name: '使用語音專用 API Key' }))
     const input = await screen.findByLabelText('語音專用 API Key') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'new-speech-credential' } })
+    fireEvent.blur(input)
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'save_api_key',
       payload: expect.objectContaining({ scope: 'speech' }),
@@ -254,6 +522,7 @@ describe('Popup speech settings', () => {
     await act(async () => {
       pendingReads[0]!.resolve({ type: 'api_key_preview', payload: { preview: 'old***' } })
     })
+    fireEvent.focus(input)
     fireEvent.blur(input)
 
     expect(input.value).toBe('current***')

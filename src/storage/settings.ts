@@ -322,7 +322,7 @@ const readSpeechCredentialOverridePreviews = async (storage: ChromeStorageLike):
 const credentialMigrations = new WeakMap<StorageAreaLike, Promise<void>>()
 
 const hasCredential = (value: unknown): value is string =>
-  typeof value === 'string' && value.length > 0
+  typeof value === 'string' && value.trim().length > 0
 
 const migrateSpeechCredentialsOnce = async (storage: ChromeStorageLike): Promise<void> => {
   const legacyItems = await storage.local.get([SPEECH_API_KEYS_STORAGE_KEY, SPEECH_API_KEY_PREVIEWS_STORAGE_KEY])

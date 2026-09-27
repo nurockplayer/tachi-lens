@@ -324,9 +324,9 @@ const handleGetApiKeyPreview = async (
     const preview = payload.scope === 'speech'
       ? await deps.getMaskedSpeechApiKeyForPopup?.(payload.providerId as SpeechProviderId)
       : await deps.getMaskedApiKeyForPopup?.(payload.providerId as ProviderId)
-    sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '' } })
+    sendResponse({ type: 'api_key_preview', payload: { preview: preview ?? '', success: true } })
   } catch {
-    sendResponse({ type: 'api_key_preview', payload: { preview: '' } })
+    sendResponse({ type: 'api_key_preview', payload: { preview: '', success: false } })
   }
 }
 
