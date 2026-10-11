@@ -113,12 +113,14 @@ describe('Gemini provider', () => {
         error: 'Quota exceeded for gemini-2.5-flash',
         status: 429,
         retryAfterMs: 44_500,
+        errorType: 'rate_limited',
       })
       expect(results[1]).toEqual({
         id: 'm2',
         error: 'Quota exceeded for gemini-2.5-flash',
         status: 429,
         retryAfterMs: 44_500,
+        errorType: 'rate_limited',
       })
     })
 
@@ -164,6 +166,7 @@ describe('Gemini provider', () => {
         id: 'm1',
         error: 'Gemini API error (503)',
         status: 503,
+        errorType: 'network',
       })
     })
 
@@ -182,7 +185,7 @@ describe('Gemini provider', () => {
 
       const results = await provider.translateBatch(REQS, 'fake-key', 'gemini-2.5-flash', 'zh-TW')
 
-      expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.error).toBe('Gemini request failed')
       expect(results[0]!.errorType).toBe('network')
     })
   })

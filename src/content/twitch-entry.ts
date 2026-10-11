@@ -284,7 +284,11 @@ const setupPage = (): void => {
   invalidateSettingsCache()
   const pageType = detectPageType(window.location.href)
   currentSelectors = getSelectorsForPage(pageType)
-  handler = new TwitchMessageHandler(currentSelectors, reportDiagnostic, runtimeMessageSender)
+  handler = new TwitchMessageHandler(currentSelectors, reportDiagnostic, runtimeMessageSender, (element) => {
+    if (!chatTranslationEnabled || stopped || isDisabledChatElement(element)) return
+    if (!handler.retryFailedMessage(element)) return
+    enqueueTranslation(element, 'live')
+  })
 }
 
 // --- CS debounce — fixed-window coalescing ---
@@ -607,6 +611,8 @@ const enqueueTranslation = (
     return
   }
   if (isDisabledChatElement(element) || inFlight.has(element) || queuedForTranslation.has(element)) return
+  if (!handler.canAutoRetry(element)) return
+  if (priority === 'live' && handler.isRetryCandidate(element)) priority = 'backlog'
 
   queuedForTranslation.add(element)
   const queued = { element, priority }
@@ -643,7 +649,8 @@ const drainTranslationQueue = (): void => {
 
     queuedForTranslation.delete(element)
 
-    if (!element.isConnected || handler.isAlreadyProcessed(element) || isDisabledChatElement(element)) {
+    if (!element.isConnected || handler.isAlreadyProcessed(element) || isDisabledChatElement(element) ||
+      !handler.canAutoRetry(element)) {
       reportDiagnosticCount('queue_obsolete_drop')
       continue
     }
@@ -703,7 +710,7 @@ const processMessage = async (
   } catch {
     if (stopped) return {}
 
-    debugLog('processMessage: error', { text: element.textContent?.slice(0, 50) })
+    debugLog('processMessage: error')
     reportDiagnostic('translation_failed', '無法讀取目前的翻譯設定')
     return {}
   } finally {
@@ -726,6 +733,7 @@ const retryUnprocessed = (): void => {
   for (const node of messages) {
     if (node instanceof HTMLElement &&
       !handler.isAlreadyProcessed(node) &&
+      handler.canAutoRetry(node) &&
       !isDisabledChatElement(node) &&
       !queuedElements.has(node)) {
       retryCount++

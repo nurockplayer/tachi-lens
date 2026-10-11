@@ -1838,7 +1838,49 @@ describe('Translator', () => {
         'test-api-key',
         'deepseek-flash',
         'zh-TW',
+        expect.any(AbortSignal),
       )
+    })
+
+    it('times out a non-Gemini provider request and lets the next translation complete', async () => {
+      const timeoutControllers: AbortController[] = []
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
+        const controller = new AbortController()
+        timeoutControllers.push(controller)
+        return controller.signal
+      })
+      const provider = createMockProvider()
+      vi.mocked(provider.translateBatch)
+        .mockImplementationOnce((_requests, _key, _model, _language, signal) => {
+          expect(signal).toBe(timeoutControllers[0]?.signal)
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+          })
+        })
+        .mockImplementation(async (requests) => requests.map((request) => ({
+          id: request.id,
+          translatedText: 'ok',
+        })))
+      deps.getProvider = vi.fn(() => provider)
+      const first = translator.translate({ messageId: 'timeout-request', text: 'hang until timeout' })
+
+      vi.advanceTimersByTime(300)
+      for (let index = 0; index < 30; index++) await Promise.resolve()
+      expect(provider.translateBatch).toHaveBeenCalledTimes(1)
+      expect(timeoutControllers).toHaveLength(1)
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000)
+      timeoutControllers[0]!.abort(new DOMException('Timed out', 'TimeoutError'))
+      await expect(first).resolves.toMatchObject({
+        messageId: 'timeout-request',
+        error: { type: 'timeout' },
+      })
+      timeoutSpy.mockRestore()
+
+      const next = translator.translate({ messageId: 'after-timeout', text: 'continue queue' })
+      vi.advanceTimersByTime(300)
+      for (let index = 0; index < 30; index++) await Promise.resolve()
+      await expect(next).resolves.toMatchObject({ messageId: 'after-timeout', translatedText: 'ok' })
+      expect(provider.translateBatch).toHaveBeenCalledTimes(2)
     })
 
     it('leaves no pending Promise in mixed success, provider failure, and dependency-throw batches', async () => {
@@ -2248,6 +2290,7 @@ describe('Translator', () => {
         'key-deepseek',
         'deepseek-flash',
         'zh-TW',
+        expect.any(AbortSignal),
       )
       expect(deps.rateLimiter.getRemainingCooldown('gemini')).toBe(57_000)
     })

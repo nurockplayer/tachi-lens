@@ -634,14 +634,17 @@ export class Translator {
     }))
 
     let batchResults: BatchItemResult[]
+    const providerTimeoutSignal = AbortSignal.timeout(30_000)
 
     try {
       batchResults = modelConfiguration
-        ? await provider.translateBatch(batchRequests, apiKey, model, targetLang, undefined, modelConfiguration)
-        : await provider.translateBatch(batchRequests, apiKey, model, targetLang)
+        ? await provider.translateBatch(batchRequests, apiKey, model, targetLang, providerTimeoutSignal, modelConfiguration)
+        : await provider.translateBatch(batchRequests, apiKey, model, targetLang, providerTimeoutSignal)
     } catch (err) {
       const error: ProviderError = {
-        type: 'network',
+        type: providerTimeoutSignal.aborted || (err instanceof Error && err.name === 'TimeoutError')
+          ? 'timeout'
+          : 'network',
         message: err instanceof Error ? err.message : 'Unknown error',
       }
 
@@ -785,15 +788,17 @@ export class Translator {
     }
 
     let providerResults: BatchItemResult[]
+    const providerSignal = signal ?? AbortSignal.timeout(30_000)
     try {
-      providerResults = signal
-        ? await provider.translateBatch(uncached, apiKey, model, targetLang, signal)
-        : await provider.translateBatch(uncached, apiKey, model, targetLang)
+      providerResults = await provider.translateBatch(uncached, apiKey, model, targetLang, providerSignal)
     } catch (error) {
+      const errorType = providerSignal.aborted || (error instanceof Error && error.name === 'TimeoutError')
+        ? 'timeout'
+        : 'network'
       providerResults = uncached.map((request) => ({
         id: request.id,
         error: error instanceof Error ? error.message : 'Unknown DeepSeek error',
-        errorType: 'network',
+        errorType,
       }))
     }
 

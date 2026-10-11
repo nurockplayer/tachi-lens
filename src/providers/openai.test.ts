@@ -51,7 +51,7 @@ describe('OpenAI provider', () => {
 
       const results = await provider.translateBatch(REQS, 'fake-key', 'gpt-4o-mini', 'zh-TW')
 
-      expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.error).toBe('OpenAI request failed')
     })
   })
 

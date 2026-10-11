@@ -1,5 +1,6 @@
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
-import type { ProviderModel, TranslationProvider } from './types'
+import { classifyProviderHttpFailure, classifyProviderThrownError } from './http-errors'
+import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const OPENAI_MODELS: ProviderModel[] = [
   { id: 'gpt-4o-mini', displayName: 'GPT-4o mini' },
@@ -18,7 +19,7 @@ export const createOpenAIProvider = (
   models: OPENAI_MODELS,
   defaultModel: OPENAI_DEFAULT_MODEL,
 
-  async translateBatch(requests, apiKey, model, targetLang) {
+  async translateBatch(requests, apiKey, model, targetLang, signal) {
     const prompt = buildTranslationPrompt(requests, targetLang)
 
     try {
@@ -28,6 +29,7 @@ export const createOpenAIProvider = (
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
+        ...(signal ? { signal } : {}),
         body: JSON.stringify({
           model,
           messages: [
@@ -38,19 +40,23 @@ export const createOpenAIProvider = (
       })
 
       if (!response.ok) {
-        return allErrors(requests, `OpenAI API error (${response.status})`)
+        return allErrors(
+          requests,
+          `OpenAI API error (${response.status})`,
+          classifyProviderHttpFailure(response.status, response),
+        )
       }
 
       const data: unknown = await response.json()
       const text = extractChatText(data)
 
       if (!text) {
-        return allErrors(requests, 'Empty response from OpenAI')
+        return allErrors(requests, 'Empty response from OpenAI', { errorType: 'invalid_response' })
       }
 
       return parseTranslationResponse(text, requests)
     } catch (err) {
-      return allErrors(requests, err instanceof Error ? err.message : 'Unknown OpenAI error')
+      return allErrors(requests, 'OpenAI request failed', { errorType: classifyProviderThrownError(err) })
     }
   },
 
@@ -74,5 +80,8 @@ const extractChatText = (data: unknown): string | undefined => {
   return (choices?.[0]?.message as Record<string, unknown>)?.content as string | undefined
 }
 
-const allErrors = (requests: { id: string }[], error: string) =>
-  requests.map((r) => ({ id: r.id, error }))
+const allErrors = (
+  requests: { id: string }[],
+  error: string,
+  classification: Partial<BatchItemResult> = {},
+) => requests.map((r) => ({ id: r.id, error, ...classification }))
