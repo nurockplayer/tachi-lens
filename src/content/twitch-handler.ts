@@ -379,13 +379,14 @@ export class TwitchMessageHandler {
         (typeof result.translatedText === 'string' && !hasUsableResult)
 
       if (hasUsableResult && typeof result.translatedText === 'string') {
-        messageFailures.delete(element)
         this.diagnosticReporter?.('translation_received')
         if (this.injectTranslation(element, result.translatedText, settings.displayMode)) {
+          messageFailures.delete(element)
           this.setProcessed(element, text)
           this.diagnosticReporter?.('translation_injected')
         } else {
           this.diagnosticReporter?.('translation_failed')
+          return this.recordRetryableFailure(element, text, 'invalid_response')
         }
       } else if (result.error?.type === 'rate_limited') {
         debugLog('translateAndInject: rate limited, leaving retryable', { messageId })
@@ -480,6 +481,7 @@ export class TwitchMessageHandler {
   }
 
   private injectTranslation(element: HTMLElement, translatedText: string, displayMode: DisplayMode): boolean {
+    this.removeStaleTranslation(element)
     const existing = element.querySelector(`[${ATTR_TRANSLATED}]`)
     if (existing) return false
 
@@ -541,6 +543,7 @@ export class TwitchMessageHandler {
   }
 
   private injectError(element: HTMLElement, errorType = 'unknown', text = this.getMessageText(element)): void {
+    this.removeStaleTranslation(element, text)
     const existing = element.querySelector(`[${ATTR_TRANSLATED}]`)
     if (existing) return
 
@@ -567,6 +570,30 @@ export class TwitchMessageHandler {
 
     element.appendChild(errorEl)
     this.sendErrorNotification({ type: errorType, message: reason })
+  }
+
+  /**
+   * Remove only Lens success output whose row's processed-text marker proves it
+   * belongs to a different message. This handles recycled content without
+   * attempting broader Twitch row identity reconciliation (#207).
+   */
+  private removeStaleTranslation(element: HTMLElement, text = this.getMessageText(element)): void {
+    const storedHash = element.getAttribute(ATTR_ORIGINAL_HASH)
+    if (!storedHash || storedHash === textHash(text)) return
+
+    const staleNodes = [...element.querySelectorAll(`[${ATTR_TRANSLATED}]`)]
+      .filter((node) => node.getAttribute('data-tachi-lens-error') !== 'true')
+    if (staleNodes.length === 0) return
+    staleNodes.forEach((node) => node.remove())
+    element.removeAttribute(ATTR_PROCESSED)
+    element.removeAttribute(ATTR_ORIGINAL_HASH)
+
+    const body = queryFirst(element, this.selectors.CHAT_MESSAGE_BODY) ??
+      element.querySelector(CHAT_MESSAGE_TEXT_AREA)
+    if (body instanceof HTMLElement && body.dataset.tachiLensOriginalDisplay !== undefined) {
+      body.style.display = body.dataset.tachiLensOriginalDisplay
+      delete body.dataset.tachiLensOriginalDisplay
+    }
   }
 
   private getFailureReason(errorType: string): string {

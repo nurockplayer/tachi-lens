@@ -136,4 +136,104 @@ describe('TwitchMessageHandler — issue #209 failure recovery', () => {
     expect(onManualRetry).not.toHaveBeenCalled()
     expect(row.querySelector('[data-tachi-lens-error="true"]')).toBeNull()
   })
+
+  it('replaces a stale translation when the same row receives a new successful message', async () => {
+    const sender = vi.fn(async (message: { type: string; payload: { messageId: string; text: string } }) => ({
+      kind: 'ok' as const,
+      value: message.type === 'translate_request'
+        ? {
+            type: 'translate_response',
+            payload: { messageId: message.payload.messageId, translatedText: `translated:${message.payload.text}` },
+          }
+        : undefined,
+    }))
+    const handler = new TwitchMessageHandler(undefined, undefined, sender as unknown as RuntimeMessageSender)
+    const row = createMessage('row A')
+    const body = row.querySelector('.chat-line__message-body') as HTMLElement
+
+    await handler.translateAndInject(row, SETTINGS)
+    const firstHash = row.getAttribute('data-tachi-lens-original-hash')
+    expect(row.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('translated:row A')
+
+    body.textContent = 'row B'
+    await handler.translateAndInject(row, SETTINGS)
+
+    const translationNodes = row.querySelectorAll('[data-tachi-lens-translated]:not([data-tachi-lens-error])')
+    expect(translationNodes).toHaveLength(1)
+    expect(translationNodes[0]?.textContent).toBe('translated:row B')
+    expect(row.getAttribute('data-tachi-lens-processed')).toBe('true')
+    expect(row.getAttribute('data-tachi-lens-original-hash')).not.toBe(firstHash)
+  })
+
+  it('restores a collapsed original body before replacing stale translation output', async () => {
+    const sender = vi.fn(async (message: { type: string; payload: { messageId: string; text: string } }) => ({
+      kind: 'ok' as const,
+      value: message.type === 'translate_request'
+        ? {
+            type: 'translate_response',
+            payload: { messageId: message.payload.messageId, translatedText: `translated:${message.payload.text}` },
+          }
+        : undefined,
+    }))
+    const handler = new TwitchMessageHandler(undefined, undefined, sender as unknown as RuntimeMessageSender)
+    const row = createMessage('row A')
+    const body = row.querySelector('.chat-line__message-body') as HTMLElement
+    body.style.display = 'inline-block'
+
+    await handler.translateAndInject(row, { ...SETTINGS, displayMode: 'collapse' })
+    expect(body.style.display).toBe('none')
+    body.textContent = 'row B'
+
+    await handler.translateAndInject(row, SETTINGS)
+
+    expect(body.style.display).toBe('inline-block')
+    expect(body.dataset.tachiLensOriginalDisplay).toBeUndefined()
+    expect(row.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('translated:row B')
+  })
+
+  it('removes stale successful output so exhausted failures can expose one retry button', async () => {
+    const onManualRetry = vi.fn()
+    let currentText = ''
+    const sender = vi.fn(async (message: { type: string; payload: { messageId: string; text: string } }) => {
+      if (message.type === 'error_notification') return { kind: 'ok' as const, value: undefined }
+      if (message.type === 'translate_request') {
+        currentText = message.payload.text
+        return {
+          kind: 'ok' as const,
+          value: message.payload.text === 'row A'
+            ? {
+                type: 'translate_response',
+                payload: { messageId: message.payload.messageId, translatedText: 'translated:row A' },
+              }
+            : {
+                type: 'translate_response',
+                payload: { messageId: message.payload.messageId, error: { type: 'timeout' } },
+              },
+        }
+      }
+      return { kind: 'ok' as const, value: undefined }
+    })
+    const handler = new TwitchMessageHandler(
+      undefined,
+      undefined,
+      sender as unknown as RuntimeMessageSender,
+      onManualRetry,
+    )
+    const row = createMessage('row A')
+    const body = row.querySelector('.chat-line__message-body')!
+    await handler.translateAndInject(row, SETTINGS)
+    body.textContent = 'row B'
+
+    await handler.translateAndInject(row, SETTINGS)
+    await handler.translateAndInject(row, SETTINGS)
+    await handler.translateAndInject(row, SETTINGS)
+
+    expect(currentText).toBe('row B')
+    expect(row.querySelectorAll('[data-tachi-lens-error="true"]')).toHaveLength(1)
+    expect(row.querySelectorAll('[data-tachi-lens-translated]:not([data-tachi-lens-error])')).toHaveLength(0)
+    expect(row.getAttribute('data-tachi-lens-processed')).toBeNull()
+    expect(row.getAttribute('data-tachi-lens-original-hash')).toBeNull()
+    row.querySelector<HTMLButtonElement>('[data-tachi-lens-error="true"]')?.click()
+    expect(onManualRetry).toHaveBeenCalledWith(row)
+  })
 })

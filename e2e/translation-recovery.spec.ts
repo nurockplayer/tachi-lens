@@ -6,7 +6,7 @@ import { getDiagnosticsEvents, seedDeepSeekTestSettings, TWITCH_URL } from './fi
 test('mixed adjacent results recover automatically and exhausted failures can retry once manually', async ({
   context, serviceWorker, collectedErrors,
 }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(90_000)
   await seedDeepSeekTestSettings(serviceWorker)
   await context.route(TWITCH_URL, route => route.fulfill({ body: getTwitchChatHtml(), contentType: 'text/html' }))
   const attempts = new Map<string, number>()
@@ -63,5 +63,21 @@ test('mixed adjacent results recover automatically and exhausted failures can re
   expect(attempts.get(source[1]!)).toBe(2)
   expect(attempts.get(source[2]!)).toBe(4)
   expect(ownership.every(Boolean)).toBe(true)
+  expect(collectedErrors).toEqual([])
+
+  // Twitch can retain Lens children when recycling a connected row. A new
+  // successful result must replace the stale child and settle exactly once.
+  source.push('Synthetic recycled message')
+  output.push('合成回收訊息')
+  await page.evaluate(text => {
+    const body = document.querySelector('.chat-line__message [data-a-target="chat-line-message-body"]')!
+    body.textContent = text
+  }, source[3]!)
+  await expect(rows.nth(0).locator('[data-tachi-lens-translated]:not([data-tachi-lens-error])')).toHaveText(output[3]!, { timeout: 10_000 })
+  await expect(rows.nth(0)).toHaveAttribute('data-tachi-lens-processed', 'true')
+  await page.waitForTimeout(10_500) // Observe two five-second retry scans.
+  expect(attempts.get(source[3]!)).toBe(1)
+  await expect(rows.nth(0).locator('[data-tachi-lens-translated]')).toHaveCount(1)
+  await expect(page.locator('[data-tachi-lens-translated]:not([data-tachi-lens-error])')).toHaveCount(3)
   expect(collectedErrors).toEqual([])
 })

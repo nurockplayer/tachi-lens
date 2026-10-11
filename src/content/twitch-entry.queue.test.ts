@@ -410,6 +410,50 @@ describe('content script translation queue', () => {
     expect(translationRequests()[2]![0]).toMatchObject({ payload: { text: 'retry candidate' } })
   })
 
+  it('does not redispatch a new message blocked by a stale Lens translation child', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'row A')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(1)
+
+    const row = container.querySelector('.chat-line__message') as HTMLElement
+    row.querySelector('[data-a-target="chat-line-message-body"]')!.textContent = 'row B'
+    mod._test.enqueueTranslation(row, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(2)
+
+    for (let scan = 0; scan < 3; scan++) {
+      await vi.advanceTimersByTimeAsync(5_000)
+      await Promise.resolve()
+    }
+    expect(translationRequests()).toHaveLength(2)
+    expect(translationRequests()[1]![0]).toMatchObject({ payload: { text: 'row B' } })
+    expect(row.querySelectorAll('[data-tachi-lens-translated]:not([data-tachi-lens-error])')).toHaveLength(1)
+    expect(row.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('translated:row B')
+    expect(row.getAttribute('data-tachi-lens-processed')).toBe('true')
+  })
+
   it('resumes translation for newly eligible messages after re-enable', async () => {
     sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
       if (message.type === 'get_content_settings') {
