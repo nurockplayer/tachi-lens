@@ -35,6 +35,7 @@ export type RuntimeMessageSender = <T>(message: unknown) => Promise<RuntimeMessa
 
 export interface TranslationAttemptResult {
   retryAfterMs?: number
+  messageRetryAfterMs?: number
   translationDisabled?: boolean
 }
 
@@ -56,29 +57,36 @@ const debugLog = (msg: string, ...args: unknown[]): void => {
   console.debug('[tachi-lens]', msg, ...args)
 }
 
-/**
- * Number of invalid provider responses (empty / whitespace / missing
- * translation) tolerated before a message settles terminally.
- *
- * The first two invalid responses leave the element retryable so a later
- * provider attempt can still succeed. The third settles the element with a
- * single error node and a single notification (#129).
- */
-const MAX_INVALID_RESPONSE_RETRIES = 3
-
-/**
- * In-memory, per-element invalid-response retry budget.
- *
- * Keyed by the element; the stored value is the identity of the text that
- * accrued the failures. When Twitch recycles a DOM element for different
- * text, the budget restarts. Nothing here is persisted to storage and no
- * timer is created.
- */
-const invalidResponseRetries = new WeakMap<HTMLElement, { text: string; count: number }>()
+const MAX_TRANSLATION_ATTEMPTS = 3
+const BASE_MESSAGE_RETRY_MS = 5_000
+const MAX_MESSAGE_RETRY_MS = 30_000
+type FailureIdentity = {
+  body: Element | null
+  identityAttribute?: typeof CHAT_MESSAGE_ID_ATTRIBUTES[number]
+  identityValue: string | null
+}
+type MessageFailure = FailureIdentity & {
+  text: string
+  attempts: number
+  nextRetryAt: number
+  terminal: boolean
+  errorType: string
+}
+const messageFailures = new WeakMap<HTMLElement, {
+  text: string
+  attempts: number
+  nextRetryAt: number
+  terminal: boolean
+  errorType: string
+  body: Element | null
+  identityAttribute?: typeof CHAT_MESSAGE_ID_ATTRIBUTES[number]
+  identityValue: string | null
+}>()
 
 // Broader selector to find the message text area in any known Twitch variant
 const CHAT_MESSAGE_TEXT_AREA =
   '[data-a-target="chat-line-message-body"], [class*="chat-line__message-body"], [data-a-target="chat-message-text"]'
+const CHAT_MESSAGE_ID_ATTRIBUTES = ['data-message-id', 'data-message-key', 'data-id', 'id'] as const
 
 /**
  * Extract a lowercased Twitch channel name from the given URL pathname.
@@ -99,6 +107,7 @@ export class TwitchMessageHandler {
     selectors?: PageSelectors,
     private readonly diagnosticReporter?: DiagnosticReporter,
     private readonly runtimeMessageSender: RuntimeMessageSender = defaultRuntimeMessageSender,
+    private readonly onManualRetry?: (element: HTMLElement) => void,
   ) {
     this.selectors = selectors ?? {
       CHAT_MESSAGE_BODY,
@@ -141,6 +150,8 @@ export class TwitchMessageHandler {
    * virtual scroll — treat as not yet processed.
    */
   isAlreadyProcessed(element: HTMLElement): boolean {
+    const failure = this.currentFailure(element)
+    if (failure?.terminal) return true
     if (element.getAttribute(ATTR_PROCESSED) !== 'true') return false
     const storedHash = element.getAttribute(ATTR_ORIGINAL_HASH)
     if (!storedHash) return true
@@ -163,11 +174,11 @@ export class TwitchMessageHandler {
     const text = this.getMessageText(element)
 
     if (this.isBot(username, settings.botNameBlacklist)) {
-      debugLog('shouldTranslate: bot skip', { username })
+      debugLog('shouldTranslate: bot skip')
       return false
     }
     if (text.length < settings.minTextLength) {
-      debugLog('shouldTranslate: too short', { text, len: text.length, min: settings.minTextLength })
+      debugLog('shouldTranslate: too short')
       return false
     }
     // High-confidence target-language skip (#55, #183). When the target
@@ -178,7 +189,7 @@ export class TwitchMessageHandler {
     // mixed-language, uncertain, or non-target messages fall through to the
     // normal flow.
     if (settings.targetLanguage && shouldSkipMessage(text, settings.targetLanguage, settings.chineseVariantMode)) {
-      debugLog('shouldTranslate: target-language skip', { text, target: settings.targetLanguage, mode: settings.chineseVariantMode })
+      debugLog('shouldTranslate: target-language skip')
       return false
     }
     // Text-based filters (no DOM access needed)
@@ -254,6 +265,30 @@ export class TwitchMessageHandler {
     element.setAttribute(ATTR_ORIGINAL_HASH, textHash(text))
   }
 
+  private captureFailureIdentity(element: HTMLElement): FailureIdentity {
+    const identityAttribute = CHAT_MESSAGE_ID_ATTRIBUTES.find((name) => element.hasAttribute(name))
+    return {
+      body: queryFirst(element, this.selectors.CHAT_MESSAGE_BODY) ?? element.querySelector(CHAT_MESSAGE_TEXT_AREA),
+      ...(identityAttribute === undefined ? {} : { identityAttribute }),
+      identityValue: identityAttribute === undefined ? null : element.getAttribute(identityAttribute),
+    }
+  }
+
+  private failureMatches(element: HTMLElement, failure: MessageFailure): boolean {
+    const current = this.captureFailureIdentity(element)
+    return failure.text === this.getMessageText(element) && failure.body === current.body &&
+      failure.identityAttribute === current.identityAttribute && failure.identityValue === current.identityValue
+  }
+
+  private currentFailure(element: HTMLElement): MessageFailure | undefined {
+    const failure = messageFailures.get(element)
+    if (!failure) return undefined
+    if (this.failureMatches(element, failure)) return failure
+    messageFailures.delete(element)
+    element.querySelectorAll('[data-tachi-lens-error="true"]').forEach((node) => node.remove())
+    return undefined
+  }
+
   async translateAndInject(
     element: HTMLElement,
     settings: ContentSettings,
@@ -261,6 +296,18 @@ export class TwitchMessageHandler {
     isCurrent: () => boolean = () => true,
   ): Promise<TranslationAttemptResult> {
     const text = this.getMessageText(element)
+    const originalBody = queryFirst(element, this.selectors.CHAT_MESSAGE_BODY) ??
+      element.querySelector(CHAT_MESSAGE_TEXT_AREA)
+    const identityAttribute = CHAT_MESSAGE_ID_ATTRIBUTES.find((name) => element.hasAttribute(name))
+    const originalIdentity = identityAttribute === undefined ? undefined : element.getAttribute(identityAttribute)
+    const isSameAttempt = (): boolean => {
+      const currentBody = queryFirst(element, this.selectors.CHAT_MESSAGE_BODY) ??
+        element.querySelector(CHAT_MESSAGE_TEXT_AREA)
+      const currentIdentityAttribute = CHAT_MESSAGE_ID_ATTRIBUTES.find((name) => element.hasAttribute(name))
+      return this.getMessageText(element) === text && currentBody === originalBody &&
+        currentIdentityAttribute === identityAttribute &&
+        (identityAttribute === undefined || element.getAttribute(identityAttribute) === originalIdentity)
+    }
     if (!text) {
       const bodyElement = queryFirst(element, this.selectors.CHAT_MESSAGE_BODY) ??
         element.querySelector(CHAT_MESSAGE_TEXT_AREA)
@@ -302,13 +349,13 @@ export class TwitchMessageHandler {
       }
 
       const response = runtimeResult.value
-      if (!isCurrent()) return {}
+      if (!isCurrent() || !isSameAttempt()) return {}
 
-      if (!response?.payload) {
-        debugLog('translateAndInject: no response payload, marking processed', { messageId })
+      if (response?.type !== 'translate_response' || !response.payload ||
+        response.payload.messageId !== messageId) {
+        debugLog('translateAndInject: missing or mismatched response, leaving retryable', { messageId })
         this.diagnosticReporter?.('translation_failed')
-        this.setProcessed(element, text)
-        return {}
+        return this.recordRetryableFailure(element, text, 'invalid_response')
       }
 
       const result = response.payload
@@ -332,51 +379,111 @@ export class TwitchMessageHandler {
         (typeof result.translatedText === 'string' && !hasUsableResult)
 
       if (hasUsableResult && typeof result.translatedText === 'string') {
-        invalidResponseRetries.delete(element)
         this.diagnosticReporter?.('translation_received')
-        this.injectTranslation(element, result.translatedText, settings.displayMode)
-        this.setProcessed(element, text)
-        this.diagnosticReporter?.('translation_injected')
+        if (this.injectTranslation(element, result.translatedText, settings.displayMode)) {
+          messageFailures.delete(element)
+          this.setProcessed(element, text)
+          this.diagnosticReporter?.('translation_injected')
+        } else {
+          this.diagnosticReporter?.('translation_failed')
+          return this.recordRetryableFailure(element, text, 'invalid_response')
+        }
       } else if (result.error?.type === 'rate_limited') {
         debugLog('translateAndInject: rate limited, leaving retryable', { messageId })
         this.diagnosticReporter?.('translation_failed')
-        return { retryAfterMs: result.error.retryAfterMs }
+        return this.recordRetryableFailure(element, text, 'rate_limited', result.error.retryAfterMs)
       } else if (isInvalidTranslation) {
         debugLog('translateAndInject: invalid response, tracking retries', { messageId })
         this.diagnosticReporter?.('translation_failed')
-
-        const current = invalidResponseRetries.get(element)
-        // A recycled element with different text restarts the budget.
-        const count = current && current.text === text ? current.count + 1 : 1
-        invalidResponseRetries.set(element, { text, count })
-
-        if (count < MAX_INVALID_RESPONSE_RETRIES) {
-          // Leave the message retryable; the existing retry scan picks it up.
-          return {}
-        }
-
-        // Terminal after the third invalid response: settle with a single
-        // error node and a single notification.
-        this.setProcessed(element, text)
-        this.injectError(element, result.error)
-        invalidResponseRetries.delete(element)
+        return this.recordRetryableFailure(element, text, 'invalid_response')
       } else {
-        debugLog('translateAndInject: error', { messageId, error: result.error })
+        debugLog('translateAndInject: error', { messageId, errorType: result.error?.type })
         this.diagnosticReporter?.('translation_failed')
-        this.setProcessed(element, text)
-        this.injectError(element, result.error)
+        const errorType = result.error?.type ?? 'unknown'
+        if (errorType === 'network' || errorType === 'timeout') {
+          return this.recordRetryableFailure(element, text, errorType)
+        }
+        this.recordTerminalFailure(element, text, errorType)
+        this.injectError(element, errorType, text)
       }
     } catch {
+      if (!isCurrent() || !isSameAttempt()) return {}
       debugLog('translateAndInject: runtime messaging failed, leaving retryable')
       this.diagnosticReporter?.('translation_failed')
+      return this.recordRetryableFailure(element, text, 'network')
     }
 
     return {}
   }
 
-  private injectTranslation(element: HTMLElement, translatedText: string, displayMode: DisplayMode): void {
+  canAutoRetry(element: HTMLElement, now = Date.now()): boolean {
+    const failure = this.currentFailure(element)
+    if (!failure) return true
+    return !failure.terminal && now >= failure.nextRetryAt
+  }
+
+  isRetryCandidate(element: HTMLElement): boolean {
+    const failure = this.currentFailure(element)
+    return failure !== undefined && !failure.terminal
+  }
+
+  retryFailedMessage(element: HTMLElement): boolean {
+    const failure = this.currentFailure(element)
+    if (!failure || !failure.terminal) return false
+    messageFailures.delete(element)
+    element.querySelectorAll('[data-tachi-lens-error="true"]').forEach((node) => node.remove())
+    element.removeAttribute(ATTR_PROCESSED)
+    element.removeAttribute(ATTR_ORIGINAL_HASH)
+    return true
+  }
+
+  private recordRetryableFailure(
+    element: HTMLElement,
+    text: string,
+    errorType: string,
+    providerCooldownMs?: number,
+  ): TranslationAttemptResult {
+    const identity = this.captureFailureIdentity(element)
+    const previous = this.currentFailure(element)
+    const attempts = previous?.text === text ? previous.attempts + 1 : 1
+    const exhausted = attempts >= MAX_TRANSLATION_ATTEMPTS
+    const baseDelay = Math.min(MAX_MESSAGE_RETRY_MS, BASE_MESSAGE_RETRY_MS * 2 ** (attempts - 1))
+    const messageRetryAfterMs = Math.round(baseDelay * (0.8 + Math.random() * 0.4))
+    const delay = Math.max(messageRetryAfterMs, providerCooldownMs ?? 0)
+    messageFailures.set(element, {
+      text,
+      attempts,
+      nextRetryAt: Date.now() + delay,
+      terminal: exhausted,
+      errorType,
+      ...identity,
+    })
+
+    if (exhausted) {
+      this.injectError(element, errorType, text)
+      return providerCooldownMs === undefined ? {} : { retryAfterMs: providerCooldownMs }
+    }
+    return {
+      ...(providerCooldownMs === undefined ? {} : { retryAfterMs: providerCooldownMs }),
+      messageRetryAfterMs: delay,
+    }
+  }
+
+  private recordTerminalFailure(element: HTMLElement, text: string, errorType: string): void {
+    messageFailures.set(element, {
+      text,
+      attempts: MAX_TRANSLATION_ATTEMPTS,
+      nextRetryAt: Number.POSITIVE_INFINITY,
+      terminal: true,
+      errorType,
+      ...this.captureFailureIdentity(element),
+    })
+  }
+
+  private injectTranslation(element: HTMLElement, translatedText: string, displayMode: DisplayMode): boolean {
+    this.removeStaleTranslation(element)
     const existing = element.querySelector(`[${ATTR_TRANSLATED}]`)
-    if (existing) return
+    if (existing) return false
 
     const container = document.createElement('div')
     container.setAttribute(ATTR_TRANSLATED, 'true')
@@ -410,6 +517,7 @@ export class TwitchMessageHandler {
       })
       element.appendChild(container)
     }
+    return true
   }
 
   private getErrorIcon(type?: string): string {
@@ -434,21 +542,72 @@ export class TwitchMessageHandler {
     }
   }
 
-  private injectError(element: HTMLElement, error?: { type: string; message: string }): void {
+  private injectError(element: HTMLElement, errorType = 'unknown', text = this.getMessageText(element)): void {
+    this.removeStaleTranslation(element, text)
     const existing = element.querySelector(`[${ATTR_TRANSLATED}]`)
     if (existing) return
 
-    const errorIcon = this.getErrorIcon(error?.type)
-    const errorColor = this.getErrorColor(error?.type)
+    const errorIcon = this.getErrorIcon(errorType)
+    const errorColor = this.getErrorColor(errorType)
 
-    const errorEl = document.createElement('span')
+    const errorEl = document.createElement('button')
     errorEl.setAttribute(ATTR_TRANSLATED, 'true')
+    errorEl.setAttribute('data-tachi-lens-error', 'true')
+    errorEl.type = 'button'
     errorEl.textContent = errorIcon
-    errorEl.title = error?.message ?? '翻譯失敗'
-    errorEl.style.cssText = `margin-left: 0.25rem; cursor: help; font-size: 0.85em; opacity: 0.6; color: ${errorColor};`
+    const reason = this.getFailureReason(errorType)
+    const identity = this.captureFailureIdentity(element)
+    errorEl.title = `${reason} Click to retry translation.`
+    errorEl.setAttribute('aria-label', `${reason} Retry translation`)
+    errorEl.style.cssText = `margin-left: 0.25rem; cursor: pointer; font-size: 0.85em; opacity: 0.8; color: ${errorColor}; background: transparent; border: 0; padding: 0;`
+    errorEl.addEventListener('click', () => {
+      const current = this.captureFailureIdentity(element)
+      if (this.getMessageText(element) === text && current.body === identity.body &&
+        current.identityAttribute === identity.identityAttribute && current.identityValue === identity.identityValue) {
+        this.onManualRetry?.(element)
+      }
+    })
 
     element.appendChild(errorEl)
-    this.sendErrorNotification(error)
+    this.sendErrorNotification({ type: errorType, message: reason })
+  }
+
+  /**
+   * Remove only Lens success output whose row's processed-text marker proves it
+   * belongs to a different message. This handles recycled content without
+   * attempting broader Twitch row identity reconciliation (#207).
+   */
+  private removeStaleTranslation(element: HTMLElement, text = this.getMessageText(element)): void {
+    const storedHash = element.getAttribute(ATTR_ORIGINAL_HASH)
+    if (!storedHash || storedHash === textHash(text)) return
+
+    const staleNodes = [...element.querySelectorAll(`[${ATTR_TRANSLATED}]`)]
+      .filter((node) => node.getAttribute('data-tachi-lens-error') !== 'true')
+    if (staleNodes.length === 0) return
+    staleNodes.forEach((node) => node.remove())
+    element.removeAttribute(ATTR_PROCESSED)
+    element.removeAttribute(ATTR_ORIGINAL_HASH)
+
+    const body = queryFirst(element, this.selectors.CHAT_MESSAGE_BODY) ??
+      element.querySelector(CHAT_MESSAGE_TEXT_AREA)
+    if (body instanceof HTMLElement && body.dataset.tachiLensOriginalDisplay !== undefined) {
+      body.style.display = body.dataset.tachiLensOriginalDisplay
+      delete body.dataset.tachiLensOriginalDisplay
+    }
+  }
+
+  private getFailureReason(errorType: string): string {
+    switch (errorType) {
+      case 'auth': return 'Check the provider API key or credentials.'
+      case 'bad_request':
+      case 'unsupported_model': return 'Check the selected provider and model.'
+      case 'quota_exceeded': return 'The provider quota is unavailable.'
+      case 'rate_limited': return 'The provider is rate limited; wait before retrying.'
+      case 'timeout': return 'The translation request timed out.'
+      case 'network': return 'The translation service could not be reached.'
+      case 'invalid_response': return 'The provider returned no usable translation.'
+      default: return 'The translation request failed.'
+    }
   }
 
   private sendErrorNotification(error?: { type: string; message: string }): void {

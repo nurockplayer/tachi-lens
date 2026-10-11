@@ -51,7 +51,7 @@ describe('Claude provider', () => {
 
       const results = await provider.translateBatch(REQS, 'fake-key', 'claude-3-5-haiku-latest', 'zh-TW')
 
-      expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.error).toBe('Claude request failed')
     })
   })
 

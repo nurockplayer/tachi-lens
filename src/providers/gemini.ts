@@ -1,6 +1,7 @@
 import type { ModelConfiguration } from './model-policy'
 import { getGeminiErrorMessage, getGeminiRetryAfterMs, readGeminiErrorBody } from './gemini-errors'
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
+import { classifyProviderThrownError } from './http-errors'
 import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const GEMINI_MODELS: ProviderModel[] = [
@@ -58,6 +59,9 @@ export const createGeminiProvider = (
           status: response.status,
           ...(response.status === 401 || response.status === 403 ? { errorType: 'auth' as const } : {}),
           ...(response.status === 400 ? { errorType: 'bad_request' as const } : {}),
+          ...(response.status === 408 ? { errorType: 'timeout' as const } : {}),
+          ...(response.status >= 500 ? { errorType: 'network' as const } : {}),
+          ...(response.status === 429 ? { errorType: 'rate_limited' as const } : {}),
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         })
       }
@@ -66,14 +70,12 @@ export const createGeminiProvider = (
       const text = extractGeminiText(data)
 
       if (!text) {
-        return allErrors(requests, 'Empty response from Gemini')
+        return allErrors(requests, 'Empty response from Gemini', { errorType: 'invalid_response' })
       }
 
       return parseTranslationResponse(text, requests)
     } catch (err) {
-      return allErrors(requests, err instanceof Error ? err.message : 'Unknown Gemini error', {
-        errorType: 'network',
-      })
+      return allErrors(requests, 'Gemini request failed', { errorType: classifyProviderThrownError(err) })
     }
   },
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sendWithCorrelatedTestResponse } from './test-helpers'
 
 const appendMessage = (container: Element, text: string): void => {
   const message = document.createElement('div')
@@ -48,7 +49,7 @@ describe('content script SPA navigation', () => {
 
     vi.stubGlobal('chrome', {
       runtime: {
-        sendMessage,
+        sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message),
         onMessage: {
           addListener: vi.fn((listener: (message: unknown) => void) => {
             runtimeMessageListener = listener

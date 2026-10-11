@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sendWithCorrelatedTestResponse } from './test-helpers'
 
 describe('content script entry', () => {
   beforeEach(() => {
@@ -12,7 +13,7 @@ describe('content script entry', () => {
     it('removes translation failure detail before it crosses the runtime boundary', async () => {
       const sendMessage = vi.fn().mockResolvedValue(undefined)
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn() } },
       })
       const { reportDiagnostic } = await import('./twitch-entry')
 
@@ -30,7 +31,7 @@ describe('content script entry', () => {
       vi.setSystemTime(new Date('2026-07-13T00:00:00Z'))
       const sendMessage = vi.fn().mockResolvedValue(undefined)
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn() } },
       })
       const { reportDiagnostic } = await import('./twitch-entry')
 
@@ -62,7 +63,7 @@ describe('content script entry', () => {
         payload: { translationEnabled: true },
       })
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn() } },
       })
 
       const { handleSettingsUpdate, getSettings } = await import('./twitch-entry')
@@ -88,7 +89,7 @@ describe('content script entry', () => {
         return Promise.resolve(undefined)
       })
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn() } },
       })
 
       const { _test, handleSettingsUpdate } = await import('./twitch-entry')
@@ -114,7 +115,7 @@ describe('content script entry', () => {
         payload: { targetLanguage: 'en' },
       })
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn() } },
       })
 
       const { getSettings } = await import('./twitch-entry')
@@ -150,7 +151,7 @@ describe('content script entry', () => {
         return undefined
       })
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn(), removeListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn(), removeListener: vi.fn() } },
       })
       document.body.innerHTML =
         '<div data-test-selector="chat-scrollable-area__message-container"></div>'
@@ -230,7 +231,7 @@ describe('content script entry', () => {
         return undefined
       })
       vi.stubGlobal('chrome', {
-        runtime: { sendMessage, onMessage: { addListener: vi.fn(), removeListener: vi.fn() } },
+        runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn(), removeListener: vi.fn() } },
       })
 
       await import('./twitch-entry')
@@ -270,7 +271,7 @@ describe('content script entry', () => {
       })
       vi.stubGlobal('chrome', {
         runtime: {
-          sendMessage,
+          sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message),
           onMessage: { addListener, removeListener: vi.fn() },
         },
       })

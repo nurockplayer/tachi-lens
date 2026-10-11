@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TwitchMessageHandler, parseChannelFromPathname, type ContentSettings } from './twitch-handler'
+import { TwitchMessageHandler, parseChannelFromPathname, type ContentSettings, type RuntimeMessageSender } from './twitch-handler'
 import type { PageSelectors } from './twitch-selectors'
 import type { DiagnosticStage } from '@/shared/messages'
+import { sendWithCorrelatedTestResponse } from './test-helpers'
 
 const DEFAULT_SETTINGS: ContentSettings & { targetLanguage: string } = {
   botNameBlacklist: [],
@@ -52,7 +53,7 @@ describe('TwitchMessageHandler', () => {
   beforeEach(() => {
     sendMessageMock = vi.fn()
     vi.stubGlobal('chrome', {
-      runtime: { sendMessage: sendMessageMock },
+      runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessageMock, message) },
     })
     handler = new TwitchMessageHandler()
   })
@@ -577,7 +578,7 @@ describe('TwitchMessageHandler', () => {
       const result = await diagnosticHandler.translateAndInject(el, DEFAULT_SETTINGS)
 
       expect(reporter).toHaveBeenCalledWith('translation_failed')
-      expect(result).toEqual({ retryAfterMs: 44_500 })
+      expect(result).toMatchObject({ retryAfterMs: 44_500, messageRetryAfterMs: 44_500 })
     })
 
     it('does not expose provider error content in diagnostics', async () => {
@@ -657,7 +658,7 @@ describe('TwitchMessageHandler', () => {
       const el = createMessageElement({ text: 'Hello' })
       sendMessageMock.mockResolvedValue({
         type: 'translate_response',
-        payload: { messageId: handler.getMessageId(el), translatedText: '你好' },
+        payload: { messageId: 'any-id', translatedText: '你好' },
       })
 
       await handler.translateAndInject(el, DEFAULT_SETTINGS)
@@ -670,7 +671,7 @@ describe('TwitchMessageHandler', () => {
       sendMessageMock.mockResolvedValue({
         type: 'translate_response',
         payload: {
-          messageId: handler.getMessageId(el),
+          messageId: 'any-id',
           error: { type: 'rate_limited', retryAfterMs: 5000, message: 'Rate limited' },
         },
       })
@@ -688,35 +689,39 @@ describe('TwitchMessageHandler', () => {
       sendMessageMock.mockResolvedValue({
         type: 'translate_response',
         payload: {
-          messageId: handler.getMessageId(el),
+          messageId: 'any-id',
           error: { type: 'auth', status: 401, message: 'Unauthorized' },
         },
       })
 
       await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
-      expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+      expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+      expect(handler.isAlreadyProcessed(el)).toBe(true)
       // Should show error indicator
       expect(el.querySelector('[data-tachi-lens-translated]')).not.toBeNull()
     })
 
     it('uses the safe runtime sender for error notifications', async () => {
-      const runtimeMessageSender = vi.fn()
-        .mockResolvedValueOnce({
-          kind: 'ok',
-          value: {
-            type: 'translate_response',
-            payload: {
-              messageId: 'any-id',
-              error: { type: 'auth', status: 401, message: 'Unauthorized' },
+      const runtimeMessageSender = vi.fn(async (message: unknown) => {
+        if ((message as { type?: string }).type === 'translate_request') {
+          return {
+            kind: 'ok' as const,
+            value: {
+              type: 'translate_response',
+              payload: {
+                messageId: (message as { payload: { messageId: string } }).payload.messageId,
+                error: { type: 'auth', status: 401, message: 'Unauthorized' },
+              },
             },
-          },
-        })
-        .mockResolvedValueOnce({ kind: 'context_invalidated' })
+          }
+        }
+        return { kind: 'context_invalidated' as const }
+      })
       const handlerWithSafeSender = new TwitchMessageHandler(
         undefined,
         undefined,
-        runtimeMessageSender,
+        runtimeMessageSender as unknown as RuntimeMessageSender,
       )
 
       await handlerWithSafeSender.translateAndInject(createMessageElement({ text: 'Hello' }), DEFAULT_SETTINGS)

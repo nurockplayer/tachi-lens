@@ -1,6 +1,6 @@
 {
   "name": "tachi-lens",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "Twitch 聊天室沉浸式翻譯 Chrome Extension",
   "type": "module",

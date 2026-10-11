@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sendWithCorrelatedTestResponse } from './test-helpers'
 
 describe('content script message hydration', () => {
   const sendMessage = vi.fn()
@@ -29,7 +30,7 @@ describe('content script message hydration', () => {
     })
 
     vi.stubGlobal('chrome', {
-      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message), onMessage: { addListener: vi.fn() } },
     })
   })
 

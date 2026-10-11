@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sendWithCorrelatedTestResponse } from './test-helpers'
 
 const appendMessage = (container: Element, text: string): void => {
   const message = document.createElement('div')
@@ -43,7 +44,7 @@ describe('content script translation queue', () => {
       '<div data-test-selector="chat-scrollable-area__message-container"></div>'
     vi.stubGlobal('chrome', {
       runtime: {
-        sendMessage,
+        sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessage, message),
         onMessage: {
           addListener: vi.fn((listener: (message: unknown) => void) => {
             runtimeMessageListener = listener
@@ -352,6 +353,105 @@ describe('content script translation queue', () => {
 
     expect(translationRequests()).toHaveLength(1)
     expect(mod._test.translationQueueLength).toBe(0)
+  })
+
+  it('gates failed-message rescans without delaying fresh live work', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string; messageId?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        const failFirst = message.payload?.text === 'retry candidate' &&
+          translationRequests().filter(([request]) =>
+            (request as { payload?: { text?: string } }).payload?.text === 'retry candidate',
+          ).length === 1
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: failFirst
+            ? { messageId: 'any-id', error: { type: 'timeout' } }
+            : { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'retry candidate')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(1)
+
+    const retryRow = container.querySelector('.chat-line__message') as HTMLElement
+    mod._test.enqueueTranslation(retryRow, 'live')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(translationRequests()).toHaveLength(1)
+
+    appendMessage(container, 'fresh live message')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(2)
+    expect(translationRequests()[1]![0]).toMatchObject({ payload: { text: 'fresh live message' } })
+
+    // The failed row's per-message delay is five seconds. Periodic rescans
+    // before that boundary do not redispatch it, while the interval tick at
+    // the boundary resumes it once.
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(translationRequests()).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(6_000)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(3)
+    expect(translationRequests()[2]![0]).toMatchObject({ payload: { text: 'retry candidate' } })
+  })
+
+  it('does not redispatch a new message blocked by a stale Lens translation child', async () => {
+    sendMessage.mockImplementation((message: { type: string; payload?: { text?: string } }) => {
+      if (message.type === 'get_content_settings') {
+        return Promise.resolve({
+          type: 'content_settings',
+          payload: { translationEnabled: true, minTextLength: 1 },
+        })
+      }
+      if (message.type === 'translate_request') {
+        return Promise.resolve({
+          type: 'translate_response',
+          payload: { messageId: 'any-id', translatedText: `translated:${message.payload?.text}` },
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const mod = await import('./twitch-entry')
+    const container = document.querySelector(
+      '[data-test-selector="chat-scrollable-area__message-container"]',
+    )!
+    appendMessage(container, 'row A')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(1)
+
+    const row = container.querySelector('.chat-line__message') as HTMLElement
+    row.querySelector('[data-a-target="chat-line-message-body"]')!.textContent = 'row B'
+    mod._test.enqueueTranslation(row, 'live')
+    await vi.advanceTimersByTimeAsync(300)
+    await Promise.resolve()
+    expect(translationRequests()).toHaveLength(2)
+
+    for (let scan = 0; scan < 3; scan++) {
+      await vi.advanceTimersByTimeAsync(5_000)
+      await Promise.resolve()
+    }
+    expect(translationRequests()).toHaveLength(2)
+    expect(translationRequests()[1]![0]).toMatchObject({ payload: { text: 'row B' } })
+    expect(row.querySelectorAll('[data-tachi-lens-translated]:not([data-tachi-lens-error])')).toHaveLength(1)
+    expect(row.querySelector('[data-tachi-lens-translated]')?.textContent).toBe('translated:row B')
+    expect(row.getAttribute('data-tachi-lens-processed')).toBe('true')
   })
 
   it('resumes translation for newly eligible messages after re-enable', async () => {

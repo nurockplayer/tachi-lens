@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TwitchMessageHandler, type ContentSettings } from './twitch-handler'
+import { sendWithCorrelatedTestResponse } from './test-helpers'
 
 /**
  * Issue #129 — Content Script retry contract for invalid provider results.
@@ -71,7 +72,7 @@ describe('TwitchMessageHandler — issue #129 invalid response retry contract', 
     sendMessageMock = vi.fn()
     reporter = vi.fn<(stage: import('@/shared/messages').DiagnosticStage, detail?: string) => void>()
     vi.stubGlobal('chrome', {
-      runtime: { sendMessage: sendMessageMock },
+      runtime: { sendMessage: (message: unknown) => sendWithCorrelatedTestResponse(sendMessageMock, message) },
     })
     handler = new TwitchMessageHandler(undefined, reporter)
   })
@@ -112,7 +113,8 @@ describe('TwitchMessageHandler — issue #129 invalid response retry contract', 
     await handler.translateAndInject(el, DEFAULT_SETTINGS)
     await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
-    expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+    expect(handler.isAlreadyProcessed(el)).toBe(true)
     const errorNodes = el.querySelectorAll('[data-tachi-lens-translated]')
     expect(errorNodes).toHaveLength(1)
 
@@ -198,7 +200,8 @@ describe('TwitchMessageHandler — issue #129 invalid response retry contract', 
     expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
 
     await handler.translateAndInject(el, DEFAULT_SETTINGS)
-    expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+    expect(handler.isAlreadyProcessed(el)).toBe(true)
     expect(el.querySelectorAll('[data-tachi-lens-translated]')).toHaveLength(1)
     const notifications = sendMessageMock.mock.calls.filter(([message]) =>
       (message as { type: string }).type === 'error_notification',
@@ -240,7 +243,7 @@ describe('TwitchMessageHandler — issue #129 invalid response retry contract', 
     expect(result.retryAfterMs).toBe(5_000)
   })
 
-  it('keeps explicit terminal errors unchanged (auth marks processed and notifies once)', async () => {
+  it('keeps explicit terminal errors out of the success marker and notifies once', async () => {
     sendMessageMock.mockResolvedValue({
       type: 'translate_response',
       payload: {
@@ -252,7 +255,8 @@ describe('TwitchMessageHandler — issue #129 invalid response retry contract', 
 
     await handler.translateAndInject(el, DEFAULT_SETTINGS)
 
-    expect(el.getAttribute('data-tachi-lens-processed')).toBe('true')
+    expect(el.getAttribute('data-tachi-lens-processed')).toBeNull()
+    expect(handler.isAlreadyProcessed(el)).toBe(true)
     expect(el.querySelectorAll('[data-tachi-lens-translated]')).toHaveLength(1)
     const notifications = sendMessageMock.mock.calls.filter(([message]) =>
       (message as { type: string }).type === 'error_notification',

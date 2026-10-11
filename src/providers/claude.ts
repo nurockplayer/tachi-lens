@@ -1,5 +1,6 @@
 import { buildTranslationPrompt, parseTranslationResponse } from './prompt'
-import type { ProviderModel, TranslationProvider } from './types'
+import { classifyProviderHttpFailure, classifyProviderThrownError } from './http-errors'
+import type { BatchItemResult, ProviderModel, TranslationProvider } from './types'
 
 export const CLAUDE_MODELS: ProviderModel[] = [
   { id: 'claude-3-5-haiku-latest', displayName: 'Claude 3.5 Haiku' },
@@ -18,7 +19,7 @@ export const createClaudeProvider = (
   models: CLAUDE_MODELS,
   defaultModel: CLAUDE_DEFAULT_MODEL,
 
-  async translateBatch(requests, apiKey, model, targetLang) {
+  async translateBatch(requests, apiKey, model, targetLang, signal) {
     const prompt = buildTranslationPrompt(requests, targetLang)
 
     try {
@@ -29,6 +30,7 @@ export const createClaudeProvider = (
           'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
         },
+        ...(signal ? { signal } : {}),
         body: JSON.stringify({
           model,
           system: prompt.system,
@@ -38,19 +40,23 @@ export const createClaudeProvider = (
       })
 
       if (!response.ok) {
-        return allErrors(requests, `Claude API error (${response.status})`)
+        return allErrors(
+          requests,
+          `Claude API error (${response.status})`,
+          classifyProviderHttpFailure(response.status, response),
+        )
       }
 
       const data: unknown = await response.json()
       const text = extractClaudeText(data)
 
       if (!text) {
-        return allErrors(requests, 'Empty response from Claude')
+        return allErrors(requests, 'Empty response from Claude', { errorType: 'invalid_response' })
       }
 
       return parseTranslationResponse(text, requests)
     } catch (err) {
-      return allErrors(requests, err instanceof Error ? err.message : 'Unknown Claude error')
+      return allErrors(requests, 'Claude request failed', { errorType: classifyProviderThrownError(err) })
     }
   },
 
@@ -77,5 +83,8 @@ const extractClaudeText = (data: unknown): string | undefined => {
   return (content?.[0] as Record<string, unknown>)?.text as string | undefined
 }
 
-const allErrors = (requests: { id: string }[], error: string) =>
-  requests.map((r) => ({ id: r.id, error }))
+const allErrors = (
+  requests: { id: string }[],
+  error: string,
+  classification: Partial<BatchItemResult> = {},
+) => requests.map((r) => ({ id: r.id, error, ...classification }))

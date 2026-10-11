@@ -74,6 +74,7 @@ describe('DeepSeek provider', () => {
         error: 'DeepSeek rate limit reached',
         status: 429,
         retryAfterMs: 12_500,
+        errorType: 'rate_limited',
       })
     })
 
@@ -92,7 +93,7 @@ describe('DeepSeek provider', () => {
 
       const results = await provider.translateBatch(REQS, 'fake-key', 'deepseek-flash', 'zh-TW')
 
-      expect(results[0]!.error).toBe('Network error')
+      expect(results[0]!.error).toBe('DeepSeek request failed')
       expect(results[0]!.errorType).toBe('network')
     })
   })
